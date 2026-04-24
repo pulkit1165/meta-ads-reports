@@ -7,7 +7,7 @@ Usage:
   python3 campaign_tracker_builder.py --account SM_FRAGRANCE_01  # defaults to today
   python3 campaign_tracker_builder.py --all  # runs all active accounts
 
-Sheet: https://docs.google.com/spreadsheets/d/11IAPsJlil75aehYf5IzpSaTCLcAgPk9-57p6ZuPNNQM
+Sheet: set by REPORTS_SHEET_ID env var (defaults to the GHA sheet).
 """
 
 import os
@@ -36,7 +36,7 @@ load_dotenv(_REPO_ROOT / '.env')
 
 TOKEN       = os.getenv('META_ACCESS_TOKEN')
 SA_FILE     = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE') or str(_REPO_ROOT / 'google-service-account.json')
-SHEET_ID    = '11IAPsJlil75aehYf5IzpSaTCLcAgPk9-57p6ZuPNNQM'
+SHEET_ID    = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
 GRAPH_URL   = 'https://graph.facebook.com/v19.0'
 
 # ── Account map: label → (act_id, tab_prefix) ─────────────────────────────────

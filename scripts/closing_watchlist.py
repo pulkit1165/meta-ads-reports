@@ -35,7 +35,7 @@ load_dotenv(_REPO_ROOT / '.env')
 
 TOKEN    = os.getenv('META_ACCESS_TOKEN')
 SA_FILE  = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE') or str(_REPO_ROOT / 'google-service-account.json')
-SHEET_ID = '11IAPsJlil75aehYf5IzpSaTCLcAgPk9-57p6ZuPNNQM'
+SHEET_ID = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
 SCOPES   = ['https://www.googleapis.com/auth/spreadsheets']
 GRAPH    = 'https://graph.facebook.com/v19.0'
 IST      = ZoneInfo('Asia/Kolkata')

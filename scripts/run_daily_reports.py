@@ -106,7 +106,7 @@ msg = f"""📊 *Daily Reports — {DATE_LABEL}*
 {'✅' if ok3 else '❌'} Creative Report: Paras / Motion / Static / Partnership / Catalogue / Testing
 {'✅' if ok4 else '❌'} Closing Camps: 1D ROAS < 1.0 watchlist
 
-🔗 https://docs.google.com/spreadsheets/d/11IAPsJlil75aehYf5IzpSaTCLcAgPk9-57p6ZuPNNQM"""
+🔗 https://docs.google.com/spreadsheets/d/{os.environ.get('REPORTS_SHEET_ID', '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4')}"""
 
 if errors:
     msg += f"\n\n⚠️ *Errors ({len(errors)}):*\n" + "\n".join(errors[:5])
