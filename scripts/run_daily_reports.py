@@ -38,30 +38,14 @@ TOKEN = os.environ.get('META_ACCESS_TOKEN') or ENV.get('META_ACCESS_TOKEN', '')
 YESTERDAY = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
 DATE_LABEL = (datetime.now() - timedelta(days=1)).strftime('%d %b %Y')
 
-ACCOUNTS = [
-    'SM_FRAGRANCE_01', 'SM_SKIN', 'SM_HAIR', 'SM_CRYSTALS',
-    'SM_PERFUME', 'SM_CL_05', 'SM_CL_06',
-    'SML_SKIN', 'SML_HAIR', 'SML_CRYSTALS', 'SML_CL_06', 'SML_CL_07',
-    'NBP_SKIN', 'NBP_HAIR_PERFUME', 'NBP_CRYSTALS',
-]
-
-PORTAL_MAP = {
-    'SM_FRAGRANCE_01': 'SM', 'SM_SKIN': 'SM', 'SM_HAIR': 'SM',
-    'SM_CRYSTALS': 'SM', 'SM_PERFUME': 'SM', 'SM_CL_05': 'SM', 'SM_CL_06': 'SM',
-    'SML_SKIN': 'SML', 'SML_HAIR': 'SML', 'SML_CRYSTALS': 'SML',
-    'SML_CL_06': 'SML', 'SML_CL_07': 'SML',
-    'NBP_SKIN': 'NBP', 'NBP_HAIR_PERFUME': 'NBP', 'NBP_CRYSTALS': 'NBP',
-}
-
-results = {'SM': 0, 'SML': 0, 'NBP': 0}
 errors = []
 
-def run(cmd, label):
+def run(cmd, label, timeout=300):
     env = os.environ.copy()
     env['META_ACCESS_TOKEN'] = TOKEN
     r = subprocess.run(
         cmd, shell=True, capture_output=True, text=True,
-        timeout=300, env=env, cwd=str(REPO_ROOT)
+        timeout=timeout, env=env, cwd=str(REPO_ROOT)
     )
     if r.returncode != 0:
         errors.append(f"{label}: {r.stderr[-200:]}")
@@ -69,15 +53,18 @@ def run(cmd, label):
     return True
 
 # ── Step 1: Campaign Tracker ───────────────────────────────────────────────────
-print(f"=== Step 1: Campaign Tracker ({YESTERDAY}) ===")
-for acct in ACCOUNTS:
-    success = run(
-        f"python3 {SCRIPTS_DIR}/campaign_tracker_builder.py --account {acct} --date {YESTERDAY}",
-        acct
-    )
-    if success:
-        results[PORTAL_MAP[acct]] += 1
-    print(f"  {'✅' if success else '❌'} {acct}")
+# Use --all (single invocation). The per-account loop was a bug: the builder
+# clears the portal tab on every write, so the last account to run wiped all
+# preceding accounts' campaigns. --all collects every account's campaigns into
+# one per-portal dict keyed by campaign_id before writing, which is what the
+# master doc actually prescribes.
+print(f"=== Step 1: Campaign Tracker ({YESTERDAY}) — all accounts in one pass ===")
+ok1 = run(
+    f"python3 {SCRIPTS_DIR}/campaign_tracker_builder.py --all --date {YESTERDAY}",
+    "tracker_all",
+    timeout=900,  # 15 accounts x ~20s each = allow 15 min
+)
+print(f"  {'✅' if ok1 else '❌'} Campaign Tracker (SM + SML + NBP)")
 
 # ── Step 2: Budget Reports ─────────────────────────────────────────────────────
 print("\n=== Step 2: Budget Reports ===")
@@ -97,11 +84,9 @@ print(f"  {'✅' if ok4 else '❌'} Closing Camps Report (1D ROAS < 1.0)")
 # ── Step 5: Summary ────────────────────────────────────────────────────────────
 # NOTE: Closing Camps Report runs separately at 1:00 PM IST via its own cron job
 # Script: closing_camps_report.py --date TODAY
-total_tabs = sum(results.values())
 msg = f"""📊 *Daily Reports — {DATE_LABEL}*
 
-✅ Campaign Tracker: {total_tabs} tabs
-   SM: {results['SM']} | SML: {results['SML']} | NBP: {results['NBP']}
+{'✅' if ok1 else '❌'} Campaign Tracker: SM + SML + NBP (de-duped across all accounts)
 {'✅' if ok2 else '❌'} Budget Reports: Category + Audience + Product
 {'✅' if ok3 else '❌'} Creative Report: Paras / Motion / Static / Partnership / Catalogue / Testing
 {'✅' if ok4 else '❌'} Closing Camps: 1D ROAS < 1.0 watchlist
