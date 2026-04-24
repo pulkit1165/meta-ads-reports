@@ -1,0 +1,87 @@
+name: State branch sync
+description: >-
+  Restores the `state/` directory from the `state` branch before a run, and
+  commits `state/` back to the `state` branch after a run. The `state` branch
+  is an orphan branch (no history shared with main) holding only runtime
+  snapshot files that scripts use to detect "closed since last run" etc.
+inputs:
+  direction:
+    description: "'restore' (before run) or 'save' (after run)"
+    required: true
+  state-dir:
+    description: Relative path to the state directory
+    required: false
+    default: state
+
+runs:
+  using: composite
+  steps:
+    - name: Sync state branch
+      shell: bash
+      env:
+        DIRECTION: ${{ inputs.direction }}
+        STATE_DIR: ${{ inputs.state-dir }}
+      run: |
+        set -euo pipefail
+        mkdir -p "$STATE_DIR"
+
+        WT=.state-branch-wt
+        BRANCH=state
+
+        if [ "$DIRECTION" = "restore" ]; then
+          if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
+            git fetch --depth=1 origin "$BRANCH:refs/remotes/origin/$BRANCH"
+            # Clean up any leftover worktree from a failed previous run
+            git worktree remove -f "$WT" 2>/dev/null || true
+            rm -rf "$WT"
+            git worktree add -f "$WT" "origin/$BRANCH"
+            # Copy everything except .git into state dir (preserving dotfiles)
+            rsync -a --exclude='.git' "$WT/" "$STATE_DIR/"
+            echo "  ✅ restored $(find "$STATE_DIR" -type f ! -name '.gitkeep' | wc -l | tr -d ' ') state file(s) from branch"
+          else
+            echo "  ℹ️  no state branch yet — starting fresh"
+          fi
+
+        elif [ "$DIRECTION" = "save" ]; then
+          # Prepare worktree (may already exist from restore step)
+          if [ ! -d "$WT" ]; then
+            if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
+              git fetch --depth=1 origin "$BRANCH:refs/remotes/origin/$BRANCH"
+              git worktree add -f "$WT" "origin/$BRANCH"
+            else
+              git worktree add -f --orphan -b "$BRANCH" "$WT"
+              (cd "$WT" && git rm -rf . 2>/dev/null || true)
+            fi
+          fi
+
+          # Sync state into worktree (mirror — delete files removed from state)
+          rsync -a --delete --exclude='.git' "$STATE_DIR/" "$WT/"
+
+          cd "$WT"
+          git add -A
+          if git diff --staged --quiet; then
+            echo "  ℹ️  no state changes to commit"
+            exit 0
+          fi
+
+          git -c user.name="meta-ads-bot" \
+              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+              commit -m "state: $(date -u +%FT%TZ) [${GITHUB_WORKFLOW:-manual}]"
+
+          # Retry on push race (another workflow pushed between our fetch and push)
+          for attempt in 1 2 3 4 5; do
+            if git push origin "HEAD:$BRANCH"; then
+              echo "  ✅ state pushed to branch"
+              exit 0
+            fi
+            echo "  ⚠️  push race, retry $attempt/5"
+            git fetch origin "$BRANCH"
+            git rebase "origin/$BRANCH" || { git rebase --abort; break; }
+          done
+          echo "  ❌ state push failed after retries" >&2
+          exit 1
+
+        else
+          echo "  ❌ invalid direction: $DIRECTION (expected 'restore' or 'save')" >&2
+          exit 1
+        fi

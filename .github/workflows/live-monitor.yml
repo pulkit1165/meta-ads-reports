@@ -1,0 +1,72 @@
+name: Live camp monitor (every 3 hours, :30 IST)
+
+on:
+  schedule:
+    # 03:30 IST = 22:00 UTC previous day
+    # 06:30 IST = 01:00 UTC
+    # 09:30 IST = 04:00 UTC
+    # 12:30 IST = 07:00 UTC
+    # 15:30 IST = 10:00 UTC
+    # 18:30 IST = 13:00 UTC
+    - cron: "0 22 * * *"
+    - cron: "0 1 * * *"
+    - cron: "0 4 * * *"
+    - cron: "0 7 * * *"
+    - cron: "0 10 * * *"
+    - cron: "0 13 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: live-monitor
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TZ: Asia/Kolkata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load ad account IDs
+        run: cat config/accounts.env >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
+      - name: Restore state branch
+        uses: ./.github/actions/state-sync
+        with:
+          direction: restore
+
+      - name: Run live_camp_monitor
+        run: python3 scripts/live_camp_monitor.py
+
+      - name: Save state branch
+        if: always()
+        uses: ./.github/actions/state-sync
+        with:
+          direction: save

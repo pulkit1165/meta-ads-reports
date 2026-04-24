@@ -1,0 +1,66 @@
+name: Live closing alert (1 PM IST)
+
+# Note: original cron runs with --notify to send a WhatsApp message to Pulkit.
+# WhatsApp API is not wired up here yet (per user decision), so --notify is
+# omitted. The closing report still lands in the sheet.
+
+on:
+  schedule:
+    # 13:00 IST = 07:30 UTC
+    - cron: "30 7 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: live-closing-alert
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TZ: Asia/Kolkata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load ad account IDs
+        run: cat config/accounts.env >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
+      - name: Restore state branch
+        uses: ./.github/actions/state-sync
+        with:
+          direction: restore
+
+      - name: Run live_camp_monitor --closing
+        run: python3 scripts/live_camp_monitor.py --closing
+
+      - name: Save state branch
+        if: always()
+        uses: ./.github/actions/state-sync
+        with:
+          direction: save

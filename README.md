@@ -8,17 +8,28 @@ Automated Meta Ads reporting — duplicated from the workspace at `~/.openclaw/w
 
 **Phase 2 ✅ refactor for GitHub Actions**: Paths made portable — all hardcoded `/Users/.../workspace/` references replaced with repo-relative paths, `/tmp/` state files moved to `state/`, EC2 deploy in `auto_rebuild_dashboard.py` gated behind `ENABLE_EC2_DEPLOY=1` env var.
 
-**Phase 3 (next): GitHub Actions workflows** on the schedules in the master doc, with a `state` branch to persist snapshot files between runs.
+**Phase 3 ✅ GitHub Actions workflows**: One workflow per schedule (see [SECRETS.md](SECRETS.md) for the table). Snapshot files persist between runs via an orphan `state` branch managed by a small composite action (`.github/actions/state-sync`). **Before any workflow will work, you must add two secrets** — see [SECRETS.md](SECRETS.md).
 
 ## Layout
 
 ```
 .
-├── scripts/     # canonical Python scripts (refactored, Phase 2)
-├── state/       # snapshot/cache files (replaces /tmp/; committed to `state` branch in Phase 3)
-├── out/         # generated artifacts (HTML dashboards)
-├── docs/        # master documentation
-├── .env.example # template — copy to .env locally
+├── scripts/               # canonical Python scripts (Phase 2-refactored)
+├── state/                 # snapshot/cache files (persisted via `state` branch)
+├── out/                   # generated artifacts (HTML dashboards)
+├── config/
+│   └── accounts.env       # 15 ad account IDs — loaded into $GITHUB_ENV
+├── docs/                  # master documentation
+├── .github/
+│   ├── actions/
+│   │   └── state-sync/    # composite action — pull/push `state` branch
+│   └── workflows/
+│       ├── daily.yml              # 04:30 IST — full pipeline
+│       ├── closing-watchlist.yml  # 10:00 / 12:00 / 15:00 / 18:00 IST
+│       ├── live-monitor.yml       # 3-hourly at :30 IST
+│       └── live-closing-alert.yml # 13:00 IST
+├── SECRETS.md             # instructions for adding the 2 required GitHub secrets
+├── .env.example
 ├── .gitignore
 └── requirements.txt
 ```

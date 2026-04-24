@@ -1,0 +1,98 @@
+name: Daily pipeline (4:30 AM IST)
+
+on:
+  schedule:
+    # 04:30 IST = 23:00 UTC previous day
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Override target date YYYY-MM-DD (default: yesterday IST)"
+        required: false
+        default: ""
+
+concurrency:
+  group: daily
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TZ: Asia/Kolkata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load ad account IDs
+        run: cat config/accounts.env >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
+      - name: Restore state branch
+        uses: ./.github/actions/state-sync
+        with:
+          direction: restore
+
+      - name: Run daily pipeline (tracker → budget → creative → closing camps)
+        run: |
+          if [ -n "${{ inputs.date }}" ]; then
+            # Manual dispatch with explicit date — invoke sub-scripts directly
+            DATE="${{ inputs.date }}"
+            echo "=== Campaign Tracker ($DATE) ==="
+            python3 scripts/campaign_tracker_builder.py --all --date "$DATE"
+            echo "=== Budget Reports ==="
+            python3 scripts/campaign_tracker_reports.py --date "$DATE"
+            echo "=== Creative Report ==="
+            python3 scripts/creative_report.py --date "$DATE"
+            echo "=== Closing Camps Report ==="
+            python3 scripts/closing_camps_report.py --date "$DATE"
+          else
+            python3 scripts/run_daily_reports.py
+          fi
+
+      - name: Build creative dashboard HTML
+        if: ${{ success() }}
+        run: python3 scripts/build_creative_dashboard.py
+
+      - name: Build NTN dashboard HTML (deploy-skipped — EC2 one still live)
+        if: ${{ success() }}
+        run: python3 scripts/auto_rebuild_dashboard.py
+
+      - name: Save state branch
+        if: always()
+        uses: ./.github/actions/state-sync
+        with:
+          direction: save
+
+      - name: Upload out/ artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-out-${{ github.run_id }}
+          path: out/
+          if-no-files-found: ignore
+          retention-days: 14
