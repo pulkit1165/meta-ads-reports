@@ -43,6 +43,13 @@ runs:
           fi
 
         elif [ "$DIRECTION" = "save" ]; then
+          # Identity env vars apply to every commit (including those created
+          # by `git rebase`), which git config -c flags do not.
+          export GIT_AUTHOR_NAME="meta-ads-bot"
+          export GIT_AUTHOR_EMAIL="41898282+github-actions[bot]@users.noreply.github.com"
+          export GIT_COMMITTER_NAME="$GIT_AUTHOR_NAME"
+          export GIT_COMMITTER_EMAIL="$GIT_AUTHOR_EMAIL"
+
           # Prepare worktree (may already exist from restore step)
           if [ ! -d "$WT" ]; then
             if git ls-remote --exit-code --heads origin "$BRANCH" > /dev/null 2>&1; then
@@ -64,9 +71,7 @@ runs:
             exit 0
           fi
 
-          git -c user.name="meta-ads-bot" \
-              -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
-              commit -m "state: $(date -u +%FT%TZ) [${GITHUB_WORKFLOW:-manual}]"
+          git commit -m "state: $(date -u +%FT%TZ) [${GITHUB_WORKFLOW:-manual}]"
 
           # Retry on push race (another workflow pushed between our fetch and push)
           for attempt in 1 2 3 4 5; do
@@ -76,7 +81,10 @@ runs:
             fi
             echo "  ⚠️  push race, retry $attempt/5"
             git fetch origin "$BRANCH"
-            git rebase "origin/$BRANCH" || { git rebase --abort; break; }
+            if ! git rebase "origin/$BRANCH"; then
+              git rebase --abort || true
+              break
+            fi
           done
           echo "  ❌ state push failed after retries" >&2
           exit 1
