@@ -5,11 +5,22 @@ Pulls ad-level spend + revenue, groups by Creative Type × Product × Portal
 Deploys to https://desistuddmuffyn.in/creative-dashboard.html
 """
 import requests, json, re, os
+from pathlib import Path
 from dotenv import dotenv_values
 from datetime import datetime, timedelta
 from collections import defaultdict
 
-env   = dotenv_values('/Users/pulkitsharma/.openclaw/workspace/.env')
+# ── Path setup (Phase 2: GitHub-Actions-friendly paths) ──────────────────────
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+STATE_DIR  = Path(os.environ.get('META_REPORTS_STATE_DIR') or (_REPO_ROOT / 'state'))
+OUT_DIR    = Path(os.environ.get('META_REPORTS_OUT_DIR')   or (_REPO_ROOT / 'out'))
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# dotenv_values returns only file contents; fall back to os.environ when keys
+# are provided via the process env (GitHub Actions secrets) instead of a file.
+_file_env = dotenv_values(_REPO_ROOT / '.env')
+env = {k: _file_env.get(k) or os.environ.get(k) for k in set(list(_file_env.keys()) + list(os.environ.keys()))}
 TOKEN = env.get('META_ACCESS_TOKEN')
 TODAY = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
 print(f'Date: {TODAY}')
@@ -404,7 +415,7 @@ function applyFilters(q) {{
 </body>
 </html>'''
 
-outfile = f'/Users/pulkitsharma/.openclaw/workspace/creative_dashboard_{TODAY}.html'
+outfile = str(OUT_DIR / f'creative_dashboard_{TODAY}.html')
 with open(outfile, 'w') as f:
     f.write(html)
 print(f'Saved: {outfile}')

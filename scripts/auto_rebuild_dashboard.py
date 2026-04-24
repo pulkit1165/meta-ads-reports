@@ -1,17 +1,28 @@
 #!/usr/bin/env python3
 """Auto-rebuild NTN Dashboard — polls Google Sheet and rebuilds HTML on change"""
 
-import re, json, requests, subprocess
+import os, re, json, requests, subprocess
 from datetime import datetime
+from pathlib import Path
 from google.oauth2.service_account import Credentials
 import gspread
 
-BASE_DIR = '/Users/pulkitsharma/.openclaw/workspace'
-SSH_KEY = '/Users/pulkitsharma/.ssh/antriksh_aws'
-EC2 = 'ec2-user@13.126.250.175'
+# ── Path setup (Phase 2: GitHub-Actions-friendly paths) ──────────────────────
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+STATE_DIR  = Path(os.environ.get('META_REPORTS_STATE_DIR') or (_REPO_ROOT / 'state'))
+OUT_DIR    = Path(os.environ.get('META_REPORTS_OUT_DIR')   or (_REPO_ROOT / 'out'))
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+# EC2 deploy is disabled by default here — the live dashboard is still served
+# by the original script on EC2. Set ENABLE_EC2_DEPLOY=1 + provide SSH_KEY/EC2
+# env vars to re-enable deploy from this copy.
+SSH_KEY = os.environ.get('EC2_SSH_KEY', '')
+EC2 = os.environ.get('EC2_HOST', '')
 SHEET_URL = 'https://docs.google.com/spreadsheets/d/1squ0JkqwiyFwIMRmqWc3q_AWHQtihn5o4dbDGyv7sAY/edit'
 
-creds = Credentials.from_service_account_file(f'{BASE_DIR}/google-service-account.json',
+_SA_FILE = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE') or str(_REPO_ROOT / 'google-service-account.json')
+creds = Credentials.from_service_account_file(_SA_FILE,
     scopes=['https://www.googleapis.com/auth/spreadsheets'])
 gc = gspread.authorize(creds)
 sh = gc.open_by_url(SHEET_URL)
@@ -703,17 +714,23 @@ drawBar('c3',L,[{{data:{ch_arr('sm_cpm')},color:'#1a3d7c',label:'SM'}},{{data:{c
 </script>
 </body></html>"""
 
-# Save locally and deploy to EC2
-with open('/tmp/ntn_filtered.html', 'w') as f:
+# Save HTML to out/ (committed as build artifact)
+_html_path = str(OUT_DIR / 'ntn_filtered.html')
+with open(_html_path, 'w') as f:
     f.write(html)
 
-# Deploy
-result = subprocess.run(
-    ['scp', '-i', SSH_KEY, '/tmp/ntn_filtered.html', f'{EC2}:/home/ec2-user/ntn_filtered.html'],
-    capture_output=True, text=True
-)
-result2 = subprocess.run(
-    ['ssh', '-i', SSH_KEY, EC2, 'sudo cp /home/ec2-user/ntn_filtered.html /usr/share/nginx/html/ntn_dashboard.html'],
-    capture_output=True, text=True
-)
-print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Dashboard rebuilt & deployed! Dates: {DL}")
+# EC2 deploy is opt-in — the original script on EC2 is still the live source.
+# To deploy from this copy, set ENABLE_EC2_DEPLOY=1 and provide EC2_SSH_KEY +
+# EC2_HOST env vars. Otherwise we just build the HTML artifact.
+if os.environ.get('ENABLE_EC2_DEPLOY') == '1' and SSH_KEY and EC2:
+    subprocess.run(
+        ['scp', '-i', SSH_KEY, _html_path, f'{EC2}:/home/ec2-user/ntn_filtered.html'],
+        capture_output=True, text=True
+    )
+    subprocess.run(
+        ['ssh', '-i', SSH_KEY, EC2, 'sudo cp /home/ec2-user/ntn_filtered.html /usr/share/nginx/html/ntn_dashboard.html'],
+        capture_output=True, text=True
+    )
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Dashboard rebuilt & deployed! Dates: {DL}")
+else:
+    print(f"[{datetime.now().strftime('%H:%M:%S')}] ✅ Dashboard built (deploy skipped): {_html_path} — Dates: {DL}")

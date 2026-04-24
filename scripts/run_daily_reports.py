@@ -10,23 +10,29 @@ Output: WhatsApp summary to Pulkit
 
 import os, sys, subprocess
 from datetime import datetime, timedelta
+from pathlib import Path
 
-WORKSPACE = '/Users/pulkitsharma/.openclaw/workspace'
-ENV_FILE  = f'{WORKSPACE}/.env'
+# ── Path setup (Phase 2: GitHub-Actions-friendly paths) ──────────────────────
+REPO_ROOT   = Path(__file__).resolve().parent.parent
+SCRIPTS_DIR = REPO_ROOT / 'scripts'
+ENV_FILE    = str(REPO_ROOT / '.env')
 
 # ── Load token ─────────────────────────────────────────────────────────────────
 def load_env():
     env = {}
-    with open(ENV_FILE) as f:
-        for line in f:
-            line = line.strip()
-            if '=' in line and not line.startswith('#'):
-                k, v = line.split('=', 1)
-                env[k.strip()] = v.strip()
+    if os.path.exists(ENV_FILE):
+        with open(ENV_FILE) as f:
+            for line in f:
+                line = line.strip()
+                if '=' in line and not line.startswith('#'):
+                    k, v = line.split('=', 1)
+                    env[k.strip()] = v.strip()
     return env
 
 ENV = load_env()
-TOKEN = ENV.get('META_ACCESS_TOKEN', '')
+# Env vars from the process environment (e.g. GitHub Actions secrets) take
+# precedence over .env file values.
+TOKEN = os.environ.get('META_ACCESS_TOKEN') or ENV.get('META_ACCESS_TOKEN', '')
 
 # ── Yesterday ─────────────────────────────────────────────────────────────────
 YESTERDAY = (datetime.now() - timedelta(days=1)).strftime('%Y-%m-%d')
@@ -55,7 +61,7 @@ def run(cmd, label):
     env['META_ACCESS_TOKEN'] = TOKEN
     r = subprocess.run(
         cmd, shell=True, capture_output=True, text=True,
-        timeout=300, env=env, cwd=WORKSPACE
+        timeout=300, env=env, cwd=str(REPO_ROOT)
     )
     if r.returncode != 0:
         errors.append(f"{label}: {r.stderr[-200:]}")
@@ -66,7 +72,7 @@ def run(cmd, label):
 print(f"=== Step 1: Campaign Tracker ({YESTERDAY}) ===")
 for acct in ACCOUNTS:
     success = run(
-        f"python3 {WORKSPACE}/campaign_tracker_builder.py --account {acct} --date {YESTERDAY}",
+        f"python3 {SCRIPTS_DIR}/campaign_tracker_builder.py --account {acct} --date {YESTERDAY}",
         acct
     )
     if success:
@@ -75,17 +81,17 @@ for acct in ACCOUNTS:
 
 # ── Step 2: Budget Reports ─────────────────────────────────────────────────────
 print("\n=== Step 2: Budget Reports ===")
-ok2 = run(f"python3 {WORKSPACE}/campaign_tracker_reports.py --date {YESTERDAY}", "budget_reports")
+ok2 = run(f"python3 {SCRIPTS_DIR}/campaign_tracker_reports.py --date {YESTERDAY}", "budget_reports")
 print(f"  {'✅' if ok2 else '❌'} Budget Reports (Category / Audience / Product)")
 
 # ── Step 3: Creative Report ────────────────────────────────────────────────────
 print("\n=== Step 3: Creative Report ===")
-ok3 = run(f"python3 {WORKSPACE}/creative_report.py --date {YESTERDAY}", "creative_report")
+ok3 = run(f"python3 {SCRIPTS_DIR}/creative_report.py --date {YESTERDAY}", "creative_report")
 print(f"  {'✅' if ok3 else '❌'} Creative Report")
 
 # ── Step 4: Closing Camps Report ──────────────────────────────────────────────
 print("\n=== Step 4: Closing Camps Report ===")
-ok4 = run(f"python3 {WORKSPACE}/closing_camps_report.py --date {YESTERDAY}", "closing_camps")
+ok4 = run(f"python3 {SCRIPTS_DIR}/closing_camps_report.py --date {YESTERDAY}", "closing_camps")
 print(f"  {'✅' if ok4 else '❌'} Closing Camps Report (1D ROAS < 1.0)")
 
 # ── Step 5: Summary ────────────────────────────────────────────────────────────

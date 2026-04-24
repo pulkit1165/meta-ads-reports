@@ -13,7 +13,7 @@ On-demand:
 
 Data fetched: 100% live from Meta API (today only, 1d_click window)
 Sheet: 🔴 Live Monitor tab (always overwritten)
-Snapshot cache: /tmp/live_monitor_snapshot.json (for ROAS delta)
+Snapshot cache: state/live_monitor_snapshot.json (for ROAS delta)
 
 Closing logic (₹2L daily cap):
   - Day 0 + Day 1-2 → 40% = ₹80K  | threshold ROAS < 1.0
@@ -25,20 +25,27 @@ import os, sys, json, argparse, requests, time
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from zoneinfo import ZoneInfo
+from pathlib import Path
 
 import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
-load_dotenv('/Users/pulkitsharma/.openclaw/workspace/.env')
+# ── Path setup (Phase 2: GitHub-Actions-friendly paths) ──────────────────────
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+STATE_DIR  = Path(os.environ.get('META_REPORTS_STATE_DIR') or (_REPO_ROOT / 'state'))
+OUT_DIR    = Path(os.environ.get('META_REPORTS_OUT_DIR')   or (_REPO_ROOT / 'out'))
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+load_dotenv(_REPO_ROOT / '.env')
 
 TOKEN    = os.getenv('META_ACCESS_TOKEN')
-SA_FILE  = '/Users/pulkitsharma/.openclaw/workspace/google-service-account.json'
+SA_FILE  = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE') or str(_REPO_ROOT / 'google-service-account.json')
 SHEET_ID = '11IAPsJlil75aehYf5IzpSaTCLcAgPk9-57p6ZuPNNQM'
 SCOPES   = ['https://www.googleapis.com/auth/spreadsheets']
 GRAPH    = 'https://graph.facebook.com/v19.0'
 IST      = ZoneInfo('Asia/Kolkata')
-SNAPSHOT = '/tmp/live_monitor_snapshot.json'
+SNAPSHOT = str(STATE_DIR / 'live_monitor_snapshot.json')
 
 WA_NUMBER = '+919517744959'  # Pulkit
 
@@ -581,9 +588,10 @@ def send_wa(message):
     except Exception as e:
         print(f"  ⚠️  WA send error: {e}")
         # Fallback: write to file for manual send
-        with open('/tmp/pending_wa_message.txt', 'w') as f:
+        _wa_path = str(STATE_DIR / 'pending_wa_message.txt')
+        with open(_wa_path, 'w') as f:
             f.write(message)
-        print("  📝 Message saved to /tmp/pending_wa_message.txt")
+        print(f"  📝 Message saved to {_wa_path}")
 
 # ── Main ──────────────────────────────────────────────────────────────────────
 

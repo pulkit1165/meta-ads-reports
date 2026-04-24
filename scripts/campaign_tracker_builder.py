@@ -19,15 +19,23 @@ import requests
 import gspread
 from datetime import datetime, timedelta
 from collections import defaultdict
+from pathlib import Path
 
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
+# ── Path setup (Phase 2: GitHub-Actions-friendly paths) ──────────────────────
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+STATE_DIR  = Path(os.environ.get('META_REPORTS_STATE_DIR') or (_REPO_ROOT / 'state'))
+OUT_DIR    = Path(os.environ.get('META_REPORTS_OUT_DIR')   or (_REPO_ROOT / 'out'))
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+
 # ── Load config ────────────────────────────────────────────────────────────────
-load_dotenv('/Users/pulkitsharma/.openclaw/workspace/.env')
+load_dotenv(_REPO_ROOT / '.env')
 
 TOKEN       = os.getenv('META_ACCESS_TOKEN')
-SA_FILE     = '/Users/pulkitsharma/.openclaw/workspace/google-service-account.json'
+SA_FILE     = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE') or str(_REPO_ROOT / 'google-service-account.json')
 SHEET_ID    = '11IAPsJlil75aehYf5IzpSaTCLcAgPk9-57p6ZuPNNQM'
 GRAPH_URL   = 'https://graph.facebook.com/v19.0'
 
@@ -294,7 +302,7 @@ def safe_div(a, b, decimals=2):
 
 # ── Lookup table for Segment + Product ───────────────────────────────────────
 # Load from lookup file if it exists, else return empty
-LOOKUP_FILE = '/Users/pulkitsharma/.openclaw/workspace/campaign_lookup.json'
+LOOKUP_FILE = str(STATE_DIR / 'campaign_lookup.json')
 
 def load_lookup():
     if os.path.exists(LOOKUP_FILE):
@@ -411,7 +419,7 @@ def fetch_campaigns(account_id, date_str):
 
     # Save revenue cache to disk for reports script
     import json as _json
-    cache_path = f'/tmp/tracker_cache_{account_id}_{date_str}.json'
+    cache_path = str(STATE_DIR / f'tracker_cache_{account_id}_{date_str}.json')
     with open(cache_path, 'w') as f:
         _json.dump(revenue_cache, f)
     print(f"  💾 Revenue cache saved: {cache_path}")

@@ -12,13 +12,23 @@ Usage:
 """
 
 import os, sys, argparse
+from pathlib import Path
 import gspread
 from gspread.utils import rowcol_to_a1
 from google.oauth2.service_account import Credentials
 from datetime import datetime, timedelta
 from collections import defaultdict
+from dotenv import load_dotenv
 
-SA_FILE  = '/Users/pulkitsharma/.openclaw/workspace/google-service-account.json'
+# ── Path setup (Phase 2: GitHub-Actions-friendly paths) ──────────────────────
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+STATE_DIR  = Path(os.environ.get('META_REPORTS_STATE_DIR') or (_REPO_ROOT / 'state'))
+OUT_DIR    = Path(os.environ.get('META_REPORTS_OUT_DIR')   or (_REPO_ROOT / 'out'))
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+load_dotenv(_REPO_ROOT / '.env')
+
+SA_FILE  = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE') or str(_REPO_ROOT / 'google-service-account.json')
 SHEET_ID = '11IAPsJlil75aehYf5IzpSaTCLcAgPk9-57p6ZuPNNQM'
 
 SCOPES = ['https://www.googleapis.com/auth/spreadsheets', 'https://www.googleapis.com/auth/drive']
@@ -155,11 +165,11 @@ def load_tracker_data(sh, date_str):
 
     # Account ID → portal map (from .env)
     from dotenv import dotenv_values
-    env = dotenv_values('/Users/pulkitsharma/.openclaw/workspace/.env')
+    env = dotenv_values(_REPO_ROOT / '.env')
 
     # Load all revenue caches for this date
     revenue_cache = {}  # campaign_id → {spend_1d, rev_1d, spend_2d, rev_2d, ...}
-    cache_files = glob.glob(f'/tmp/tracker_cache_act_*_{date_str}.json')
+    cache_files = glob.glob(str(STATE_DIR / f'tracker_cache_act_*_{date_str}.json'))
     for cf in cache_files:
         try:
             with open(cf) as f:

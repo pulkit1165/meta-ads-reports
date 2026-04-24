@@ -21,16 +21,23 @@ Usage:
 """
 
 import os, sys, json, argparse, requests
+from pathlib import Path
 import gspread
 from datetime import datetime, timedelta
 from collections import defaultdict
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
-load_dotenv('/Users/pulkitsharma/.openclaw/workspace/.env')
+# ── Path setup (Phase 2: GitHub-Actions-friendly paths) ──────────────────────
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+STATE_DIR  = Path(os.environ.get('META_REPORTS_STATE_DIR') or (_REPO_ROOT / 'state'))
+OUT_DIR    = Path(os.environ.get('META_REPORTS_OUT_DIR')   or (_REPO_ROOT / 'out'))
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+load_dotenv(_REPO_ROOT / '.env')
 
 TOKEN    = os.getenv('META_ACCESS_TOKEN')
-SA_FILE  = '/Users/pulkitsharma/.openclaw/workspace/google-service-account.json'
+SA_FILE  = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE') or str(_REPO_ROOT / 'google-service-account.json')
 SHEET_ID = '11IAPsJlil75aehYf5IzpSaTCLcAgPk9-57p6ZuPNNQM'
 GRAPH    = 'https://graph.facebook.com/v19.0'
 

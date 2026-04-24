@@ -19,15 +19,22 @@ import os, sys, json, argparse, requests, time
 from datetime import datetime, timedelta
 from collections import defaultdict
 from zoneinfo import ZoneInfo
+from pathlib import Path
 
 import gspread
 from google.oauth2.service_account import Credentials
 from dotenv import load_dotenv
 
-load_dotenv('/Users/pulkitsharma/.openclaw/workspace/.env')
+# ── Path setup (Phase 2: GitHub-Actions-friendly paths) ──────────────────────
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+STATE_DIR  = Path(os.environ.get('META_REPORTS_STATE_DIR') or (_REPO_ROOT / 'state'))
+OUT_DIR    = Path(os.environ.get('META_REPORTS_OUT_DIR')   or (_REPO_ROOT / 'out'))
+STATE_DIR.mkdir(parents=True, exist_ok=True)
+OUT_DIR.mkdir(parents=True, exist_ok=True)
+load_dotenv(_REPO_ROOT / '.env')
 
 TOKEN    = os.getenv('META_ACCESS_TOKEN')
-SA_FILE  = '/Users/pulkitsharma/.openclaw/workspace/google-service-account.json'
+SA_FILE  = os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE') or str(_REPO_ROOT / 'google-service-account.json')
 SHEET_ID = '11IAPsJlil75aehYf5IzpSaTCLcAgPk9-57p6ZuPNNQM'
 SCOPES   = ['https://www.googleapis.com/auth/spreadsheets']
 GRAPH    = 'https://graph.facebook.com/v19.0'
@@ -35,7 +42,7 @@ IST      = ZoneInfo('Asia/Kolkata')
 
 # Snapshot file: stores CIDs from previous run for closed-camp detection
 def snapshot_path(date_str):
-    return f'/tmp/closing_snapshot_{date_str}.json'
+    return str(STATE_DIR / f'closing_snapshot_{date_str}.json')
 
 def load_snapshot(date_str):
     path = snapshot_path(date_str)
@@ -469,7 +476,7 @@ def build_budget_type_section(camps, update_str):
 
 def load_morning_snapshot(date_str):
     """Load the very first (10AM) snapshot of the day."""
-    path = f'/tmp/closing_morning_{date_str}.json'
+    path = str(STATE_DIR / f'closing_morning_{date_str}.json')
     if os.path.exists(path):
         with open(path) as f:
             return json.load(f)
@@ -477,7 +484,7 @@ def load_morning_snapshot(date_str):
 
 def save_morning_snapshot(date_str, camps, run_label):
     """Save 10AM snapshot — only written once per day."""
-    path = f'/tmp/closing_morning_{date_str}.json'
+    path = str(STATE_DIR / f'closing_morning_{date_str}.json')
     if not os.path.exists(path):
         data = {c['cid']: {
             'name':      c['name'],
