@@ -31,7 +31,6 @@ import argparse
 import requests
 from pathlib import Path
 from datetime import datetime, timedelta
-from collections import defaultdict
 
 import gspread
 from google.oauth2.service_account import Credentials
@@ -245,8 +244,14 @@ def check_creative(sh, date_str):
 # ── Check: 🔴 Closing tab ─────────────────────────────────────────────────────
 def check_closing(sh, date_str):
     section(f"Report 3/4: 🔴 Closing tab ({date_str})")
+    # closing_watchlist only ever writes for TODAY's date — skip the check
+    # when validating a past date, otherwise this always false-positives.
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    if date_str != today_str:
+        info(f"date is not today ({today_str}) — closing tab only written for current date, skipping")
+        return True
+
     dl = date_label(date_str)
-    # Tab name uses `Closing DD MMM YY` with lowercase month
     candidates = [
         f"🔴 Closing {dl}",
         f"🔴 Closing {datetime.strptime(date_str,'%Y-%m-%d').strftime('%d %b %y')}",
