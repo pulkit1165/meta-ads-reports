@@ -35,7 +35,7 @@ jobs:
           fetch-depth: 1
 
       - name: Load ad account IDs
-        run: cat config/accounts.env >> "$GITHUB_ENV"
+        run: grep -E '^[A-Z][A-Z0-9_]*=' config/accounts.env >> "$GITHUB_ENV"
 
       - name: Set up Python
         uses: actions/setup-python@v5
