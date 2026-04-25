@@ -424,6 +424,318 @@ def write(rows, date_str, ts_label):
     print(f"  ✅ Wrote {len(padded)} rows to '{tab_name}'")
 
 
+# ── HTML dashboard render ─────────────────────────────────────────────────────
+def render_html(camps, ads, date_str, ts_label):
+    """Build a single-page HTML dashboard mirroring the NTN dashboard's style.
+    Output goes to out/today_live.html (always-current) AND out/today_live_<date>.html.
+    """
+    # ── Aggregates ─────────────────────────────────────────────────────────
+    total_spend  = sum(c['spend']  for c in camps)
+    total_budget = sum(c['budget'] for c in camps)
+    total_camps  = len(camps)
+    total_rev    = sum(c['spend'] * c['roas'] for c in camps)
+    avg_roas     = (total_rev / total_spend) if total_spend else 0.0
+
+    spend_below_1 = sum(c['spend'] for c in camps if c['roas'] < 1.0)
+    spend_above_1_5 = sum(c['spend'] for c in camps if c['roas'] >= 1.5)
+    pct_below_1 = (spend_below_1 / total_spend * 100) if total_spend else 0
+    pct_above_1_5 = (spend_above_1_5 / total_spend * 100) if total_spend else 0
+
+    # Success-rate buckets
+    bucket_data = []
+    bucket_data.append(('Below 1.0x', sum(c['spend'] for c in camps if c['roas'] < 1.0), '#dc3545'))
+    bucket_data.append(('≥ 1.0x',     sum(c['spend'] for c in camps if c['roas'] >= 1.0), '#f5c518'))
+    bucket_data.append(('≥ 1.5x',     sum(c['spend'] for c in camps if c['roas'] >= 1.5), '#90c695'))
+    bucket_data.append(('≥ 1.75x',    sum(c['spend'] for c in camps if c['roas'] >= 1.75), '#5fa572'))
+    bucket_data.append(('≥ 2.0x',     sum(c['spend'] for c in camps if c['roas'] >= 2.0), '#00a878'))
+    bucket_data.append(('≥ 3.0x',     sum(c['spend'] for c in camps if c['roas'] >= 3.0), '#9b59b6'))
+
+    # Audience aggregates per type
+    def aggregate_audiences(type_key):
+        agg = defaultdict(lambda: {'count': 0, 'spend': 0.0, 'budget': 0.0, 'rev': 0.0})
+        for c in camps:
+            if c['type'] != type_key:
+                continue
+            seg = c['segment'] or 'Unmapped'
+            a = agg[seg]
+            a['count']  += 1
+            a['spend']  += c['spend']
+            a['budget'] += c['budget']
+            a['rev']    += c['spend'] * c['roas']
+        out = []
+        for seg, a in sorted(agg.items(), key=lambda kv: -kv[1]['spend']):
+            roas = (a['rev'] / a['spend']) if a['spend'] else 0.0
+            out.append({'seg': seg, 'count': a['count'], 'spend': int(a['spend']),
+                        'budget': int(a['budget']), 'roas': roas})
+        return out
+
+    prospecting = aggregate_audiences('Sales')
+    retarget    = aggregate_audiences('Retarget')
+
+    # Decision-triggered camps (≥30% spent + ROAS ≤ 1)
+    triggered = []
+    for c in camps:
+        if c['budget'] <= 0:
+            continue
+        pct_spent = c['spend'] / c['budget'] * 100
+        if pct_spent >= 30 and c['roas'] <= 1.0:
+            triggered.append({**c, 'pct_spent': pct_spent})
+    triggered.sort(key=lambda x: -x['pct_spent'])
+
+    # Best creatives
+    eligible_ads = [a for a in ads if a['spend'] >= 500]
+    eligible_ads.sort(key=lambda x: -x['roas'])
+    top_creatives = eligible_ads[:10]
+
+    # Creative type mix
+    type_agg = defaultdict(lambda: {'count': 0, 'spend': 0.0, 'rev': 0.0})
+    for a in ads:
+        t = type_agg[a['creative_type']]
+        t['count'] += 1; t['spend'] += a['spend']; t['rev'] += a['spend'] * a['roas']
+    total_ad_spend = sum(t['spend'] for t in type_agg.values())
+    creative_mix = []
+    type_order = ['Paras', 'Partnership', 'Motion', 'Static', 'Catalogue', 'Testing', 'Others']
+    for ct in type_order:
+        if ct not in type_agg:
+            continue
+        t = type_agg[ct]
+        roas = (t['rev'] / t['spend']) if t['spend'] else 0.0
+        share = (t['spend'] / total_ad_spend * 100) if total_ad_spend else 0.0
+        creative_mix.append({'type': ct, 'count': t['count'], 'spend': int(t['spend']),
+                             'share': share, 'roas': roas})
+
+    # ── Helper: render rows ────────────────────────────────────────────────
+    def roas_class(r):
+        if r >= 2.0: return 'rg'
+        if r >= 1.5: return 'ro'
+        return 'rr'
+
+    def audience_table_rows(items, total):
+        out = []
+        for it in items:
+            share = (it['spend'] / total * 100) if total else 0
+            cls = roas_class(it['roas'])
+            out.append(
+                f"<tr><td>{it['seg']}</td><td>{it['count']}</td>"
+                f"<td>₹{it['budget']:,}</td><td>₹{it['spend']:,}</td>"
+                f"<td>{share:.1f}%</td><td class='{cls}'>{it['roas']:.2f}x</td></tr>"
+            )
+        return ''.join(out)
+
+    prospecting_rows = audience_table_rows(prospecting, sum(it['spend'] for it in prospecting))
+    retarget_rows    = audience_table_rows(retarget,    sum(it['spend'] for it in retarget))
+
+    # Best creatives rows
+    cr_rows = ''
+    for i, a in enumerate(top_creatives, 1):
+        cls = roas_class(a['roas'])
+        cr_rows += (f"<tr><td><b>{i}</b></td><td style='font-size:11px'>{a['name'][:80]}</td>"
+                    f"<td>{a['creative_type']}</td><td style='font-size:11px'>{a['account']}</td>"
+                    f"<td>₹{int(a['spend']):,}</td><td class='{cls}'>{a['roas']:.2f}x</td></tr>")
+
+    # Creative mix rows
+    cm_rows = ''
+    for it in creative_mix:
+        cls = roas_class(it['roas'])
+        cm_rows += (f"<tr><td>{it['type']}</td><td>{it['count']}</td>"
+                    f"<td>₹{it['spend']:,}</td><td>{it['share']:.1f}%</td>"
+                    f"<td class='{cls}'>{it['roas']:.2f}x</td></tr>")
+
+    # Decision triggered rows
+    tr_rows = ''
+    if triggered:
+        for c in triggered[:50]:
+            zero_flag = '💀 ZERO' if c['roas'] == 0 else f"{c['roas']:.2f}x"
+            tr_rows += (f"<tr><td style='font-size:11px'>{c['name'][:90]}</td>"
+                        f"<td>{c['account']}</td><td>{c['type']}</td>"
+                        f"<td>₹{int(c['budget']):,}</td><td>₹{int(c['spend']):,}</td>"
+                        f"<td><b>{c['pct_spent']:.0f}%</b></td>"
+                        f"<td style='color:#dc3545;font-weight:700'>{zero_flag}</td></tr>")
+    else:
+        tr_rows = "<tr><td colspan='7' style='text-align:center;color:#0d6e3a;padding:20px'>✅ No camps currently triggering the close decision rule.</td></tr>"
+
+    # Bucket bars (success rate visual)
+    max_b = max(b[1] for b in bucket_data) or 1
+    bucket_html = ''
+    for label, val, color in bucket_data:
+        share = (val / total_spend * 100) if total_spend else 0
+        bar_w = (val / max_b) * 100
+        bucket_html += (
+            f"<div class='bucket-row'>"
+            f"<div class='bucket-lbl'>{label}</div>"
+            f"<div class='bucket-bar-wrap'>"
+            f"<div class='bucket-bar' style='width:{bar_w:.1f}%;background:{color}'></div>"
+            f"</div>"
+            f"<div class='bucket-val'>₹{int(val):,} ({share:.1f}%)</div>"
+            f"</div>"
+        )
+
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
+
+    # ── HTML template ──────────────────────────────────────────────────────
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>Today's Live — Meta Ads</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:'Segoe UI',system-ui,sans-serif;background:#f0f4fb;color:#1a1a2e}}
+.header{{background:linear-gradient(135deg,#0d2145,#1a3d7c);padding:20px 28px;display:flex;align-items:center;justify-content:space-between}}
+.header h1{{color:#fff;font-size:20px;font-weight:700}}
+.header p{{color:rgba(255,255,255,.6);font-size:11px;margin-top:3px}}
+.last-upd{{color:rgba(255,255,255,.6);font-size:11px;text-align:right}}
+.last-upd a{{color:rgba(255,255,255,.85);text-decoration:none;border-bottom:1px dashed rgba(255,255,255,.4)}}
+.main{{max-width:1400px;margin:0 auto;padding:24px 28px}}
+
+.kpi-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}}
+.kpi{{background:#fff;border-radius:12px;padding:20px;border:1px solid #dde3f0;box-shadow:0 2px 10px rgba(0,0,0,.04);position:relative;overflow:hidden;transition:transform .15s}}
+.kpi:hover{{transform:translateY(-2px)}}
+.kpi::before{{content:'';position:absolute;top:0;left:0;width:4px;height:100%}}
+.kpi.spend::before{{background:#f5c518}}
+.kpi.camps::before{{background:#1a3d7c}}
+.kpi.good::before{{background:#00a878}}
+.kpi.bad::before{{background:#dc3545}}
+.kpi-icon{{font-size:24px;margin-bottom:8px}}
+.kpi-lbl{{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.8px;font-weight:700}}
+.kpi-val{{font-size:26px;font-weight:900;color:#0d2145;margin:5px 0 3px}}
+.kpi-sub{{font-size:11px;color:#6b7280}}
+
+.card{{background:#fff;border-radius:12px;padding:20px;border:1px solid #dde3f0;box-shadow:0 2px 10px rgba(0,0,0,.04);margin-bottom:18px}}
+.sec-ttl{{font-size:13px;font-weight:700;color:#0d2145;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #eef2ff}}
+.sec-ttl .meta{{color:#6b7280;font-weight:400;font-size:11px;margin-left:8px}}
+
+.tables-row{{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}}
+@media(max-width:900px){{.kpi-grid,.tables-row{{grid-template-columns:1fr}}}}
+
+table{{width:100%;border-collapse:collapse;font-size:12px}}
+th{{background:#0d2145;color:#fff;padding:8px 10px;text-align:left;font-size:10px;letter-spacing:.3px;text-transform:uppercase}}
+th:not(:first-child){{text-align:center}}
+td{{padding:7px 10px;border-bottom:1px solid #eef2ff}}
+td:not(:first-child){{text-align:center;font-weight:600}}
+.rg{{color:#0d6e3a;font-weight:700}}
+.ro{{color:#a35a00;font-weight:700}}
+.rr{{color:#a3260a;font-weight:700}}
+
+.bucket-row{{display:grid;grid-template-columns:90px 1fr 200px;gap:12px;align-items:center;padding:6px 0}}
+.bucket-lbl{{font-size:12px;font-weight:700;color:#0d2145}}
+.bucket-bar-wrap{{height:22px;background:#f4f6fa;border-radius:6px;overflow:hidden}}
+.bucket-bar{{height:100%;border-radius:6px;transition:width .4s}}
+.bucket-val{{font-size:11px;color:#6b7280;text-align:right;font-variant-numeric:tabular-nums}}
+
+.alert{{background:#fff5f5;border:1px solid #fed7d7;border-radius:12px;padding:18px;margin-bottom:18px}}
+.alert-ttl{{color:#a3260a;font-weight:800;margin-bottom:10px;font-size:13px;padding-bottom:8px;border-bottom:1px solid #fed7d7}}
+
+footer{{text-align:center;color:#6b7280;font-size:11px;padding:20px}}
+footer a{{color:#1a3d7c;text-decoration:none;border-bottom:1px dashed #1a3d7c}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>🔴 Today's Live — Meta Ads</h1>
+    <p>{datetime.strptime(date_str,'%Y-%m-%d').strftime('%A, %d %B %Y')} · SM portal · Live data from Meta Marketing API</p>
+  </div>
+  <div class="last-upd">
+    Last updated: {ts_label}<br>
+    <a href="{sheet_url}" target="_blank">Open in Sheets ↗</a>
+  </div>
+</div>
+
+<div class="main">
+
+  <!-- KPI cards -->
+  <div class="kpi-grid">
+    <div class="kpi spend">
+      <div class="kpi-icon">💰</div><div class="kpi-lbl">Total Spend Today</div>
+      <div class="kpi-val">₹{int(total_spend):,}</div>
+      <div class="kpi-sub">of ₹{int(total_budget):,} budgeted</div>
+    </div>
+    <div class="kpi camps">
+      <div class="kpi-icon">📦</div><div class="kpi-lbl">Active Camps</div>
+      <div class="kpi-val">{total_camps}</div>
+      <div class="kpi-sub">with spend &gt; 0</div>
+    </div>
+    <div class="kpi good">
+      <div class="kpi-icon">🟢</div><div class="kpi-lbl">Spend ≥ 1.5x ROAS</div>
+      <div class="kpi-val">{pct_above_1_5:.1f}%</div>
+      <div class="kpi-sub">₹{int(spend_above_1_5):,} / day</div>
+    </div>
+    <div class="kpi bad">
+      <div class="kpi-icon">🔴</div><div class="kpi-lbl">Spend &lt; 1.0x ROAS</div>
+      <div class="kpi-val">{pct_below_1:.1f}%</div>
+      <div class="kpi-sub">₹{int(spend_below_1):,} on close watch</div>
+    </div>
+  </div>
+
+  <!-- Success rate -->
+  <div class="card">
+    <div class="sec-ttl">🎯 Daily Success Rate <span class="meta">— spend distribution by ROAS bucket (avg ROAS today: <b>{avg_roas:.2f}x</b>)</span></div>
+    {bucket_html}
+  </div>
+
+  <!-- Decision triggered alert -->
+  <div class="alert">
+    <div class="alert-ttl">💀 DECISION TRIGGERED — ≥30% budget spent + ROAS ≤ 1x ({len(triggered)} camp{'s' if len(triggered)!=1 else ''})</div>
+    <table>
+      <thead><tr>
+        <th>Campaign</th><th>Account</th><th>Type</th>
+        <th>Budget</th><th>Spent</th><th>% Spent</th><th>ROAS</th>
+      </tr></thead>
+      <tbody>{tr_rows}</tbody>
+    </table>
+  </div>
+
+  <!-- By Type × Audience -->
+  <div class="tables-row">
+    <div class="card">
+      <div class="sec-ttl">🎯 Prospecting <span class="meta">— audiences by spend</span></div>
+      <table>
+        <thead><tr><th>Audience</th><th># Camps</th><th>Budget</th><th>Spent</th><th>% Block</th><th>ROAS</th></tr></thead>
+        <tbody>{prospecting_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No prospecting camps active</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="sec-ttl">🔁 Retarget <span class="meta">— audiences by spend</span></div>
+      <table>
+        <thead><tr><th>Audience</th><th># Camps</th><th>Budget</th><th>Spent</th><th>% Block</th><th>ROAS</th></tr></thead>
+        <tbody>{retarget_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No retarget camps active</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- Best creatives + creative type mix -->
+  <div class="tables-row">
+    <div class="card">
+      <div class="sec-ttl">🎨 Best Creatives Today <span class="meta">— top 10 ads by ROAS (min ₹500 spend)</span></div>
+      <table>
+        <thead><tr><th>#</th><th>Ad Name</th><th>Type</th><th>Account</th><th>Spent</th><th>ROAS</th></tr></thead>
+        <tbody>{cr_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No qualifying ads yet</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="card">
+      <div class="sec-ttl">📐 Creative Type Mix <span class="meta">— % of running spend</span></div>
+      <table>
+        <thead><tr><th>Type</th><th># Ads</th><th>Spent</th><th>% Share</th><th>Avg ROAS</th></tr></thead>
+        <tbody>{cm_rows or '<tr><td colspan="5" style="text-align:center;color:#888;padding:20px">No data</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+
+</div>
+
+<footer>
+  🤖 Auto-rebuilds every 2 hrs IST business hours · <a href="{sheet_url}" target="_blank">Sheet source</a> · {ts_label}
+</footer>
+
+</body>
+</html>
+"""
+    return html
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     parser = argparse.ArgumentParser()
@@ -454,6 +766,16 @@ def main():
     rows += section_best_creatives(ads, ts_label)
 
     write(rows, args.date, ts_label)
+
+    # Also produce an HTML dashboard alongside the sheet update.
+    print("→ Rendering HTML dashboard…")
+    html = render_html(camps, ads, args.date, ts_label)
+    out_now    = OUT_DIR / 'today_live.html'                     # always-current (overwritten)
+    out_dated  = OUT_DIR / f'today_live_{args.date}.html'        # date-stamped history
+    out_now.write_text(html, encoding='utf-8')
+    out_dated.write_text(html, encoding='utf-8')
+    print(f"   ✅ {out_now}")
+    print(f"   ✅ {out_dated}")
 
 
 if __name__ == '__main__':
