@@ -1,15 +1,10 @@
-name: Today's Live Report (every 2 hrs IST business hours)
+name: Today's Live Report (hourly, IST business hours)
 
 on:
   schedule:
-    # IST business hours, every 2 hours starting 09:30 IST = 04:00 UTC.
-    # 09:30 IST = 04:00 UTC
-    # 11:30 IST = 06:00 UTC
-    # 13:30 IST = 08:00 UTC
-    # 15:30 IST = 10:00 UTC
-    # 17:30 IST = 12:00 UTC
-    # 19:30 IST = 14:00 UTC
-    - cron: "0 4,6,8,10,12,14 * * *"
+    # Every hour at the top of the hour UTC, between 04:00 and 14:00 UTC.
+    # That's 09:30 IST through 19:30 IST inclusive — 11 runs per day.
+    - cron: "0 4-14 * * *"
   workflow_dispatch:
 
 concurrency:
