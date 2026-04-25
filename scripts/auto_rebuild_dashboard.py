@@ -1,11 +1,18 @@
 #!/usr/bin/env python3
 """Auto-rebuild NTN Dashboard — polls Google Sheet and rebuilds HTML on change"""
 
-import os, re, json, requests, subprocess
+import os, re, json, requests, subprocess, sys
 from datetime import datetime
 from pathlib import Path
 from google.oauth2.service_account import Credentials
 import gspread
+
+# ── Reuse today-live helpers (data + HTML body sections) ────────────────
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from today_live_report import (
+    fetch_today_campaigns, fetch_today_ads,
+    compute_today_aggregates, render_today_inner, render_today_styles,
+)
 
 # ── Path setup (Phase 2: GitHub-Actions-friendly paths) ──────────────────────
 _REPO_ROOT = Path(__file__).resolve().parent.parent
@@ -409,6 +416,43 @@ def load_today_live():
 LIVE = load_today_live()
 print(f"[today-live] {'loaded ' + LIVE.get('tab_name','—') if LIVE else 'no Today Live tab found yet'}")
 
+# ── Today's live data — full sections embedded in this dashboard ───────
+# We re-fetch from the Meta API directly (same path today_live_report uses)
+# so the embedded section is always current relative to whenever the dashboard
+# was rebuilt. If META_ACCESS_TOKEN isn't set we just skip the embed.
+TODAY_INNER_HTML = ''
+TODAY_DATE_LABEL = ''
+TODAY_TS_LABEL   = ''
+if os.getenv('META_ACCESS_TOKEN'):
+    try:
+        # Use Asia/Kolkata "today" so this matches the sheet tab naming the
+        # rest of the today_live machinery uses.
+        from zoneinfo import ZoneInfo as _ZI
+        _now = datetime.now(_ZI('Asia/Kolkata'))
+        _today_str        = _now.strftime('%Y-%m-%d')
+        TODAY_DATE_LABEL  = _now.strftime('%A, %d %B %Y')
+        TODAY_TS_LABEL    = _now.strftime('%d %b %Y, %H:%M IST')
+        print(f"[today-live] fetching live data for {_today_str}…")
+        _camps = fetch_today_campaigns(_today_str)
+        _ads   = fetch_today_ads(_today_str)
+        print(f"[today-live] {len(_camps)} camps, {len(_ads)} ads — rendering inner section")
+        _agg = compute_today_aggregates(_camps, _ads)
+        _gha_sid = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
+        _sheet_url = f"https://docs.google.com/spreadsheets/d/{_gha_sid}"
+        TODAY_INNER_HTML = render_today_inner(
+            _agg, _today_str, TODAY_TS_LABEL, _sheet_url,
+            heading=f"🔴 Today Live — {TODAY_DATE_LABEL} · last updated {TODAY_TS_LABEL}",
+        )
+    except Exception as _e:
+        print(f"[today-live] embed failed (continuing without): {_e}")
+        TODAY_INNER_HTML = (
+            f"<div style='padding:18px;background:#fff5f5;border:1px solid #fed7d7;"
+            f"border-radius:12px;margin-bottom:18px'>"
+            f"<b style='color:#a3260a'>⚠ Today Live unavailable:</b> {_e}</div>"
+        )
+else:
+    print("[today-live] META_ACCESS_TOKEN not set — skipping live embed")
+
 # Build KPI
 kpi = {}
 for i,dl in enumerate(DL):
@@ -658,6 +702,7 @@ footer{{text-align:center;padding:16px;color:#9ca3af;font-size:10px;border-top:1
 .meta-tbl tr:hover td{{background:#f8faff}}
 .meta-tbl .group-hdr td{{background:#f0f4ff;font-weight:800;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:#6b7280;padding:6px 14px}}
 .val-good{{color:#059669;font-weight:800}}.val-warn{{color:#d97706;font-weight:800}}.val-bad{{color:#dc2626;font-weight:800}}.val-neu{{color:#374151}}
+{render_today_styles()}
 </style>
 </head>
 <body>
@@ -670,6 +715,7 @@ footer{{text-align:center;padding:16px;color:#9ca3af;font-size:10px;border-top:1
   {date_btns()}
 </div>
 <div class="main">
+  {TODAY_INNER_HTML}
   <div class="kpi-grid">
     <div class="kpi orders"><div class="kpi-icon">📦</div><div class="kpi-lbl">Orders</div><div class="kpi-val" id="v-o">—</div><div class="kpi-sub">All portals</div></div>
     <div class="kpi rev"><div class="kpi-icon">💰</div><div class="kpi-lbl">Revenue</div><div class="kpi-val" id="v-r">—</div><div class="kpi-sub">SM+SML+NBP</div></div>
@@ -885,20 +931,9 @@ footer{{text-align:center;padding:16px;color:#9ca3af;font-size:10px;border-top:1
     </div>
   </div>
   <div class="tables-row">
-    <div class="tbl-card">
-      <div class="sec-ttl">🎨 Creative Performance</div>
+    <div class="tbl-card full">
+      <div class="sec-ttl">🎨 Creative Performance  <span style="color:#6b7280;font-weight:400;font-size:11px">— historical (yesterday)</span></div>
       <table><thead><tr><th>Type</th><th>ROAS</th><th>Spend (₹)</th></tr></thead><tbody>{creative_rows()}</tbody></table>
-    </div>
-    <div class="tbl-card">
-      <div class="sec-ttl">🔴 Today Live  <span style="color:#6b7280;font-weight:400;font-size:11px">— refreshes every 2 hrs</span></div>
-      {('<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>'
-        f'<tr><td>Source tab</td><td>{LIVE.get("tab_name","—")}</td></tr>'
-        f'<tr><td>Last update</td><td>{LIVE.get("updated","—")}</td></tr>'
-        f'<tr><td>Camps with spend today</td><td><b>{LIVE.get("total_camps","—")}</b></td></tr>'
-        f'<tr><td>Total spend today</td><td><b>₹{LIVE.get("total_spend","—")}</b></td></tr>'
-        f'<tr><td>% spend below 1.0x ROAS</td><td><b style="color:#a3260a">{LIVE.get("pct_below_1","—")}</b></td></tr>'
-        f'<tr><td>% spend above 1.5x ROAS</td><td><b style="color:#0d6e3a">{LIVE.get("pct_above_1_5","—")}</b></td></tr>'
-        '</tbody></table>') if LIVE else '<p style="color:#888;font-size:11px">No live tab found — has today_live_report run today?</p>'}
     </div>
   </div>
   <div class="tables-row">

@@ -425,32 +425,36 @@ def write(rows, date_str, ts_label):
 
 
 # ── HTML dashboard render ─────────────────────────────────────────────────────
-def render_html(camps, ads, date_str, ts_label):
-    """Build a single-page HTML dashboard mirroring the NTN dashboard's style.
-    Output goes to out/today_live.html (always-current) AND out/today_live_<date>.html.
-    """
-    # ── Aggregates ─────────────────────────────────────────────────────────
+def _roas_class(r):
+    if r >= 2.0: return 'rg'
+    if r >= 1.5: return 'ro'
+    return 'rr'
+
+
+def compute_today_aggregates(camps, ads):
+    """Pure data: turn raw camps + ads into a structured dict ready to render.
+    Reused by render_html() (standalone HTML) and by auto_rebuild_dashboard.py
+    (which embeds today's sections inside the NTN dashboard)."""
     total_spend  = sum(c['spend']  for c in camps)
     total_budget = sum(c['budget'] for c in camps)
     total_camps  = len(camps)
     total_rev    = sum(c['spend'] * c['roas'] for c in camps)
     avg_roas     = (total_rev / total_spend) if total_spend else 0.0
 
-    spend_below_1 = sum(c['spend'] for c in camps if c['roas'] < 1.0)
+    spend_below_1   = sum(c['spend'] for c in camps if c['roas'] < 1.0)
     spend_above_1_5 = sum(c['spend'] for c in camps if c['roas'] >= 1.5)
-    pct_below_1 = (spend_below_1 / total_spend * 100) if total_spend else 0
-    pct_above_1_5 = (spend_above_1_5 / total_spend * 100) if total_spend else 0
+    pct_below_1     = (spend_below_1   / total_spend * 100) if total_spend else 0
+    pct_above_1_5   = (spend_above_1_5 / total_spend * 100) if total_spend else 0
 
-    # Success-rate buckets
-    bucket_data = []
-    bucket_data.append(('Below 1.0x', sum(c['spend'] for c in camps if c['roas'] < 1.0), '#dc3545'))
-    bucket_data.append(('≥ 1.0x',     sum(c['spend'] for c in camps if c['roas'] >= 1.0), '#f5c518'))
-    bucket_data.append(('≥ 1.5x',     sum(c['spend'] for c in camps if c['roas'] >= 1.5), '#90c695'))
-    bucket_data.append(('≥ 1.75x',    sum(c['spend'] for c in camps if c['roas'] >= 1.75), '#5fa572'))
-    bucket_data.append(('≥ 2.0x',     sum(c['spend'] for c in camps if c['roas'] >= 2.0), '#00a878'))
-    bucket_data.append(('≥ 3.0x',     sum(c['spend'] for c in camps if c['roas'] >= 3.0), '#9b59b6'))
+    bucket_data = [
+        ('Below 1.0x', sum(c['spend'] for c in camps if c['roas'] < 1.0),  '#dc3545'),
+        ('≥ 1.0x',     sum(c['spend'] for c in camps if c['roas'] >= 1.0), '#f5c518'),
+        ('≥ 1.5x',     sum(c['spend'] for c in camps if c['roas'] >= 1.5), '#90c695'),
+        ('≥ 1.75x',    sum(c['spend'] for c in camps if c['roas'] >= 1.75), '#5fa572'),
+        ('≥ 2.0x',     sum(c['spend'] for c in camps if c['roas'] >= 2.0), '#00a878'),
+        ('≥ 3.0x',     sum(c['spend'] for c in camps if c['roas'] >= 3.0), '#9b59b6'),
+    ]
 
-    # Audience aggregates per type
     def aggregate_audiences(type_key):
         agg = defaultdict(lambda: {'count': 0, 'spend': 0.0, 'budget': 0.0, 'rev': 0.0})
         for c in camps:
@@ -472,7 +476,6 @@ def render_html(camps, ads, date_str, ts_label):
     prospecting = aggregate_audiences('Sales')
     retarget    = aggregate_audiences('Retarget')
 
-    # Decision-triggered camps (≥30% spent + ROAS ≤ 1)
     triggered = []
     for c in camps:
         if c['budget'] <= 0:
@@ -482,20 +485,17 @@ def render_html(camps, ads, date_str, ts_label):
             triggered.append({**c, 'pct_spent': pct_spent})
     triggered.sort(key=lambda x: -x['pct_spent'])
 
-    # Best creatives
     eligible_ads = [a for a in ads if a['spend'] >= 500]
     eligible_ads.sort(key=lambda x: -x['roas'])
     top_creatives = eligible_ads[:10]
 
-    # Creative type mix
     type_agg = defaultdict(lambda: {'count': 0, 'spend': 0.0, 'rev': 0.0})
     for a in ads:
         t = type_agg[a['creative_type']]
         t['count'] += 1; t['spend'] += a['spend']; t['rev'] += a['spend'] * a['roas']
     total_ad_spend = sum(t['spend'] for t in type_agg.values())
     creative_mix = []
-    type_order = ['Paras', 'Partnership', 'Motion', 'Static', 'Catalogue', 'Testing', 'Others']
-    for ct in type_order:
+    for ct in ['Paras', 'Partnership', 'Motion', 'Static', 'Catalogue', 'Testing', 'Others']:
         if ct not in type_agg:
             continue
         t = type_agg[ct]
@@ -504,17 +504,67 @@ def render_html(camps, ads, date_str, ts_label):
         creative_mix.append({'type': ct, 'count': t['count'], 'spend': int(t['spend']),
                              'share': share, 'roas': roas})
 
-    # ── Helper: render rows ────────────────────────────────────────────────
-    def roas_class(r):
-        if r >= 2.0: return 'rg'
-        if r >= 1.5: return 'ro'
-        return 'rr'
+    return {
+        'total_spend': total_spend, 'total_budget': total_budget, 'total_camps': total_camps,
+        'avg_roas': avg_roas,
+        'spend_below_1': spend_below_1, 'spend_above_1_5': spend_above_1_5,
+        'pct_below_1': pct_below_1, 'pct_above_1_5': pct_above_1_5,
+        'bucket_data': bucket_data,
+        'prospecting': prospecting, 'retarget': retarget,
+        'triggered': triggered,
+        'top_creatives': top_creatives, 'creative_mix': creative_mix,
+    }
 
-    def audience_table_rows(items, total):
+
+def render_today_styles():
+    """The CSS rules used by render_today_inner(). Standalone — auto_rebuild_dashboard
+    appends this to its own stylesheet so the embedded today-live sections render right."""
+    return """
+.tl-kpi-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:18px}
+.tl-kpi{background:#fff;border-radius:12px;padding:18px;border:1px solid #dde3f0;box-shadow:0 2px 10px rgba(0,0,0,.04);position:relative;overflow:hidden;transition:transform .15s}
+.tl-kpi:hover{transform:translateY(-2px)}
+.tl-kpi::before{content:'';position:absolute;top:0;left:0;width:4px;height:100%}
+.tl-kpi.spend::before{background:#f5c518}
+.tl-kpi.camps::before{background:#1a3d7c}
+.tl-kpi.good::before{background:#00a878}
+.tl-kpi.bad::before{background:#dc3545}
+.tl-kpi-icon{font-size:22px;margin-bottom:6px}
+.tl-kpi-lbl{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.8px;font-weight:700}
+.tl-kpi-val{font-size:24px;font-weight:900;color:#0d2145;margin:5px 0 3px}
+.tl-kpi-sub{font-size:11px;color:#6b7280}
+.tl-card{background:#fff;border-radius:12px;padding:18px;border:1px solid #dde3f0;box-shadow:0 2px 10px rgba(0,0,0,.04);margin-bottom:18px}
+.tl-sec-ttl{font-size:13px;font-weight:700;color:#0d2145;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #eef2ff}
+.tl-sec-ttl .meta{color:#6b7280;font-weight:400;font-size:11px;margin-left:8px}
+.tl-tables-row{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}
+@media(max-width:900px){.tl-kpi-grid,.tl-tables-row{grid-template-columns:1fr}}
+.tl-bucket-row{display:grid;grid-template-columns:90px 1fr 200px;gap:12px;align-items:center;padding:6px 0}
+.tl-bucket-lbl{font-size:12px;font-weight:700;color:#0d2145}
+.tl-bucket-bar-wrap{height:22px;background:#f4f6fa;border-radius:6px;overflow:hidden}
+.tl-bucket-bar{height:100%;border-radius:6px;transition:width .4s}
+.tl-bucket-val{font-size:11px;color:#6b7280;text-align:right;font-variant-numeric:tabular-nums}
+.tl-alert{background:#fff5f5;border:1px solid #fed7d7;border-radius:12px;padding:18px;margin-bottom:18px}
+.tl-alert-ttl{color:#a3260a;font-weight:800;margin-bottom:10px;font-size:13px;padding-bottom:8px;border-bottom:1px solid #fed7d7}
+.tl-section table{width:100%;border-collapse:collapse;font-size:12px}
+.tl-section th{background:#0d2145;color:#fff;padding:8px 10px;text-align:left;font-size:10px;letter-spacing:.3px;text-transform:uppercase}
+.tl-section th:not(:first-child){text-align:center}
+.tl-section td{padding:7px 10px;border-bottom:1px solid #eef2ff}
+.tl-section td:not(:first-child){text-align:center;font-weight:600}
+.tl-section .rg{color:#0d6e3a;font-weight:700}
+.tl-section .ro{color:#a35a00;font-weight:700}
+.tl-section .rr{color:#a3260a;font-weight:700}
+"""
+
+
+def render_today_inner(agg, date_str, ts_label, sheet_url, heading=None):
+    """Render the today-live body sections only (no <html>/<head>/<body> chrome).
+    `heading`: optional label text for an in-line section header. Pass None to
+    omit (used when the host dashboard already provides its own page title)."""
+    # Audience rows
+    def audience_rows(items, total):
         out = []
         for it in items:
             share = (it['spend'] / total * 100) if total else 0
-            cls = roas_class(it['roas'])
+            cls = _roas_class(it['roas'])
             out.append(
                 f"<tr><td>{it['seg']}</td><td>{it['count']}</td>"
                 f"<td>₹{it['budget']:,}</td><td>₹{it['spend']:,}</td>"
@@ -522,29 +572,26 @@ def render_html(camps, ads, date_str, ts_label):
             )
         return ''.join(out)
 
-    prospecting_rows = audience_table_rows(prospecting, sum(it['spend'] for it in prospecting))
-    retarget_rows    = audience_table_rows(retarget,    sum(it['spend'] for it in retarget))
+    prospecting_rows = audience_rows(agg['prospecting'], sum(it['spend'] for it in agg['prospecting']))
+    retarget_rows    = audience_rows(agg['retarget'],    sum(it['spend'] for it in agg['retarget']))
 
-    # Best creatives rows
     cr_rows = ''
-    for i, a in enumerate(top_creatives, 1):
-        cls = roas_class(a['roas'])
+    for i, a in enumerate(agg['top_creatives'], 1):
+        cls = _roas_class(a['roas'])
         cr_rows += (f"<tr><td><b>{i}</b></td><td style='font-size:11px'>{a['name'][:80]}</td>"
                     f"<td>{a['creative_type']}</td><td style='font-size:11px'>{a['account']}</td>"
                     f"<td>₹{int(a['spend']):,}</td><td class='{cls}'>{a['roas']:.2f}x</td></tr>")
 
-    # Creative mix rows
     cm_rows = ''
-    for it in creative_mix:
-        cls = roas_class(it['roas'])
+    for it in agg['creative_mix']:
+        cls = _roas_class(it['roas'])
         cm_rows += (f"<tr><td>{it['type']}</td><td>{it['count']}</td>"
                     f"<td>₹{it['spend']:,}</td><td>{it['share']:.1f}%</td>"
                     f"<td class='{cls}'>{it['roas']:.2f}x</td></tr>")
 
-    # Decision triggered rows
     tr_rows = ''
-    if triggered:
-        for c in triggered[:50]:
+    if agg['triggered']:
+        for c in agg['triggered'][:50]:
             zero_flag = '💀 ZERO' if c['roas'] == 0 else f"{c['roas']:.2f}x"
             tr_rows += (f"<tr><td style='font-size:11px'>{c['name'][:90]}</td>"
                         f"<td>{c['account']}</td><td>{c['type']}</td>"
@@ -554,26 +601,118 @@ def render_html(camps, ads, date_str, ts_label):
     else:
         tr_rows = "<tr><td colspan='7' style='text-align:center;color:#0d6e3a;padding:20px'>✅ No camps currently triggering the close decision rule.</td></tr>"
 
-    # Bucket bars (success rate visual)
-    max_b = max(b[1] for b in bucket_data) or 1
+    max_b = max(b[1] for b in agg['bucket_data']) or 1
     bucket_html = ''
-    for label, val, color in bucket_data:
-        share = (val / total_spend * 100) if total_spend else 0
+    for label, val, color in agg['bucket_data']:
+        share = (val / agg['total_spend'] * 100) if agg['total_spend'] else 0
         bar_w = (val / max_b) * 100
         bucket_html += (
-            f"<div class='bucket-row'>"
-            f"<div class='bucket-lbl'>{label}</div>"
-            f"<div class='bucket-bar-wrap'>"
-            f"<div class='bucket-bar' style='width:{bar_w:.1f}%;background:{color}'></div>"
+            f"<div class='tl-bucket-row'>"
+            f"<div class='tl-bucket-lbl'>{label}</div>"
+            f"<div class='tl-bucket-bar-wrap'>"
+            f"<div class='tl-bucket-bar' style='width:{bar_w:.1f}%;background:{color}'></div>"
             f"</div>"
-            f"<div class='bucket-val'>₹{int(val):,} ({share:.1f}%)</div>"
+            f"<div class='tl-bucket-val'>₹{int(val):,} ({share:.1f}%)</div>"
             f"</div>"
         )
 
-    sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
+    heading_html = ''
+    if heading:
+        heading_html = f'<h2 style="font-size:18px;color:#0d2145;margin-bottom:14px">{heading}</h2>'
 
-    # ── HTML template ──────────────────────────────────────────────────────
-    html = f"""<!DOCTYPE html>
+    triggered_count = len(agg['triggered'])
+    triggered_label = 'camp' if triggered_count == 1 else 'camps'
+
+    return f"""
+<div class="tl-section">
+  {heading_html}
+
+  <div class="tl-kpi-grid">
+    <div class="tl-kpi spend">
+      <div class="tl-kpi-icon">💰</div><div class="tl-kpi-lbl">Total Spend Today</div>
+      <div class="tl-kpi-val">₹{int(agg['total_spend']):,}</div>
+      <div class="tl-kpi-sub">of ₹{int(agg['total_budget']):,} budgeted</div>
+    </div>
+    <div class="tl-kpi camps">
+      <div class="tl-kpi-icon">📦</div><div class="tl-kpi-lbl">Active Camps</div>
+      <div class="tl-kpi-val">{agg['total_camps']}</div>
+      <div class="tl-kpi-sub">with spend &gt; 0</div>
+    </div>
+    <div class="tl-kpi good">
+      <div class="tl-kpi-icon">🟢</div><div class="tl-kpi-lbl">Spend ≥ 1.5x ROAS</div>
+      <div class="tl-kpi-val">{agg['pct_above_1_5']:.1f}%</div>
+      <div class="tl-kpi-sub">₹{int(agg['spend_above_1_5']):,} / day</div>
+    </div>
+    <div class="tl-kpi bad">
+      <div class="tl-kpi-icon">🔴</div><div class="tl-kpi-lbl">Spend &lt; 1.0x ROAS</div>
+      <div class="tl-kpi-val">{agg['pct_below_1']:.1f}%</div>
+      <div class="tl-kpi-sub">₹{int(agg['spend_below_1']):,} on close watch</div>
+    </div>
+  </div>
+
+  <div class="tl-card">
+    <div class="tl-sec-ttl">🎯 Daily Success Rate <span class="meta">— spend distribution by ROAS bucket (avg ROAS today: <b>{agg['avg_roas']:.2f}x</b>)</span></div>
+    {bucket_html}
+  </div>
+
+  <div class="tl-alert">
+    <div class="tl-alert-ttl">💀 DECISION TRIGGERED — ≥30% budget spent + ROAS ≤ 1x ({triggered_count} {triggered_label})</div>
+    <table>
+      <thead><tr>
+        <th>Campaign</th><th>Account</th><th>Type</th>
+        <th>Budget</th><th>Spent</th><th>% Spent</th><th>ROAS</th>
+      </tr></thead>
+      <tbody>{tr_rows}</tbody>
+    </table>
+  </div>
+
+  <div class="tl-tables-row">
+    <div class="tl-card">
+      <div class="tl-sec-ttl">🎯 Prospecting <span class="meta">— audiences by spend</span></div>
+      <table>
+        <thead><tr><th>Audience</th><th># Camps</th><th>Budget</th><th>Spent</th><th>% Block</th><th>ROAS</th></tr></thead>
+        <tbody>{prospecting_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No prospecting camps active</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="tl-card">
+      <div class="tl-sec-ttl">🔁 Retarget <span class="meta">— audiences by spend</span></div>
+      <table>
+        <thead><tr><th>Audience</th><th># Camps</th><th>Budget</th><th>Spent</th><th>% Block</th><th>ROAS</th></tr></thead>
+        <tbody>{retarget_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No retarget camps active</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="tl-tables-row">
+    <div class="tl-card">
+      <div class="tl-sec-ttl">🎨 Best Creatives Today <span class="meta">— top 10 ads by ROAS (min ₹500 spend)</span></div>
+      <table>
+        <thead><tr><th>#</th><th>Ad Name</th><th>Type</th><th>Account</th><th>Spent</th><th>ROAS</th></tr></thead>
+        <tbody>{cr_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No qualifying ads yet</td></tr>'}</tbody>
+      </table>
+    </div>
+    <div class="tl-card">
+      <div class="tl-sec-ttl">📐 Creative Type Mix <span class="meta">— % of running spend</span></div>
+      <table>
+        <thead><tr><th>Type</th><th># Ads</th><th>Spent</th><th>% Share</th><th>Avg ROAS</th></tr></thead>
+        <tbody>{cm_rows or '<tr><td colspan="5" style="text-align:center;color:#888;padding:20px">No data</td></tr>'}</tbody>
+      </table>
+    </div>
+  </div>
+</div>
+"""
+
+
+def render_html(camps, ads, date_str, ts_label):
+    """Build a single-page HTML dashboard mirroring the NTN dashboard's style.
+    Output goes to out/today_live.html (always-current) AND out/today_live_<date>.html.
+    """
+    agg = compute_today_aggregates(camps, ads)
+    sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
+    inner = render_today_inner(agg, date_str, ts_label, sheet_url)
+    styles = render_today_styles()
+
+    return f"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -588,47 +727,9 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:#f0f4fb;color:#1a1a
 .last-upd{{color:rgba(255,255,255,.6);font-size:11px;text-align:right}}
 .last-upd a{{color:rgba(255,255,255,.85);text-decoration:none;border-bottom:1px dashed rgba(255,255,255,.4)}}
 .main{{max-width:1400px;margin:0 auto;padding:24px 28px}}
-
-.kpi-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:24px}}
-.kpi{{background:#fff;border-radius:12px;padding:20px;border:1px solid #dde3f0;box-shadow:0 2px 10px rgba(0,0,0,.04);position:relative;overflow:hidden;transition:transform .15s}}
-.kpi:hover{{transform:translateY(-2px)}}
-.kpi::before{{content:'';position:absolute;top:0;left:0;width:4px;height:100%}}
-.kpi.spend::before{{background:#f5c518}}
-.kpi.camps::before{{background:#1a3d7c}}
-.kpi.good::before{{background:#00a878}}
-.kpi.bad::before{{background:#dc3545}}
-.kpi-icon{{font-size:24px;margin-bottom:8px}}
-.kpi-lbl{{font-size:10px;color:#6b7280;text-transform:uppercase;letter-spacing:.8px;font-weight:700}}
-.kpi-val{{font-size:26px;font-weight:900;color:#0d2145;margin:5px 0 3px}}
-.kpi-sub{{font-size:11px;color:#6b7280}}
-
-.card{{background:#fff;border-radius:12px;padding:20px;border:1px solid #dde3f0;box-shadow:0 2px 10px rgba(0,0,0,.04);margin-bottom:18px}}
-.sec-ttl{{font-size:13px;font-weight:700;color:#0d2145;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #eef2ff}}
-.sec-ttl .meta{{color:#6b7280;font-weight:400;font-size:11px;margin-left:8px}}
-
-.tables-row{{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px}}
-@media(max-width:900px){{.kpi-grid,.tables-row{{grid-template-columns:1fr}}}}
-
-table{{width:100%;border-collapse:collapse;font-size:12px}}
-th{{background:#0d2145;color:#fff;padding:8px 10px;text-align:left;font-size:10px;letter-spacing:.3px;text-transform:uppercase}}
-th:not(:first-child){{text-align:center}}
-td{{padding:7px 10px;border-bottom:1px solid #eef2ff}}
-td:not(:first-child){{text-align:center;font-weight:600}}
-.rg{{color:#0d6e3a;font-weight:700}}
-.ro{{color:#a35a00;font-weight:700}}
-.rr{{color:#a3260a;font-weight:700}}
-
-.bucket-row{{display:grid;grid-template-columns:90px 1fr 200px;gap:12px;align-items:center;padding:6px 0}}
-.bucket-lbl{{font-size:12px;font-weight:700;color:#0d2145}}
-.bucket-bar-wrap{{height:22px;background:#f4f6fa;border-radius:6px;overflow:hidden}}
-.bucket-bar{{height:100%;border-radius:6px;transition:width .4s}}
-.bucket-val{{font-size:11px;color:#6b7280;text-align:right;font-variant-numeric:tabular-nums}}
-
-.alert{{background:#fff5f5;border:1px solid #fed7d7;border-radius:12px;padding:18px;margin-bottom:18px}}
-.alert-ttl{{color:#a3260a;font-weight:800;margin-bottom:10px;font-size:13px;padding-bottom:8px;border-bottom:1px solid #fed7d7}}
-
 footer{{text-align:center;color:#6b7280;font-size:11px;padding:20px}}
 footer a{{color:#1a3d7c;text-decoration:none;border-bottom:1px dashed #1a3d7c}}
+{styles}
 </style>
 </head>
 <body>
@@ -644,87 +745,7 @@ footer a{{color:#1a3d7c;text-decoration:none;border-bottom:1px dashed #1a3d7c}}
   </div>
 </div>
 
-<div class="main">
-
-  <!-- KPI cards -->
-  <div class="kpi-grid">
-    <div class="kpi spend">
-      <div class="kpi-icon">💰</div><div class="kpi-lbl">Total Spend Today</div>
-      <div class="kpi-val">₹{int(total_spend):,}</div>
-      <div class="kpi-sub">of ₹{int(total_budget):,} budgeted</div>
-    </div>
-    <div class="kpi camps">
-      <div class="kpi-icon">📦</div><div class="kpi-lbl">Active Camps</div>
-      <div class="kpi-val">{total_camps}</div>
-      <div class="kpi-sub">with spend &gt; 0</div>
-    </div>
-    <div class="kpi good">
-      <div class="kpi-icon">🟢</div><div class="kpi-lbl">Spend ≥ 1.5x ROAS</div>
-      <div class="kpi-val">{pct_above_1_5:.1f}%</div>
-      <div class="kpi-sub">₹{int(spend_above_1_5):,} / day</div>
-    </div>
-    <div class="kpi bad">
-      <div class="kpi-icon">🔴</div><div class="kpi-lbl">Spend &lt; 1.0x ROAS</div>
-      <div class="kpi-val">{pct_below_1:.1f}%</div>
-      <div class="kpi-sub">₹{int(spend_below_1):,} on close watch</div>
-    </div>
-  </div>
-
-  <!-- Success rate -->
-  <div class="card">
-    <div class="sec-ttl">🎯 Daily Success Rate <span class="meta">— spend distribution by ROAS bucket (avg ROAS today: <b>{avg_roas:.2f}x</b>)</span></div>
-    {bucket_html}
-  </div>
-
-  <!-- Decision triggered alert -->
-  <div class="alert">
-    <div class="alert-ttl">💀 DECISION TRIGGERED — ≥30% budget spent + ROAS ≤ 1x ({len(triggered)} camp{'s' if len(triggered)!=1 else ''})</div>
-    <table>
-      <thead><tr>
-        <th>Campaign</th><th>Account</th><th>Type</th>
-        <th>Budget</th><th>Spent</th><th>% Spent</th><th>ROAS</th>
-      </tr></thead>
-      <tbody>{tr_rows}</tbody>
-    </table>
-  </div>
-
-  <!-- By Type × Audience -->
-  <div class="tables-row">
-    <div class="card">
-      <div class="sec-ttl">🎯 Prospecting <span class="meta">— audiences by spend</span></div>
-      <table>
-        <thead><tr><th>Audience</th><th># Camps</th><th>Budget</th><th>Spent</th><th>% Block</th><th>ROAS</th></tr></thead>
-        <tbody>{prospecting_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No prospecting camps active</td></tr>'}</tbody>
-      </table>
-    </div>
-    <div class="card">
-      <div class="sec-ttl">🔁 Retarget <span class="meta">— audiences by spend</span></div>
-      <table>
-        <thead><tr><th>Audience</th><th># Camps</th><th>Budget</th><th>Spent</th><th>% Block</th><th>ROAS</th></tr></thead>
-        <tbody>{retarget_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No retarget camps active</td></tr>'}</tbody>
-      </table>
-    </div>
-  </div>
-
-  <!-- Best creatives + creative type mix -->
-  <div class="tables-row">
-    <div class="card">
-      <div class="sec-ttl">🎨 Best Creatives Today <span class="meta">— top 10 ads by ROAS (min ₹500 spend)</span></div>
-      <table>
-        <thead><tr><th>#</th><th>Ad Name</th><th>Type</th><th>Account</th><th>Spent</th><th>ROAS</th></tr></thead>
-        <tbody>{cr_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No qualifying ads yet</td></tr>'}</tbody>
-      </table>
-    </div>
-    <div class="card">
-      <div class="sec-ttl">📐 Creative Type Mix <span class="meta">— % of running spend</span></div>
-      <table>
-        <thead><tr><th>Type</th><th># Ads</th><th>Spent</th><th>% Share</th><th>Avg ROAS</th></tr></thead>
-        <tbody>{cm_rows or '<tr><td colspan="5" style="text-align:center;color:#888;padding:20px">No data</td></tr>'}</tbody>
-      </table>
-    </div>
-  </div>
-
-</div>
+<div class="main">{inner}</div>
 
 <footer>
   🤖 Auto-rebuilds every 2 hrs IST business hours · <a href="{sheet_url}" target="_blank">Sheet source</a> · {ts_label}
@@ -733,7 +754,7 @@ footer a{{color:#1a3d7c;text-decoration:none;border-bottom:1px dashed #1a3d7c}}
 </body>
 </html>
 """
-    return html
+
 
 
 # ── Main ──────────────────────────────────────────────────────────────────────
