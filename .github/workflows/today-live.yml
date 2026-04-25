@@ -1,0 +1,59 @@
+name: Today's Live Report (every 2 hrs IST business hours)
+
+on:
+  schedule:
+    # IST business hours, every 2 hours starting 09:30 IST = 04:00 UTC.
+    # 09:30 IST = 04:00 UTC
+    # 11:30 IST = 06:00 UTC
+    # 13:30 IST = 08:00 UTC
+    # 15:30 IST = 10:00 UTC
+    # 17:30 IST = 12:00 UTC
+    # 19:30 IST = 14:00 UTC
+    - cron: "0 4,6,8,10,12,14 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: today-live
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TZ: Asia/Kolkata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load ad account IDs + sheet IDs
+        run: |
+          grep -E '^[A-Z][A-Z0-9_]*=' config/accounts.env >> "$GITHUB_ENV"
+          grep -E '^[A-Z][A-Z0-9_]*=' config/sheets.env   >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
+      - name: Run today_live_report
+        run: python3 scripts/today_live_report.py

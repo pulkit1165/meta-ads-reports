@@ -294,6 +294,57 @@ def fmt_roas(r):
     if r == 0: return '0x ⚫'
     return f"{r}x"
 
+def build_zero_priority_section(camps, update_str):
+    """
+    Section 0: Decision-trigger camps. Surfaces the highest-priority closes —
+    camps that have already burned ≥30% of their daily budget AND have today's
+    ROAS at zero (no purchases) or ≤ 1.0. These are the ones to act on first.
+    Returns [] (no section) if nothing matches.
+    """
+    triggered = []
+    for c in camps:
+        bud, spent, roas = c['budget'], c['spend'], c['roas']
+        if bud <= 0:
+            continue
+        pct_spent = spent / bud * 100
+        if pct_spent >= 30 and (c['is_zero_roas'] or roas <= 1.0):
+            triggered.append((pct_spent, c))
+    if not triggered:
+        return []
+    triggered.sort(key=lambda t: (not t[1]['is_zero_roas'], -t[0]))  # zero first, then by % spent desc
+
+    total_bud   = sum(c['budget'] for _, c in triggered)
+    total_spend = sum(c['spend']  for _, c in triggered)
+    zero_n      = sum(1 for _, c in triggered if c['is_zero_roas'])
+
+    rows = []
+    rows.append([f'💀  DECISION TRIGGERED — ≥30% spent + ROAS ≤ 1x  |  {update_str}  |  {len(triggered)} camps  |  Budget: ₹{total_bud:,.0f}  |  Spent: ₹{total_spend:,.0f}  |  Zero ROAS: {zero_n}',
+                 '', '', '', '', '', '', '', '', '', ''])
+    rows.append(['Bucket', 'Campaign Name', 'Type', 'Budget (₹)', 'Spent (₹)', '% Spent',
+                 'Today ROAS', 'Yday ROAS', '7D ROAS', '⚠️ Flag', 'Started'])
+    for pct_spent, c in triggered:
+        flag = '💀 ZERO' if c['is_zero_roas'] else f'< 1.0x'
+        if c['above_yday']:
+            flag += f"  |  ✅ Was {c['roas_yday']}x yday"
+        elif c['max_roas'] >= 1.5:
+            flag += f"  |  📈 Max {c['max_roas']}x"
+        rows.append([
+            c['bucket_label'],
+            c['name'],
+            c['camp_type'],
+            int(c['budget']),
+            int(c['spend']),
+            f"{int(pct_spent)}%",
+            fmt_roas(c['roas']),
+            fmt_roas(c['roas_yday']) if c['roas_yday'] is not None else '—',
+            fmt_roas(c['roas_7d'])   if c['roas_7d']   is not None else '—',
+            flag,
+            c['start'],
+        ])
+    rows.append([''])
+    return rows
+
+
 def build_critical_section(camps, update_str):
     """Section 1: All camps under 1x ROAS, bucketed."""
     critical = [c for c in camps if c['roas'] < 1.0]
@@ -638,6 +689,7 @@ def write_to_sheet(all_rows, tab_name, is_first_run=False):
 
     # Scan rows for section headers and apply colors
     SECTION_KEYWORDS = {
+        '💀': (rgb(80, 0, 0),     rgb(255, 220, 220)),  # darkest red — decision-triggered
         '🚨': (rgb(139, 0, 0),    rgb(255, 255, 255)),
         '⚠️': (rgb(180, 90, 0),   rgb(255, 255, 255)),
         '📊': (rgb(30, 60, 120),  rgb(255, 255, 255)),
@@ -696,9 +748,33 @@ def write_to_sheet(all_rows, tab_name, is_first_run=False):
                         textFormat={'bold': True, 'foregroundColor': rgb(255, 255, 255)},
                         horizontalAlignment='CENTER')
                     break
-            # Alternate zebra for data rows
-            row_bg = rgb(248, 248, 255) if i % 2 == 0 else rgb(255, 255, 255)
-            fmt(i, 2, i, max_cols, backgroundColor=row_bg)
+
+            # ─── Decision-rule highlight ─────────────────────────────────────
+            # If the row has spent ≥ 30% of its budget AND today's ROAS ≤ 1.0,
+            # paint the rest of the row red so the close decision pops visually.
+            # Column F (idx 5) = '% Spent' (str like '35%' or '—')
+            # Column G (idx 6) = 'Today ROAS' (str like '0.42' or '—')
+            try:
+                pct_str  = str(row[5]) if len(row) > 5 else ''
+                roas_str = str(row[6]) if len(row) > 6 else ''
+                pct_v  = int(pct_str.rstrip('%')) if pct_str.rstrip('%').isdigit() else None
+                roas_v = float(roas_str) if roas_str.replace('.','',1).replace('-','',1).isdigit() else (0.0 if roas_str in ('', '—', '-', '0') else None)
+                trigger_close = (pct_v is not None and pct_v >= 30) and (roas_v is not None and roas_v <= 1.0)
+            except (ValueError, IndexError):
+                trigger_close = False
+
+            if trigger_close:
+                # Light red row body (col 2 onward) + bold bright-red ROAS cell
+                fmt(i, 2, i, max_cols,
+                    backgroundColor=rgb(255, 220, 220),
+                    textFormat={'bold': True})
+                fmt(i, 7, i, 7,
+                    backgroundColor=rgb(220, 53, 69),
+                    textFormat={'bold': True, 'foregroundColor': rgb(255, 255, 255)})
+            else:
+                # Alternate zebra for non-trigger data rows
+                row_bg = rgb(248, 248, 255) if i % 2 == 0 else rgb(255, 255, 255)
+                fmt(i, 2, i, max_cols, backgroundColor=row_bg)
 
     # Apply all formatting in one batch
     if fmt_reqs:
@@ -763,6 +839,7 @@ def main():
     if not is_first_run and has_prev:
         all_rows += build_closed_section(camps, prev_snapshot, morning_snapshot, update_str)
 
+    all_rows += build_zero_priority_section(camps, update_str)
     all_rows += build_critical_section(camps, update_str)
     all_rows += build_warning_section(camps, update_str)
     all_rows += build_budget_type_section(camps, update_str)
