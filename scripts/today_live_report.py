@@ -157,7 +157,9 @@ def fetch_today_campaigns(date_str):
 
 
 def fetch_today_ads(date_str):
-    """Ad-level today insights for the creative section."""
+    """Ad-level today insights for the creative section. Includes ONLY ads
+    that had spend > 0 on date_str (today). Use fetch_active_ads() for the
+    universe of currently-active ads regardless of spend."""
     out = []
     for acct, acct_name in ACCOUNTS:
         if not acct:
@@ -178,6 +180,34 @@ def fetch_today_ads(date_str):
                 'campaign':      r.get('campaign_name', ''),
                 'spend':         safe_float(r.get('spend')),
                 'roas':          extract_roas(r.get('purchase_roas')),
+                'creative_type': derive_creative_type(name),
+            })
+    return out
+
+
+def fetch_active_ads():
+    """Currently-active ads in the SM portal (effective_status=ACTIVE — matches
+    what the user sees in Meta Ads Manager). Used for accurate # Active Ads
+    counts in the Creative Type Mix section.
+
+    Note: an ad that was paused mid-day after spending will appear in
+    fetch_today_ads() (it had spend) but NOT in fetch_active_ads(). That's
+    why the two counts can diverge in either direction."""
+    out = []
+    for acct, acct_name in ACCOUNTS:
+        if not acct:
+            continue
+        rows = paginate(f"{GRAPH}/{acct}/ads", {
+            'fields': 'id,name,effective_status,status',
+            'effective_status': '["ACTIVE"]',
+            'limit': 500,
+        })
+        for r in rows:
+            name = r.get('name', '')
+            out.append({
+                'aid':           r.get('id'),
+                'account':       acct_name,
+                'name':          name,
                 'creative_type': derive_creative_type(name),
             })
     return out
@@ -291,7 +321,9 @@ def section_success_rate(camps, ts_label):
     return rows
 
 
-def section_best_creatives(ads, ts_label, top_n=10, min_spend=500):
+def section_best_creatives(ads, ts_label, top_n=10, min_spend=500, active_ads=None):
+    """`ads` = ads with spend>0 today. `active_ads` = currently-active ads
+    (effective_status=ACTIVE, regardless of spend)."""
     rows = []
     rows.append([f"🎨  BEST CREATIVES TODAY  |  Ad-level  |  Top {top_n} by ROAS (min ₹{min_spend} spend)  |  {ts_label}",
                  '', '', '', '', ''])
@@ -317,33 +349,38 @@ def section_best_creatives(ads, ts_label, top_n=10, min_spend=500):
         ])
     rows.append([''])
 
-    # Creative type % split
-    rows.append([f"📐  CREATIVE TYPE MIX  |  All running ads (any spend)",
+    # Creative type mix — Active count (Meta UI) vs Had-Spend count (today insights)
+    rows.append([f"📐  CREATIVE TYPE MIX  |  Active = currently active in Meta · Had Spend = spent > 0 today",
                  '', '', '', '', ''])
-    rows.append(['Creative Type', '# Ads', 'Spend (₹)', '% of Spend', 'Avg ROAS', ''])
+    rows.append(['Creative Type', '# Active', '# Had Spend', 'Spend (₹)', '% of Spend', 'Avg ROAS'])
 
-    type_agg = defaultdict(lambda: {'count': 0, 'spend': 0.0, 'rev': 0.0})
+    spent_agg = defaultdict(lambda: {'spent_count': 0, 'spend': 0.0, 'rev': 0.0})
     for a in ads:
-        ta = type_agg[a['creative_type']]
-        ta['count'] += 1
-        ta['spend'] += a['spend']
-        ta['rev']   += a['spend'] * a['roas']
+        t = spent_agg[a['creative_type']]
+        t['spent_count'] += 1
+        t['spend'] += a['spend']
+        t['rev']   += a['spend'] * a['roas']
+    active_agg = defaultdict(int)
+    if active_ads is not None:
+        for a in active_ads:
+            active_agg[a['creative_type']] += 1
 
-    total = sum(t['spend'] for t in type_agg.values())
+    total = sum(t['spend'] for t in spent_agg.values())
     order = ['Paras', 'Partnership', 'Motion', 'Static', 'Catalogue', 'Testing', 'Others']
     for ct in order:
-        if ct not in type_agg:
+        if ct not in spent_agg and ct not in active_agg:
             continue
-        t = type_agg[ct]
-        roas = (t['rev'] / t['spend']) if t['spend'] else 0.0
-        share = (t['spend'] / total * 100) if total else 0.0
+        s = spent_agg.get(ct, {'spent_count': 0, 'spend': 0.0, 'rev': 0.0})
+        active_count = active_agg.get(ct, 0)
+        roas  = (s['rev'] / s['spend']) if s['spend'] else 0.0
+        share = (s['spend'] / total * 100) if total else 0.0
         rows.append([
             ct,
-            t['count'],
-            int(t['spend']),
+            active_count,
+            s['spent_count'],
+            int(s['spend']),
             fmt_pct(share),
             fmt_roas(roas),
-            '',
         ])
     rows.append([''])
     return rows
@@ -431,7 +468,7 @@ def _roas_class(r):
     return 'rr'
 
 
-def compute_today_aggregates(camps, ads):
+def compute_today_aggregates(camps, ads, active_ads=None):
     """Pure data: turn raw camps + ads into a structured dict ready to render.
     Reused by render_html() (standalone HTML) and by auto_rebuild_dashboard.py
     (which embeds today's sections inside the NTN dashboard)."""
@@ -489,20 +526,40 @@ def compute_today_aggregates(camps, ads):
     eligible_ads.sort(key=lambda x: -x['roas'])
     top_creatives = eligible_ads[:10]
 
-    type_agg = defaultdict(lambda: {'count': 0, 'spend': 0.0, 'rev': 0.0})
+    # Spend / ROAS / spent-today count comes from `ads` (had spend > 0 today).
+    # Active count comes from `active_ads` (effective_status=ACTIVE in Meta UI
+    # right now). The two universes overlap but aren't identical: an ad paused
+    # mid-day after spending is in `ads` but not `active_ads`; a brand-new
+    # active ad with no spend yet is the reverse.
+    spent_agg = defaultdict(lambda: {'spent_count': 0, 'spend': 0.0, 'rev': 0.0})
     for a in ads:
-        t = type_agg[a['creative_type']]
-        t['count'] += 1; t['spend'] += a['spend']; t['rev'] += a['spend'] * a['roas']
-    total_ad_spend = sum(t['spend'] for t in type_agg.values())
+        t = spent_agg[a['creative_type']]
+        t['spent_count'] += 1
+        t['spend'] += a['spend']
+        t['rev']   += a['spend'] * a['roas']
+
+    active_agg = defaultdict(lambda: {'active_count': 0})
+    if active_ads is not None:
+        for a in active_ads:
+            active_agg[a['creative_type']]['active_count'] += 1
+
+    total_ad_spend = sum(t['spend'] for t in spent_agg.values())
     creative_mix = []
     for ct in ['Paras', 'Partnership', 'Motion', 'Static', 'Catalogue', 'Testing', 'Others']:
-        if ct not in type_agg:
+        if ct not in spent_agg and ct not in active_agg:
             continue
-        t = type_agg[ct]
-        roas = (t['rev'] / t['spend']) if t['spend'] else 0.0
-        share = (t['spend'] / total_ad_spend * 100) if total_ad_spend else 0.0
-        creative_mix.append({'type': ct, 'count': t['count'], 'spend': int(t['spend']),
-                             'share': share, 'roas': roas})
+        s = spent_agg.get(ct, {'spent_count': 0, 'spend': 0.0, 'rev': 0.0})
+        a = active_agg.get(ct, {'active_count': 0})
+        roas  = (s['rev'] / s['spend']) if s['spend'] else 0.0
+        share = (s['spend'] / total_ad_spend * 100) if total_ad_spend else 0.0
+        creative_mix.append({
+            'type':         ct,
+            'active_count': a['active_count'],
+            'spent_count':  s['spent_count'],
+            'spend':        int(s['spend']),
+            'share':        share,
+            'roas':         roas,
+        })
 
     return {
         'total_spend': total_spend, 'total_budget': total_budget, 'total_camps': total_camps,
@@ -585,9 +642,14 @@ def render_today_inner(agg, date_str, ts_label, sheet_url, heading=None):
     cm_rows = ''
     for it in agg['creative_mix']:
         cls = _roas_class(it['roas'])
-        cm_rows += (f"<tr><td>{it['type']}</td><td>{it['count']}</td>"
-                    f"<td>₹{it['spend']:,}</td><td>{it['share']:.1f}%</td>"
-                    f"<td class='{cls}'>{it['roas']:.2f}x</td></tr>")
+        cm_rows += (
+            f"<tr><td>{it['type']}</td>"
+            f"<td>{it['active_count']}</td>"
+            f"<td>{it['spent_count']}</td>"
+            f"<td>₹{it['spend']:,}</td>"
+            f"<td>{it['share']:.1f}%</td>"
+            f"<td class='{cls}'>{it['roas']:.2f}x</td></tr>"
+        )
 
     tr_rows = ''
     if agg['triggered']:
@@ -692,10 +754,10 @@ def render_today_inner(agg, date_str, ts_label, sheet_url, heading=None):
       </table>
     </div>
     <div class="tl-card">
-      <div class="tl-sec-ttl">📐 Creative Type Mix <span class="meta">— % of running spend</span></div>
+      <div class="tl-sec-ttl">📐 Creative Type Mix <span class="meta">— Active = currently active in Meta · Had-spend = spent &gt; 0 today (any status)</span></div>
       <table>
-        <thead><tr><th>Type</th><th># Ads</th><th>Spent</th><th>% Share</th><th>Avg ROAS</th></tr></thead>
-        <tbody>{cm_rows or '<tr><td colspan="5" style="text-align:center;color:#888;padding:20px">No data</td></tr>'}</tbody>
+        <thead><tr><th>Type</th><th># Active</th><th># Had Spend</th><th>Spent (₹)</th><th>% of Spend</th><th>Avg ROAS</th></tr></thead>
+        <tbody>{cm_rows or '<tr><td colspan="6" style="text-align:center;color:#888;padding:20px">No data</td></tr>'}</tbody>
       </table>
     </div>
   </div>
@@ -703,11 +765,13 @@ def render_today_inner(agg, date_str, ts_label, sheet_url, heading=None):
 """
 
 
-def render_html(camps, ads, date_str, ts_label):
+def render_html(camps, ads, date_str, ts_label, active_ads=None):
     """Build a single-page HTML dashboard mirroring the NTN dashboard's style.
     Output goes to out/today_live.html (always-current) AND out/today_live_<date>.html.
+    `active_ads` is optional; when passed, the Creative Type Mix section shows
+    real active counts alongside spent-today counts.
     """
-    agg = compute_today_aggregates(camps, ads)
+    agg = compute_today_aggregates(camps, ads, active_ads=active_ads)
     sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
     inner = render_today_inner(agg, date_str, ts_label, sheet_url)
     styles = render_today_styles()
@@ -777,20 +841,24 @@ def main():
     camps = fetch_today_campaigns(args.date)
     print(f"   {len(camps)} SM camps with spend today")
 
-    print("→ Fetching ad-level today data…")
+    print("→ Fetching ad-level today data (had spend > 0)…")
     ads = fetch_today_ads(args.date)
     print(f"   {len(ads)} SM ads with spend today")
+
+    print("→ Fetching currently-active SM ads (matches Meta UI count)…")
+    active_ads = fetch_active_ads()
+    print(f"   {len(active_ads)} SM ads currently active")
 
     rows = []
     rows += section_audience_breakdown(camps, ts_label)
     rows += section_success_rate(camps, ts_label)
-    rows += section_best_creatives(ads, ts_label)
+    rows += section_best_creatives(ads, ts_label, active_ads=active_ads)
 
     write(rows, args.date, ts_label)
 
     # Also produce an HTML dashboard alongside the sheet update.
     print("→ Rendering HTML dashboard…")
-    html = render_html(camps, ads, args.date, ts_label)
+    html = render_html(camps, ads, args.date, ts_label, active_ads=active_ads)
     out_now    = OUT_DIR / 'today_live.html'                     # always-current (overwritten)
     out_dated  = OUT_DIR / f'today_live_{args.date}.html'        # date-stamped history
     out_now.write_text(html, encoding='utf-8')

@@ -10,7 +10,7 @@ import gspread
 # ── Reuse today-live helpers (data + HTML body sections) ────────────────
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from today_live_report import (
-    fetch_today_campaigns, fetch_today_ads,
+    fetch_today_campaigns, fetch_today_ads, fetch_active_ads,
     compute_today_aggregates, render_today_inner, render_today_styles,
 )
 
@@ -433,10 +433,11 @@ if os.getenv('META_ACCESS_TOKEN'):
         TODAY_DATE_LABEL  = _now.strftime('%A, %d %B %Y')
         TODAY_TS_LABEL    = _now.strftime('%d %b %Y, %H:%M IST')
         print(f"[today-live] fetching live data for {_today_str}…")
-        _camps = fetch_today_campaigns(_today_str)
-        _ads   = fetch_today_ads(_today_str)
-        print(f"[today-live] {len(_camps)} camps, {len(_ads)} ads — rendering inner section")
-        _agg = compute_today_aggregates(_camps, _ads)
+        _camps      = fetch_today_campaigns(_today_str)
+        _ads        = fetch_today_ads(_today_str)
+        _active_ads = fetch_active_ads()
+        print(f"[today-live] {len(_camps)} camps, {len(_ads)} ads w/ spend, {len(_active_ads)} ads currently active — rendering inner section")
+        _agg = compute_today_aggregates(_camps, _ads, active_ads=_active_ads)
         _gha_sid = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
         _sheet_url = f"https://docs.google.com/spreadsheets/d/{_gha_sid}"
         TODAY_INNER_HTML = render_today_inner(
