@@ -829,14 +829,25 @@ def main():
 
     # Save snapshots
     save_snapshot(date_str, camps, update_str)
-    if is_first_run:
-        save_morning_snapshot(date_str, camps, update_str)  # only saves once
+    # Morning snapshot — used by 'TOTAL CLOSED SINCE MORNING' section.
+    # We used to gate this on run_hour<11 IST, but GHA cron is best-effort and
+    # the 10 AM run frequently fires late or skips entirely. The function
+    # itself already has a 'save only if file does not exist' guard, so calling
+    # it on every run is safe — it just captures the earliest run of the day
+    # as the day's baseline. Reload the in-memory snapshot in case we just
+    # created it on this run.
+    save_morning_snapshot(date_str, camps, update_str)
+    morning_snapshot = load_morning_snapshot(date_str)
 
     # Build all sections
     all_rows = []
 
-    # Closed-camps section (only on non-first runs)
-    if not is_first_run and has_prev:
+    # Closed-camps section runs whenever we have anything to compare against:
+    #   - prev_snapshot (Part 1 — closed since last run)
+    #   - morning_snapshot beyond just the current run's own save (Part 2 — total closed since morning)
+    # On the very first run of the day there's nothing to report yet, so the
+    # section is empty and we skip it.
+    if has_prev or morning_snapshot:
         all_rows += build_closed_section(camps, prev_snapshot, morning_snapshot, update_str)
 
     all_rows += build_zero_priority_section(camps, update_str)

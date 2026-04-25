@@ -36,7 +36,10 @@ SCOPES   = ['https://www.googleapis.com/auth/spreadsheets']
 IST      = ZoneInfo('Asia/Kolkata')
 
 CLOSING_TAB_RE = re.compile(r'🔴\s+Closing\s+(\d{1,2})\s+(\w{3})\s+(\d{2,4})', re.IGNORECASE)
-TOTAL_HEADER_RE = re.compile(r'TOTAL CLOSED SINCE 10\s*AM', re.IGNORECASE)
+# Match any 'TOTAL CLOSED SINCE …' header — used to be hardcoded to "10 AM" but
+# the morning snapshot may be captured at a later time when the 10 AM cron is
+# delayed by GitHub Actions, so we accept any text after SINCE.
+TOTAL_HEADER_RE = re.compile(r'TOTAL CLOSED SINCE\b', re.IGNORECASE)
 
 
 def parse_money(s):
