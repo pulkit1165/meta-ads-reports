@@ -103,8 +103,46 @@ def load_kpi_daily():
 KPI_DAILY = load_kpi_daily()
 print(f"[{datetime.now().strftime('%H:%M:%S')}] KPI Daily loaded: {len(KPI_DAILY)} dates")
 
+# ── Section-header lookup ───────────────────────────────────────────────────
+# The original implementation hard-coded row indices like rows[252:269] for
+# 'sales_block', rows[128:135] for 'creative', etc. The source sheet has been
+# edited since those indices were chosen, so each one now points at the wrong
+# section. Header-based lookup is robust to row drift.
+def find_section(needle, start=0):
+    """Row index of the first row whose col-A starts with `needle` (case-insensitive)."""
+    n = needle.lower().strip()
+    for i in range(start, len(R)):
+        cell = (R[i][0] or '').strip().lower()
+        if cell.startswith(n):
+            return i
+    return -1
+
+def section_data_rows(header_row, max_rows=60):
+    """Yield row indices that contain data (non-blank col A) starting after the
+    header_row + 1 (skip likely sub-header) and stopping at the next blank row."""
+    if header_row < 0:
+        return []
+    out = []
+    # First non-blank row after header is usually a column-headers row (e.g. "Type | ...").
+    # We don't know in advance so we yield ALL non-blank rows; callers filter on col A.
+    i = header_row + 1
+    while i < len(R) and i - header_row <= max_rows:
+        row = R[i] if i < len(R) else []
+        a = (row[0] or '').strip()
+        rest = any((row[k] or '').strip() for k in range(1, min(6, len(row))))
+        if not a and not rest:
+            break
+        out.append(i)
+        i += 1
+    return out
+
 def v(r,c):
     try: return str(R[r][c]).replace('₹','').replace(',','').strip() or '-'
+    except: return '-'
+
+def vraw(r, c):
+    """Like v() but preserves ₹ + comma formatting (used for cells we render literally)."""
+    try: return (R[r][c] or '').strip() or '-'
     except: return '-'
 
 # Detect all date columns dynamically
@@ -115,26 +153,261 @@ print(f"[{datetime.now().strftime('%H:%M:%S')}] Dates detected: {DL}")
 
 def arr(r, s=1): return [v(r,i) for i in range(s, n)]
 
+# ── Header-based section locations (resilient to row drift) ─────────────────
+ORDERS_HDR    = find_section('Orders Report')        # row of section header
+SM_OPEN       = find_section('Audience - SM')
+SML_OPEN      = find_section('Audience - SML')
+NBP_OPEN      = find_section('Audience - NBP')
+CREATIVE_HDR  = find_section('Creative performance')  # creative perf section
+SM_PROD       = find_section('Products - SM')
+SML_PROD      = find_section('Products - SML')
+NBP_PROD      = find_section('Products - NBP')
+SALES_BLK     = find_section('Sales Block Opening')
+NR_MASTER_HDR = find_section('New Returning- Master')
+NR_PORTAL_HDR = find_section('New Returning- Portal')
+C16_MASTER    = find_section('C1-C6 Count Pending %age ( Master')
+C16_PORTAL    = find_section('C1-C6 Count Pending %age ( Portal')
+print(f"[sections] orders={ORDERS_HDR} creative={CREATIVE_HDR} sales_block={SALES_BLK} "
+      f"c16_master={C16_MASTER} c16_portal={C16_PORTAL} nr_master={NR_MASTER_HDR}")
+
+def kpi_row(header_row, label_substr):
+    """Find a row by label within the section that starts at header_row.
+    Returns the row index, or None."""
+    if header_row < 0:
+        return None
+    for i in range(header_row + 1, min(len(R), header_row + 30)):
+        cell = (R[i][0] or '').strip().lower()
+        if cell.startswith(label_substr.lower()):
+            return i
+        if not cell and not any((R[i][k] or '').strip() for k in range(1, min(6, len(R[i])))):
+            break
+    return None
+
+def kpi_arr(header_row, label_substr, start_col=1):
+    """Pull the date-aligned array for the row whose label starts with label_substr."""
+    r = kpi_row(header_row, label_substr)
+    if r is None:
+        return ['-'] * len(DL)
+    return [v(r, c) for c in range(start_col, start_col + len(DL))]
+
+# Section: Sales Block Opening Report (the real one — not the C1-C6 misalignment)
+def sales_block_rows():
+    """Read every data row in the Sales Block section until 'Grand Total' or section break."""
+    out = []
+    if SALES_BLK < 0:
+        return out
+    # Sub-header row immediately after section title is "TOF | New Remarks | NBP | SM | SML | Total"
+    for i in section_data_rows(SALES_BLK + 1):  # +1 to skip the column-header row
+        row = R[i]
+        a = (row[0] or '').strip()
+        if a in ('TOF', 'New Remarks', ''): continue
+        out.append([v(i, j) for j in range(6)])
+        if a.lower().startswith('grand total'):
+            break
+    return out
+
+# Section: Creative performance (Type | Amt Spent | Roas)
+def creative_rows_data():
+    if CREATIVE_HDR < 0:
+        return []
+    out = []
+    for i in section_data_rows(CREATIVE_HDR + 1):
+        a = (R[i][0] or '').strip()
+        if a in ('', 'Type', 'Creative Performance'): continue
+        # Data layout: Type | Amt Spent | Roas
+        amt   = v(i, 1)
+        roas  = v(i, 2)
+        out.append((a, roas, amt))
+        if a.lower().startswith('grand total'):
+            break
+    return out
+
+# Section: Products by portal (Product | Avg Roas | Budget)
+def product_rows_data(header_row):
+    if header_row < 0:
+        return []
+    out = []
+    for i in section_data_rows(header_row + 1):
+        a = (R[i][0] or '').strip()
+        if a in ('', 'Product'): continue
+        roas = v(i, 1)
+        bud  = v(i, 2)
+        out.append((a, roas, bud))
+        if a.lower().startswith('grand total'):
+            break
+    return out
+
+# Section: CPM rows from the per-portal metrics table (rows around 54-72)
+def cpm_for_portal(portal):
+    """Find the CPM row for `portal` and return its date-aligned values."""
+    # The per-portal metrics block has rows like (Portal | Metrics | val_per_date...).
+    # We look for col A == portal AND col B == 'CPM'.
+    for i in range(len(R)):
+        a = (R[i][0] or '').strip().upper()
+        b = (R[i][1] or '').strip().upper()
+        if a == portal and b == 'CPM':
+            return [v(i, c) for c in range(2, 2 + len(DL))]
+    return ['-'] * len(DL)
+
+# Section: New / Returning — Master file (rows after NR_MASTER_HDR)
+def nr_master_arr(label):
+    if NR_MASTER_HDR < 0:
+        return ['-'] * len(DL)
+    for i in range(NR_MASTER_HDR + 1, min(len(R), NR_MASTER_HDR + 8)):
+        a = (R[i][0] or '').strip().lower()
+        if a == label.lower():
+            return [v(i, c) for c in range(1, 1 + len(DL))]
+    return ['-'] * len(DL)
+
+# Section: New / Returning — Portal-wise
+def nr_portal_arr(portal, metric):
+    if NR_PORTAL_HDR < 0:
+        return ['-'] * len(DL)
+    for i in range(NR_PORTAL_HDR + 1, min(len(R), NR_PORTAL_HDR + 12)):
+        a = (R[i][0] or '').strip().upper()
+        b = (R[i][1] or '').strip().lower()
+        if a == portal and b == metric.lower():
+            return [v(i, c) for c in range(2, 2 + len(DL))]
+    return ['-'] * len(DL)
+
+# Section: C1-C6 cohort percentages
+def c16_cohort(header_row, portal):
+    """Returns [{'cohort': 'C1', 'values': [v_per_date...]}, ...] for one portal."""
+    if header_row < 0:
+        return []
+    out = []
+    for i in range(header_row + 1, min(len(R), header_row + 30)):
+        a = (R[i][0] or '').strip().upper()
+        b = (R[i][1] or '').strip().upper()
+        if a == portal and b in ('C1', 'C2', 'C3', 'C4', 'C5', 'C6'):
+            out.append({'cohort': b, 'values': [v(i, c) for c in range(2, 2 + len(DL))]})
+        elif a == f'{portal} TOTAL':
+            out.append({'cohort': 'Total', 'values': [v(i, c) for c in range(2, 2 + len(DL))]})
+            break
+    return out
+
 D = {
     'dates': DATES_RAW,
-    'orders':  arr(3), 'revenue': arr(4), 'adspend': arr(5), 'roas': arr(6),
-    'new_m': arr(11), 'ret_m': arr(12),
-    'sm_new':  arr(16,2)+['-']*max(0,len(DL)-n+2),
-    'sm_ret':  arr(17,2)+['-']*max(0,len(DL)-n+2),
-    'sml_new': arr(18,2)+['-']*max(0,len(DL)-n+2),
-    'sml_ret': arr(19,2)+['-']*max(0,len(DL)-n+2),
-    'nbp_new': arr(20,2)+['-']*max(0,len(DL)-n+2),
-    'nbp_ret': arr(21,2)+['-']*max(0,len(DL)-n+2),
-    'sm_cpm':  [v(141,2),v(141,3)]+['-']*(len(DL)-2),
-    'sml_cpm': [v(147,2),v(147,3)]+['-']*(len(DL)-2),
-    'nbp_cpm': [v(153,2),v(153,3)]+['-']*(len(DL)-2),
-    'creative': [(v(128+i,0),v(128+i,1),v(128+i,2)) for i in range(7) if R[128+i][0] not in ['','Type','Creative Performance']],
-    'sm_prods': [(v(197+i,0),v(197+i,1),v(197+i,2)) for i in range(52) if R[197+i][0] not in ['Product','Grand Total','']],
-    'sml_prods': [(v(178+i,0),v(178+i,1),v(178+i,2)) for i in range(15) if R[178+i][0] not in ['Product','Grand Total','']],
-    'nbp_prods': [(v(164+i,0),v(164+i,1),v(164+i,2)) for i in range(9) if R[164+i][0] not in ['Product','Grand Total','']],
-    'sales_block': [[v(i,j) for j in range(6)] for i in range(252,270) if R[i][0]],
+    'orders':  kpi_arr(ORDERS_HDR, 'Orders'),
+    'revenue': kpi_arr(ORDERS_HDR, 'Revenue'),
+    'adspend': kpi_arr(ORDERS_HDR, 'Ad Spend'),
+    'roas':    kpi_arr(ORDERS_HDR, 'Roas'),
+    # New / Returning percentages
+    'new_m':   nr_master_arr('New'),
+    'ret_m':   nr_master_arr('Returning'),
+    'sm_new':  nr_portal_arr('SM',  'New'),
+    'sm_ret':  nr_portal_arr('SM',  'Returning'),
+    'sml_new': nr_portal_arr('SML', 'New'),
+    'sml_ret': nr_portal_arr('SML', 'Returning'),
+    'nbp_new': nr_portal_arr('NBP', 'New'),
+    'nbp_ret': nr_portal_arr('NBP', 'Returning'),
+    # CPMs from the per-portal metrics block
+    'sm_cpm':  cpm_for_portal('SM'),
+    'sml_cpm': cpm_for_portal('SML'),
+    'nbp_cpm': cpm_for_portal('NBP'),
+    # Tables
+    'creative':   creative_rows_data(),
+    'sm_prods':   product_rows_data(SM_PROD),
+    'sml_prods':  product_rows_data(SML_PROD),
+    'nbp_prods':  product_rows_data(NBP_PROD),
+    'sales_block': sales_block_rows(),
+    # C1-C6 actuals (master + portal-wise variants)
+    'c16_master_sm':  c16_cohort(C16_MASTER, 'SM'),
+    'c16_master_sml': c16_cohort(C16_MASTER, 'SML'),
+    'c16_master_nbp': c16_cohort(C16_MASTER, 'NBP'),
+    'c16_portal_sm':  c16_cohort(C16_PORTAL, 'SM'),
+    'c16_portal_sml': c16_cohort(C16_PORTAL, 'SML'),
+    'c16_portal_nbp': c16_cohort(C16_PORTAL, 'NBP'),
     'updated': datetime.now().strftime('%d %b %Y, %I:%M %p IST')
 }
+
+# ── C1-C6 targets (from GHA sheet, editable by user) ───────────────────────
+# Targets live in the GHA-owned sheet, tab 'C1-C6 Targets'. If the tab doesn't
+# exist yet we auto-create it with sensible defaults so the user can edit and
+# re-run. Layout: rows are 'Portal | Cohort | Target %', e.g. 'SM | C1 | 30%'.
+def load_c16_targets():
+    """Returns {('SM','C1'): 30, ...} as int %s."""
+    gha_sid = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
+    try:
+        gha_sh = gc.open_by_key(gha_sid)
+    except Exception as e:
+        print(f"[c16-targets] cannot open GHA sheet: {e}")
+        return {}
+    titles = [w.title for w in gha_sh.worksheets()]
+    if 'C1-C6 Targets' not in titles:
+        # Bootstrap a default targets tab (user edits later)
+        try:
+            ws = gha_sh.add_worksheet(title='C1-C6 Targets', rows=30, cols=4)
+            seed = [['Portal', 'Cohort', 'Target % (Pending — lower is better)', 'Notes']]
+            # Defaults: tighter targets for early cohorts (more first-purchase activation expected)
+            defaults = {
+                'C1': 30, 'C2': 50, 'C3': 70, 'C4': 75, 'C5': 80, 'C6': 90,
+            }
+            for portal in ('SM', 'SML', 'NBP'):
+                for c in ('C1','C2','C3','C4','C5','C6'):
+                    seed.append([portal, c, defaults[c], 'edit me — % pending allowed'])
+            ws.update(range_name='A1', values=seed, value_input_option='USER_ENTERED')
+            print("[c16-targets] bootstrapped 'C1-C6 Targets' tab in GHA sheet")
+        except Exception as e:
+            print(f"[c16-targets] bootstrap error: {e}")
+            return {}
+    try:
+        ws = gha_sh.worksheet('C1-C6 Targets')
+        rows = ws.get_all_values()
+    except Exception as e:
+        print(f"[c16-targets] read error: {e}")
+        return {}
+    out = {}
+    for r in rows[1:]:
+        if len(r) < 3: continue
+        portal, cohort, tgt = (r[0] or '').strip().upper(), (r[1] or '').strip().upper(), (r[2] or '').strip()
+        if not portal or cohort not in ('C1','C2','C3','C4','C5','C6'): continue
+        try:
+            out[(portal, cohort)] = int(str(tgt).rstrip('%').strip() or 0)
+        except ValueError:
+            continue
+    return out
+
+C16_TARGETS = load_c16_targets()
+print(f"[c16-targets] loaded {len(C16_TARGETS)} targets")
+
+# ── Today's Live snapshot from GHA sheet (for live-vs-static comparison) ───
+def load_today_live():
+    """Pull a few key live metrics from the GHA sheet's '🔴 Today's Live ...' tab.
+    Returns dict with current spend, current ROAS, success-rate buckets, top creative.
+    Best-effort: returns empty dict if tab not found."""
+    gha_sid = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
+    try:
+        gha_sh = gc.open_by_key(gha_sid)
+    except Exception:
+        return {}
+    today_label = datetime.now().strftime('%d %b %y').upper()
+    candidates = [w.title for w in gha_sh.worksheets() if today_label in w.title and 'Live' in w.title]
+    if not candidates:
+        return {}
+    try:
+        ws = gha_sh.worksheet(candidates[0])
+        rows = ws.get_all_values()
+    except Exception:
+        return {}
+    out = {'tab_name': candidates[0], 'updated': '—'}
+    for r in rows:
+        cell = (r[0] or '')
+        # Update timestamp from the section header
+        if cell.startswith('📊') and 'Updated' in cell:
+            out['updated'] = cell.split('Updated', 1)[-1].strip().rstrip('|').strip()
+        # Total spend today + total camps + buckets
+        if cell == 'TOTAL TODAY' and len(r) > 4:
+            out['total_camps'] = r[2]
+            out['total_spend'] = r[3]
+        if '≥ 1.5x' in cell and len(r) > 4:
+            out['pct_above_1_5'] = r[4]
+        if 'Below 1.0x' in cell and len(r) > 4:
+            out['pct_below_1'] = r[4]
+    return out
+
+LIVE = load_today_live()
+print(f"[today-live] {'loaded ' + LIVE.get('tab_name','—') if LIVE else 'no Today Live tab found yet'}")
 
 # Build KPI
 kpi = {}
@@ -178,13 +451,76 @@ def tbl_row(lbl, arr_key):
     tds = ''.join(f'<td>{a[i] if i<len(a) else "-"}</td>' for i in range(len(DL)))
     return f'<tr><td>{lbl}</td>{tds}</tr>'
 
+def _pct_to_float(v):
+    try: return float(str(v).rstrip('%').strip())
+    except (ValueError, TypeError): return None
+
 def nr_rows():
+    """New/Returning table — adds 7-day average + today vs avg delta + trend arrow.
+    Latest date = last column; 7-day avg = mean of the last 7 dates that have data."""
+    series = [
+        ('New % (Master)',     'new_m'),
+        ('Returning % (Master)','ret_m'),
+        ('SM — New',           'sm_new'),
+        ('SM — Returning',     'sm_ret'),
+        ('SML — New',          'sml_new'),
+        ('SML — Returning',    'sml_ret'),
+        ('NBP — New',          'nbp_new'),
+        ('NBP — Returning',    'nbp_ret'),
+    ]
     rows = ''
-    for lbl,key in [('New % (Master)','new_m'),('Returning % (Master)','ret_m'),
-                     ('SM — New','sm_new'),('SM — Returning','sm_ret'),
-                     ('SML — New','sml_new'),('SML — Returning','sml_ret'),
-                     ('NBP — New','nbp_new'),('NBP — Returning','nbp_ret')]:
-        rows += tbl_row(lbl, key)
+    for lbl, key in series:
+        a = D.get(key, [])
+        tds = ''.join(f'<td>{a[i] if i<len(a) else "-"}</td>' for i in range(len(DL)))
+
+        # Analytics columns
+        nums = [_pct_to_float(x) for x in a]
+        valid = [n for n in nums if n is not None]
+        latest = next((n for n in reversed(nums) if n is not None), None)
+        prior7 = [n for n in nums[-8:-1] if n is not None]
+        avg7   = (sum(prior7) / len(prior7)) if prior7 else None
+
+        avg_cell = f'{avg7:.1f}%' if avg7 is not None else '—'
+        if latest is not None and avg7 is not None:
+            delta = latest - avg7
+            arrow = '↑' if delta > 0.5 else ('↓' if delta < -0.5 else '→')
+            color = '#0d6e3a' if delta > 0.5 else ('#a3260a' if delta < -0.5 else '#666')
+            delta_cell = f'<span style="color:{color};font-weight:700">{arrow} {delta:+.1f}pp</span>'
+        else:
+            delta_cell = '—'
+        rows += f'<tr><td>{lbl}</td>{tds}<td style="background:#f5f7ff">{avg_cell}</td><td style="background:#f5f7ff">{delta_cell}</td></tr>'
+    return rows
+
+def nr_th_cols():
+    """Header cells for the N/R table (dates + 7-day avg + delta)."""
+    return th_cols() + '<th>7-day Avg</th><th>Today vs Avg</th>'
+
+def c16_rows(cohorts, portal):
+    """Render C1-C6 actuals for one portal. Adds Target and vs-Target columns.
+    Color: green if actual ≤ target, amber within 10pp, red if > target+10pp.
+    (Lower % pending is better.)"""
+    rows = ''
+    for c in cohorts:
+        co = c['cohort']
+        vals = c['values']
+        tds = ''.join(f'<td>{v if v else "-"}</td>' for v in vals)
+        latest_pct = _pct_to_float(next((v for v in reversed(vals) if v), None))
+        target = C16_TARGETS.get((portal.upper(), co))
+        if co == 'Total' or target is None or latest_pct is None:
+            tgt_cell = '—'
+            cmp_cell = '—'
+        else:
+            tgt_cell = f'{target}%'
+            diff = latest_pct - target
+            if diff <= 0:
+                cmp_cell = f'<span style="color:#0d6e3a;font-weight:700">✓ {diff:+.0f}pp</span>'
+            elif diff <= 10:
+                cmp_cell = f'<span style="color:#a35a00;font-weight:700">⚠ +{diff:.0f}pp</span>'
+            else:
+                cmp_cell = f'<span style="color:#a3260a;font-weight:700">✗ +{diff:.0f}pp</span>'
+        is_total = co == 'Total'
+        bg = 'background:#eef2ff;font-weight:700' if is_total else ''
+        rows += f'<tr style="{bg}"><td>{co}</td>{tds}<td>{tgt_cell}</td><td>{cmp_cell}</td></tr>'
     return rows
 
 def creative_rows():
@@ -543,20 +879,45 @@ footer{{text-align:center;padding:16px;color:#9ca3af;font-size:10px;border-top:1
     <div class="chart-card"><div class="chart-title">📡 CPM by Portal</div><canvas id="c3" height="160"></canvas></div>
   </div>
   <div class="tables-row">
+    <div class="tbl-card full">
+      <div class="sec-ttl">👥 New vs Returning  <span style="color:#6b7280;font-weight:400;font-size:11px">— with 7-day average and today vs avg delta</span></div>
+      <table><thead><tr><th>Metric</th>{nr_th_cols()}</tr></thead><tbody>{nr_rows()}</tbody></table>
+    </div>
+  </div>
+  <div class="tables-row">
     <div class="tbl-card">
-      <div class="sec-ttl">👥 New vs Returning</div>
-      <table><thead><tr><th>Metric</th>{th_cols()}</tr></thead><tbody>{nr_rows()}</tbody></table>
+      <div class="sec-ttl">🎨 Creative Performance</div>
+      <table><thead><tr><th>Type</th><th>ROAS</th><th>Spend (₹)</th></tr></thead><tbody>{creative_rows()}</tbody></table>
     </div>
     <div class="tbl-card">
-      <div class="sec-ttl">🎨 Creative Performance · 4-Apr</div>
-      <table><thead><tr><th>Type</th><th>ROAS</th><th>Spend (₹)</th></tr></thead><tbody>{creative_rows()}</tbody></table>
+      <div class="sec-ttl">🔴 Today Live  <span style="color:#6b7280;font-weight:400;font-size:11px">— refreshes every 2 hrs</span></div>
+      {('<table><thead><tr><th>Metric</th><th>Value</th></tr></thead><tbody>'
+        f'<tr><td>Source tab</td><td>{LIVE.get("tab_name","—")}</td></tr>'
+        f'<tr><td>Last update</td><td>{LIVE.get("updated","—")}</td></tr>'
+        f'<tr><td>Camps with spend today</td><td><b>{LIVE.get("total_camps","—")}</b></td></tr>'
+        f'<tr><td>Total spend today</td><td><b>₹{LIVE.get("total_spend","—")}</b></td></tr>'
+        f'<tr><td>% spend below 1.0x ROAS</td><td><b style="color:#a3260a">{LIVE.get("pct_below_1","—")}</b></td></tr>'
+        f'<tr><td>% spend above 1.5x ROAS</td><td><b style="color:#0d6e3a">{LIVE.get("pct_above_1_5","—")}</b></td></tr>'
+        '</tbody></table>') if LIVE else '<p style="color:#888;font-size:11px">No live tab found — has today_live_report run today?</p>'}
     </div>
   </div>
   <div class="tables-row">
     <div class="tbl-card full">
-      <div class="sec-ttl">🏪 Sales Block Opening Report · 5-Apr</div>
+      <div class="sec-ttl">🏪 Sales Block Opening Report</div>
       <table><thead><tr><th>TOF</th><th>Remarks</th><th>NBP</th><th>SM</th><th>SML</th><th>Grand Total</th></tr></thead>
       <tbody>{sb_rows()}</tbody></table>
+    </div>
+  </div>
+
+  <!-- ═══ C1-C6 Cohort Pending % — Master file (vs editable targets) ═══ -->
+  <div class="tables-row">
+    <div class="tbl-card full">
+      <div class="sec-ttl">🎯 C1-C6 Cohort Pending %  <span style="color:#6b7280;font-weight:400;font-size:11px">— Master file · per-portal · actuals vs targets (lower is better — edit targets in GHA sheet → 'C1-C6 Targets' tab)</span></div>
+      <table><thead><tr><th>SM Cohort</th>{th_cols()}<th>Target</th><th>vs Target</th></tr></thead><tbody>{c16_rows(D['c16_master_sm'], 'SM')}</tbody></table>
+      <div style="height:8px"></div>
+      <table><thead><tr><th>SML Cohort</th>{th_cols()}<th>Target</th><th>vs Target</th></tr></thead><tbody>{c16_rows(D['c16_master_sml'], 'SML')}</tbody></table>
+      <div style="height:8px"></div>
+      <table><thead><tr><th>NBP Cohort</th>{th_cols()}<th>Target</th><th>vs Target</th></tr></thead><tbody>{c16_rows(D['c16_master_nbp'], 'NBP')}</tbody></table>
     </div>
   </div>
   <div class="prods">
