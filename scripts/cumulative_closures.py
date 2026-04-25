@@ -40,6 +40,8 @@ CLOSING_TAB_RE = re.compile(r'🔴\s+Closing\s+(\d{1,2})\s+(\w{3})\s+(\d{2,4})',
 # the morning snapshot may be captured at a later time when the 10 AM cron is
 # delayed by GitHub Actions, so we accept any text after SINCE.
 TOTAL_HEADER_RE = re.compile(r'TOTAL CLOSED SINCE\b', re.IGNORECASE)
+# Section emojis used as "this is a different section, stop reading the prior one"
+SECTION_PREFIX = ('💀', '🚨', '⚠️', '📊', '📋', '✅')
 
 
 def parse_money(s):
@@ -63,56 +65,104 @@ def parse_date_from_tab(tab_title):
 
 def extract_closures_for_day(ws):
     """
-    Walks the closing tab to find the 'TOTAL CLOSED SINCE 10 AM' section header,
-    then reads camp rows below it until a blank/section break.
+    Walks the closing tab to find every 'TOTAL CLOSED SINCE …' Part-2 section,
+    keeps only the latest one for the day (it's cumulative — last write wins),
+    and reads camp rows under it until a blank line OR the next non-TOTAL
+    section header.
 
-    Returns: dict with totals + per-type breakdown.
+    Falls back to summing every 'CLOSED SINCE LAST RUN' Part-1 section if no
+    Part-2 section ever materialised that day (older closing tabs predating
+    the Part-2 fix). De-dupes by camp name across Part-1 sections so a camp
+    that closed and stayed closed isn't counted twice.
+
+    Returns: list of {name, type, budget} dicts.
     """
     rows = ws.get_all_values()
-    in_total_section = False
-    skipped_header   = False
-    closures = []
 
-    for r in rows:
+    # ── Pass 1: locate Part-2 (TOTAL CLOSED SINCE …) section starts ──────
+    part2_starts = []
+    for i, r in enumerate(rows):
         if not r:
             continue
+        joined = ' '.join(r)
+        if TOTAL_HEADER_RE.search(joined):
+            # Skip 'None yet' empty sections
+            if 'None yet' in joined or '— None' in joined:
+                continue
+            part2_starts.append(i)
+
+    if part2_starts:
+        # Use only the latest Part-2 section (cumulative, last write wins)
+        return _read_data_block(rows, start_idx=part2_starts[-1] + 1)
+
+    # ── Fallback: aggregate Part-1 (CLOSED SINCE LAST RUN) sections ──────
+    # Match 'CLOSED ... SINCE LAST RUN' but not the empty '— None' variant.
+    part1_re = re.compile(r'CLOSED.*SINCE LAST RUN', re.IGNORECASE)
+    part1_starts = [
+        i for i, r in enumerate(rows)
+        if r and r[0] and part1_re.search(r[0]) and 'None' not in r[0]
+    ]
+    if not part1_starts:
+        return []
+
+    seen_names = set()
+    closures = []
+    for s in part1_starts:
+        for c in _read_data_block(rows, start_idx=s + 1):
+            if c['name'] in seen_names:
+                continue
+            seen_names.add(c['name'])
+            closures.append(c)
+    return closures
+
+
+def _read_data_block(rows, start_idx):
+    """Helper used by both the Part-2 and Part-1 paths. Reads the data rows
+    under a section header. Skips column-header / segmentation rows; stops at
+    a blank line or the next non-TOTAL section header.
+
+    Layout (both Part-1 and Part-2 use the same):
+      column 0 = bucket label, 1 = campaign name, 2 = type, 3 = budget, ...
+    """
+    out = []
+    skipped_header = False
+    for i in range(start_idx, len(rows)):
+        r = rows[i]
+        if not r:
+            break
         first = (r[0] or '').strip()
-        # Section header detection
-        if TOTAL_HEADER_RE.search(' '.join(r)):
-            in_total_section = True
-            skipped_header = False
-            continue
-        if not in_total_section:
-            continue
-        # Inside the section. Skip the column-header line (first non-empty after section start).
+        joined = ' '.join((c or '') for c in r).strip()
+
+        # Stop at next non-TOTAL section
+        if first.startswith(SECTION_PREFIX) and not TOTAL_HEADER_RE.search(joined):
+            break
+        # Blank row terminates
+        if not joined:
+            break
+        # Skip the column-header line (Bucket | Campaign Name | Type | Budget | ...)
         if not skipped_header:
-            if 'Bucket' in first or 'Campaign Name' in ' '.join(r):
+            if 'Campaign Name' in joined or first == 'Bucket':
                 skipped_header = True
                 continue
-            # Skip subtitle/segmentation lines
-            if 'Segmentation' in ' '.join(r):
+            # Skip 'Segmentation: …' summary line if present
+            if first.lower().startswith('segmentation'):
                 continue
+            # Anything else before the column header is also skipped
             continue
-        # Stop at the next big section or a fully blank row
-        if first.startswith(('💀', '🚨', '⚠️', '📊', '📋', '✅')) and 'TOTAL CLOSED' not in ' '.join(r):
-            break
-        if all(not (c or '').strip() for c in r):
-            # Blank row likely ends the section
-            break
-        # Data row layout: Bucket, Campaign Name, Type, Was Budget, Was Today ROAS, ...
+        # Data row
         if len(r) < 4:
             continue
-        camp_name = (r[1] or '').strip()
-        camp_type = (r[2] or '').strip()
+        camp_name  = (r[1] or '').strip()
+        camp_type  = (r[2] or '').strip()
         was_budget = parse_money(r[3])
         if not camp_name or was_budget <= 0:
             continue
-        closures.append({
+        out.append({
             'name':   camp_name,
             'type':   camp_type or 'Unknown',
             'budget': was_budget,
         })
-    return closures
+    return out
 
 
 def build_summary(by_day):
