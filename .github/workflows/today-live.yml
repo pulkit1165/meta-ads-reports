@@ -57,3 +57,12 @@ jobs:
 
       - name: Run today_live_report
         run: python3 scripts/today_live_report.py
+
+      - name: Upload HTML dashboard artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: today-live-${{ github.run_id }}
+          path: out/today_live*.html
+          if-no-files-found: ignore
+          retention-days: 7
