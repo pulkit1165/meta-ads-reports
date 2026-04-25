@@ -83,7 +83,7 @@ echo "✓ Python deps installed in .venv"
 
 # ── Step 4: Smoke test — can we open the GHA sheet? ────────────────────────
 echo "→ Smoke test: opening the GHA reports sheet..."
-set -a; . "$REPO_ROOT/config/sheets.env"; set +a
+set -a; . "$REPO_ROOT/.env"; . "$REPO_ROOT/config/sheets.env"; set +a
 python3 - <<'PY'
 import os, gspread
 from google.oauth2.service_account import Credentials
