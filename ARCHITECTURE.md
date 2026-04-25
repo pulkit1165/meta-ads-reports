@@ -198,34 +198,57 @@ Add at: https://github.com/pulkit1165/meta-ads-reports/settings/secrets/actions
 
 ## Bootstrapping a new machine
 
+### Fast path (recommended) — `scripts/bootstrap_local.sh`
+
 ```bash
-# 1. Clone + venv
+git clone git@github.com:pulkit1165/meta-ads-reports.git
+cd meta-ads-reports
+
+# Place the two creds manually:
+#   1. Copy google-service-account.json from your source machine
+#      (~/.openclaw/workspace/google-service-account.json) to ./google-service-account.json
+#      AirDrop / 1Password secure note / encrypted USB. NEVER email or commit.
+#   2. Edit .env (auto-created from .env.example on first script run) and paste META_ACCESS_TOKEN.
+
+bash scripts/bootstrap_local.sh
+```
+
+The script:
+- Verifies the service-account JSON is present + valid + chmod 600
+- Creates `.env` from `.env.example` and checks that `META_ACCESS_TOKEN` is set
+- Adds `GOOGLE_SERVICE_ACCOUNT_FILE` to `.env` pointing at the file
+- Creates `.venv` and pip-installs `requirements.txt`
+- Smoke-tests by opening the GHA reports sheet via the service account
+
+If anything's missing it prints exactly what to do and exits non-zero.
+
+### Manual path
+
+```bash
 git clone git@github.com:pulkit1165/meta-ads-reports.git
 cd meta-ads-reports
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 
-# 2. Local-dev creds (only needed if you want to run scripts locally,
-#    NOT needed if you're only editing code + relying on GHA to run things)
 cp .env.example .env
 # Fill META_ACCESS_TOKEN in .env
 
-# Service account file: copy from the master workspace OR ask user
+# Service account file (from the source machine):
 cp ~/.openclaw/workspace/google-service-account.json .
+chmod 600 google-service-account.json
 
-# 3. Verify env loads
+# Verify env loads
 set -a; . config/accounts.env; . config/sheets.env; set +a
 python3 -c "import os; assert os.environ.get('REPORTS_SHEET_ID'); print('env OK')"
 
-# 4. Smoke test (optional)
+# Smoke test
 python3 scripts/today_live_report.py
 open out/today_live.html
-
-# 5. Push from any machine
-git push  # triggers no GHA work, but state stays in sync
 ```
 
-If working from a 2nd / 3rd machine where the user prefers not to copy the service-account JSON locally, just rely on GHA — make code changes, push, watch the workflow run + download the artifact from the Actions tab.
+### Code-only path (no creds needed)
+
+If you only want to edit code on a 2nd/3rd machine and let GHA run things, skip the credential copy. Just `git pull`, edit, `git push`, and watch the Actions tab.
 
 ---
 
