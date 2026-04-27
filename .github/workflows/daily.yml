@@ -88,6 +88,10 @@ jobs:
         if: ${{ success() }}
         run: python3 scripts/cumulative_closures.py
 
+      - name: Refresh KPI Daily (last 7 days)
+        if: ${{ success() }}
+        run: python3 scripts/kpi_daily_builder.py --days 7
+
       - name: Save state branch
         if: always()
         uses: ./.github/actions/state-sync

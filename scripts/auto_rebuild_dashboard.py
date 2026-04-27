@@ -37,9 +37,34 @@ R = sh.get_worksheet(0).get_all_values()
 
 # ── Load KPI Daily tab (Meta funnel metrics) ──────────────────────────────────
 def load_kpi_daily():
-    """Returns dict: { 'YYYY-MM-DD': { 'SM': {...}, 'SML': {...}, 'NBP': {...}, 'Total': {...} } }"""
+    """Merges 'KPI Daily' from two sheets:
+      1. GHA-owned reports sheet (auto-populated by scripts/kpi_daily_builder.py)
+      2. Original NTN source sheet (operator-maintained)
+    GHA wins for any date present in both. NTN fills gaps for older dates GHA
+    doesn't have yet.
+    Returns: { 'YYYY-MM-DD': { 'SM': {...}, 'SML': {...}, 'NBP': {...}, 'Total': {...} } }
+    """
+    out_ntn = _load_kpi_daily_from_sheet(sh)
+
+    # Pull GHA-owned KPI Daily (separate sheet)
+    gha_sid = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
+    out_gha = {}
     try:
-        ws = sh.worksheet('KPI Daily')
+        gha_sh = gc.open_by_key(gha_sid)
+        out_gha = _load_kpi_daily_from_sheet(gha_sh)
+        print(f"[kpi-daily] GHA: {len(out_gha)} dates  |  NTN: {len(out_ntn)} dates")
+    except Exception as e:
+        print(f"[kpi-daily] GHA sheet load failed: {e}")
+
+    # Merge — GHA overrides NTN for overlapping dates
+    merged = dict(out_ntn)
+    merged.update(out_gha)
+    return merged
+
+
+def _load_kpi_daily_from_sheet(sheet):
+    try:
+        ws = sheet.worksheet('KPI Daily')
         rows = ws.get_all_values()
         if not rows or len(rows) < 2:
             return {}
