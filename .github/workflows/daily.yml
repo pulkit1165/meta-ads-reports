@@ -102,3 +102,19 @@ jobs:
           path: out/
           if-no-files-found: ignore
           retention-days: 14
+
+      # ── Cloudflare Pages deploy (only if CLOUDFLARE_PAGES_PROJECT var set) ─
+      # Mirrors today-live.yml's deploy step. Daily runs once at 04:30 IST,
+      # so this gives a morning refresh in addition to the hourly one.
+      - name: Prepare landing page (NTN as index.html)
+        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && success() }}
+        run: |
+          [ -f out/ntn_filtered.html ] && cp out/ntn_filtered.html out/index.html
+
+      - name: Deploy to Cloudflare Pages
+        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && success() }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy out --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }} --branch=main --commit-dirty=true

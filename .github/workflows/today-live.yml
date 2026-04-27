@@ -67,3 +67,23 @@ jobs:
             out/ntn_filtered.html
           if-no-files-found: ignore
           retention-days: 7
+
+      # ── Cloudflare Pages deploy (only if user has enabled it) ──────────────
+      # The deploy is gated on a repository VARIABLE (not a secret) called
+      # CLOUDFLARE_PAGES_PROJECT. Until the user sets it via the GitHub UI
+      # (Settings → Secrets and variables → Actions → Variables), these steps
+      # are silently skipped. Once set, every workflow run pushes a fresh build
+      # to <project-name>.pages.dev.
+      - name: Prepare landing page (NTN as index.html)
+        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && success() }}
+        run: |
+          [ -f out/ntn_filtered.html ] && cp out/ntn_filtered.html out/index.html
+          ls -la out/
+
+      - name: Deploy to Cloudflare Pages
+        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && success() }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy out --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }} --branch=main --commit-dirty=true
