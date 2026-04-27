@@ -228,6 +228,80 @@ def derive_type(campaign_name):
     return 'Sales'
 
 
+# ── Category-head taxonomy (used by scripts/category_reports.py) ─────────────
+# The ops team has internal heads each looking after one category. Their preferred
+# names differ slightly from derive_product_and_category()'s output:
+#   - Crystal is split into 'Crystal Home Decor' (frames, plates, hourglasses,
+#     coasters, idols, clocks) vs 'Crystal Accessory' (bracelets, sutras,
+#     keyrings, pendants, rudraksha)
+#   - Jewellery surfaces as '24K Jewellery'
+#   - Fragrance surfaces as 'Perfumes'
+#   - 'Aibot' is a separate category
+def derive_category_v2(campaign_or_ad_name):
+    """Returns one of:
+      Skin / Hair / Crystal Home Decor / Crystal Accessory / 24K Jewellery /
+      Perfumes / Aibot / Nutraceuticals / Other
+    """
+    n = _norm(campaign_or_ad_name)
+
+    # Aibot first — it's a distinct sub-brand, no overlap with other keywords
+    if 'aibot' in n or 'ai_bot' in n or 'aiblot' in n:
+        return 'Aibot'
+
+    # 24K Jewellery — must check before Skin (24k_gold_serum is skincare)
+    if any(kw in n for kw in ['gold_jewellery', '24k_jewellery', '24k_chain', '24k_pendant',
+                              'gold_chain', 'gold_necklace', 'wanda_jewellery', 'wanda_24k']):
+        return '24K Jewellery'
+
+    # Perfumes / Fragrance
+    if any(kw in n for kw in ['perfume', 'fragrance', 'edp', 'edt', 'cologne', 'attar',
+                              'rich_brat', 'inde_sleek', 'eau_de']):
+        return 'Perfumes'
+
+    # Skin (covers most skincare keywords)
+    if any(kw in n for kw in ['skin', 'am_pm', 'ampm', 'sunkissed', 'sun_kissed', 'goat_milk',
+                              'goatmilk', 'triderma', 'tri_derma', '24k_gold_serum',
+                              'pitglow', 'pit_glow', 'lipbright', 'lip_bright', 'hyaluronic',
+                              'pigmentation', 'vitamin_c', 'ashwabutin', 'glycothione',
+                              'niacinamide', 'time_reversal', 'trifecta', 'undereye',
+                              'under_eye', 'roll_on', 'rollon', 'glutabright', 'botox',
+                              'eyebrow', 'brow_grow', 'eye_care']):
+        return 'Skin'
+
+    # Hair
+    if any(kw in n for kw in ['hair', 'phusphus', 'phus_phus', 'xtremehair', 'xtreme_hair',
+                              'hairmist', 'hair_mist', 'dandragone', 'dandruff', 'rice_mist',
+                              'hair_oil', 'hair_serum', 'hair_growth', 'hair_booster']):
+        return 'Hair'
+
+    # Nutraceuticals (capsules, supplements)
+    if any(kw in n for kw in ['berberine', 'charbigone', 'charbi_gone', 'charbi', 'capsule',
+                              'capsules', 'supplement', 'vitamin', 'ashwagandha']):
+        return 'Nutraceuticals'
+
+    # Crystal — Accessory (worn on body)
+    if any(kw in n for kw in ['bracelet', 'sutra', 'keyring', 'pendant', 'necklace',
+                              'mala', 'rudraksha', 'half_n_half', 'wrist']):
+        return 'Crystal Accessory'
+
+    # Crystal — Home Decor (frames, idols, plates, clocks, etc.)
+    if any(kw in n for kw in ['frame', 'coaster', 'plate', 'clock', 'hourglass', 'wall_art',
+                              'idol', 'statue', 'horseclock', 'horse_clock', 'horseframe',
+                              'horse_frame', 'peacock_frame', 'money_bowl', 'geode',
+                              'tortoise', 'pyramid', 'butterfly', 'tree', 'sphere', 'wand',
+                              'hanuman', 'ganesha', 'shiva', 'durga', 'lakshmi',
+                              'leaf', 'mountain', 'cluster', 'tower']):
+        return 'Crystal Home Decor'
+
+    # Generic crystal mention without specific item type → default to Home Decor
+    if any(kw in n for kw in ['crystal', 'pyrite', 'selenite', 'amethyst', 'rose_quartz',
+                              'citrine', 'obsidian', 'tigereye', 'opalite', 'hematite',
+                              'hematarite']):
+        return 'Crystal Home Decor'
+
+    return 'Other'
+
+
 if __name__ == '__main__':
     # Test against known campaigns
     tests = [

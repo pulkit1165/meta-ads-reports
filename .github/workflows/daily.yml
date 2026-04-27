@@ -92,6 +92,10 @@ jobs:
         if: ${{ success() }}
         run: python3 scripts/kpi_daily_builder.py --days 7
 
+      - name: Refresh Category Heads reports (8 tabs, full 7-day history)
+        if: ${{ success() }}
+        run: python3 scripts/category_reports.py
+
       - name: Save state branch
         if: always()
         uses: ./.github/actions/state-sync
