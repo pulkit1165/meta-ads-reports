@@ -510,6 +510,279 @@ def write_to_sheet(category, rows, ts_label):
     print(f"   ✅ Wrote {len(padded)} rows to '{tab_name}'")
 
 
+# ── HTML dashboard render ─────────────────────────────────────────────────────
+def render_categories_dashboard_html(per_cat_ads, link_map, recent_ad_ids, history,
+                                     ts_label, date_str, sheet_url):
+    """Single-page HTML dashboard with a tab strip for each category and the
+    same 5 sections we write to the sheet. Output goes to out/categories.html
+    and gets deployed to Cloudflare Pages alongside the NTN dashboard.
+    `per_cat_ads`: {category: [ad_dict, ...]}
+    """
+    OUT_DIR = Path(os.environ.get('META_REPORTS_OUT_DIR') or (_REPO_ROOT / 'out'))
+    OUT_DIR.mkdir(parents=True, exist_ok=True)
+
+    def cls(roas):
+        if roas >= 2.0: return 'rg'
+        if roas >= 1.5: return 'ro'
+        return 'rr'
+
+    def render_section_best_worst(ads, label, emoji_class):
+        """Returns inner HTML for the Top/Bottom 10 section."""
+        eligible = [a for a in ads if a['spend'] >= MIN_SPEND_FOR_TOP]
+        if not eligible:
+            return f'<p class="empty">No qualifying ads (need ≥ ₹{MIN_SPEND_FOR_TOP} spend today)</p>'
+        eligible.sort(key=lambda x: -x['roas'])
+        rows = eligible[:10] if label == 'best' else list(reversed(eligible))[:10]
+        body = ''
+        for i, a in enumerate(rows, 1):
+            body += (
+                f"<tr><td><b>{i}</b></td>"
+                f"<td style='font-size:11px'>{a['ad_name'][:75]}</td>"
+                f"<td>{a['type']}</td>"
+                f"<td>{a['ctr']:.2f}%</td>"
+                f"<td>₹{int(a['cpm']):,}</td>"
+                f"<td>{('₹' + str(round(a['cpv'], 2))) if a['cpv'] else '—'}</td>"
+                f"<td>₹{int(a['cpr']):,}</td>"
+                f"<td>₹{int(a['spend']):,}</td>"
+                f"<td class='{cls(a['roas'])}'>{a['roas']:.2f}x</td></tr>"
+            )
+        return ('<table>'
+                '<thead><tr><th>#</th><th>Ad Name</th><th>Type</th><th>CTR</th>'
+                '<th>CPM</th><th>CPV</th><th>CPR/1k</th><th>Spend</th><th>ROAS</th></tr></thead>'
+                f'<tbody>{body}</tbody></table>')
+
+    def render_landing_pages(ads):
+        pages = section_landing_pages(ads, link_map)
+        if not pages:
+            return '<p class="empty">No landing pages with ≥ ₹500 spend today</p>'
+        body = ''
+        for i, p in enumerate(pages, 1):
+            short = p['url'].replace('https://', '').replace('http://', '')
+            short = short[:90] + ('…' if len(short) > 90 else '')
+            body += (
+                f"<tr><td><b>{i}</b></td>"
+                f"<td style='font-size:11px'><a href='{p['url']}' target='_blank' rel='noopener'>{short}</a></td>"
+                f"<td>{p['ad_count']}</td>"
+                f"<td>₹{int(p['spend']):,}</td>"
+                f"<td>{p['impressions']:,}</td>"
+                f"<td>{p['clicks']:,}</td>"
+                f"<td>{p['lpv']:,}</td>"
+                f"<td>{p['purchases']}</td>"
+                f"<td>{p['cvr']:.2f}%</td></tr>"
+            )
+        return ('<table>'
+                '<thead><tr><th>#</th><th>URL</th><th># Ads</th><th>Spend</th>'
+                '<th>Imp</th><th>Clicks</th><th>LPVs</th><th>Purchases</th><th>CVR</th></tr></thead>'
+                f'<tbody>{body}</tbody></table>')
+
+    def render_new_pushed(ads):
+        new_ads = section_new_creatives(ads, recent_ad_ids)
+        if not new_ads:
+            return f'<p class="empty">No new ads pushed in last {NEW_CREATIVE_DAYS} days for this category</p>'
+        body = ''
+        for a in new_ads:
+            body += (
+                f"<tr><td>{a.get('_created', '—')}</td>"
+                f"<td>{a.get('_status', '—')}</td>"
+                f"<td style='font-size:11px'>{a['ad_name'][:60]}</td>"
+                f"<td>{a['type']}</td>"
+                f"<td>₹{int(a['spend']):,}</td>"
+                f"<td>{a['ctr']:.2f}%</td>"
+                f"<td>{a['purchases']}</td>"
+                f"<td>₹{int(a['revenue']):,}</td>"
+                f"<td class='{cls(a['roas'])}'>{a['roas']:.2f}x</td></tr>"
+            )
+        return ('<table>'
+                '<thead><tr><th>Created</th><th>Status</th><th>Ad Name</th><th>Type</th>'
+                '<th>Spend</th><th>CTR</th><th>Purch.</th><th>Revenue</th><th>ROAS</th></tr></thead>'
+                f'<tbody>{body}</tbody></table>')
+
+    def render_budget(category):
+        rows = ''
+        ts_total = ts_rev = ts_s = ts_r = ts_sr = ts_rr = 0
+        for ds in sorted(history.keys()):
+            slot = history[ds].get(category, {'sales': 0, 'retarget': 0, 'rev_sales': 0, 'rev_retarget': 0})
+            s_spend, s_rev = slot['sales'], slot['rev_sales']
+            r_spend, r_rev = slot['retarget'], slot['rev_retarget']
+            t_spend = s_spend + r_spend; t_rev = s_rev + r_rev
+            ts_total += t_spend; ts_rev += t_rev
+            ts_s += s_spend; ts_r += r_spend; ts_sr += s_rev; ts_rr += r_rev
+            s_roas = (s_rev / s_spend) if s_spend else 0
+            r_roas = (r_rev / r_spend) if r_spend else 0
+            t_roas = (t_rev / t_spend) if t_spend else 0
+            rows += (
+                f"<tr><td>{ds}</td>"
+                f"<td>₹{int(s_spend):,}</td><td>₹{int(s_rev):,}</td>"
+                f"<td class='{cls(s_roas)}'>{(f'{s_roas:.2f}x' if s_spend else '—')}</td>"
+                f"<td>₹{int(r_spend):,}</td><td>₹{int(r_rev):,}</td>"
+                f"<td class='{cls(r_roas)}'>{(f'{r_roas:.2f}x' if r_spend else '—')}</td>"
+                f"<td>₹{int(t_spend):,}</td>"
+                f"<td class='{cls(t_roas)}'>{(f'{t_roas:.2f}x' if t_spend else '—')}</td></tr>"
+            )
+        # Total row
+        ts_s_roas = (ts_sr / ts_s) if ts_s else 0
+        ts_r_roas = (ts_rr / ts_r) if ts_r else 0
+        ts_t_roas = (ts_rev / ts_total) if ts_total else 0
+        rows += (
+            f"<tr style='background:#eef2ff;font-weight:700'>"
+            f"<td>{BUDGET_HISTORY_DAYS}-day total</td>"
+            f"<td>₹{int(ts_s):,}</td><td>₹{int(ts_sr):,}</td>"
+            f"<td class='{cls(ts_s_roas)}'>{(f'{ts_s_roas:.2f}x' if ts_s else '—')}</td>"
+            f"<td>₹{int(ts_r):,}</td><td>₹{int(ts_rr):,}</td>"
+            f"<td class='{cls(ts_r_roas)}'>{(f'{ts_r_roas:.2f}x' if ts_r else '—')}</td>"
+            f"<td>₹{int(ts_total):,}</td>"
+            f"<td class='{cls(ts_t_roas)}'>{(f'{ts_t_roas:.2f}x' if ts_total else '—')}</td></tr>"
+        )
+        return ('<table>'
+                '<thead><tr><th>Date</th>'
+                '<th>Sales Spend</th><th>Sales Rev</th><th>Sales ROAS</th>'
+                '<th>Retarget Spend</th><th>Retarget Rev</th><th>Retarget ROAS</th>'
+                '<th>Total Spend</th><th>Overall ROAS</th></tr></thead>'
+                f'<tbody>{rows}</tbody></table>')
+
+    # Build all category panels
+    panels_html = ''
+    tabs_html   = ''
+    for i, cat in enumerate(CATEGORIES):
+        cat_ads   = per_cat_ads.get(cat, [])
+        cat_spend = int(sum(a['spend'] for a in cat_ads))
+        slug = cat.replace(' ', '-').lower()
+        active = ' active' if i == 0 else ''
+        hidden = '' if i == 0 else ' hidden'
+        tabs_html += (
+            f'<button class="cat-tab{active}" data-cat="{slug}">'
+            f'{cat} <span class="badge">{len(cat_ads)}</span></button>'
+        )
+        panels_html += f'''
+<div class="cat-panel" data-cat="{slug}"{hidden}>
+  <div class="panel-header">
+    <h2>📂 {cat}</h2>
+    <div class="meta">{len(cat_ads)} ads with spend today · ₹{cat_spend:,} total</div>
+  </div>
+
+  <section class="card">
+    <h3 class="sec-best">🏆 Top 10 Creatives by ROAS <span class="meta">— min ₹{MIN_SPEND_FOR_TOP} spend</span></h3>
+    {render_section_best_worst(cat_ads, 'best', 'best')}
+  </section>
+
+  <section class="card">
+    <h3 class="sec-worst">🚨 Bottom 10 Creatives by ROAS <span class="meta">— min ₹{MIN_SPEND_FOR_TOP} spend</span></h3>
+    {render_section_best_worst(cat_ads, 'worst', 'worst')}
+  </section>
+
+  <section class="card">
+    <h3 class="sec-pages">🔗 Landing Pages in Use <span class="meta">— spend grouped by URL</span></h3>
+    {render_landing_pages(cat_ads)}
+  </section>
+
+  <section class="card">
+    <h3 class="sec-new">🆕 New Creatives Pushed <span class="meta">— last {NEW_CREATIVE_DAYS} days</span></h3>
+    {render_new_pushed(cat_ads)}
+  </section>
+
+  <section class="card">
+    <h3 class="sec-budget">💰 Budget &amp; Spend Summary <span class="meta">— last {BUDGET_HISTORY_DAYS} days · Sales vs Retarget</span></h3>
+    {render_budget(cat)}
+  </section>
+</div>
+'''
+
+    html = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1.0">
+<title>📂 Category Heads — Meta Ads</title>
+<style>
+*{{margin:0;padding:0;box-sizing:border-box}}
+body{{font-family:'Segoe UI',system-ui,sans-serif;background:#f0f4fb;color:#1a1a2e}}
+.header{{background:linear-gradient(135deg,#0d2145,#1a3d7c);padding:20px 28px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}}
+.header h1{{color:#fff;font-size:20px;font-weight:700}}
+.header p{{color:rgba(255,255,255,.6);font-size:11px;margin-top:3px}}
+.header nav{{color:rgba(255,255,255,.85);font-size:12px}}
+.header nav a{{color:#fff;text-decoration:none;border-bottom:1px dashed rgba(255,255,255,.5);margin-left:14px}}
+.header nav a:hover{{border-style:solid}}
+.tabs{{background:#fff;border-bottom:1px solid #dde3f0;padding:10px 28px;display:flex;gap:6px;flex-wrap:wrap;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.05)}}
+.cat-tab{{padding:7px 14px;border-radius:20px;border:2px solid #dde3f0;background:#fff;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:6px}}
+.cat-tab:hover{{border-color:#1a3d7c;color:#1a3d7c}}
+.cat-tab.active{{background:#1a3d7c;color:#fff;border-color:#1a3d7c}}
+.cat-tab .badge{{background:rgba(255,255,255,.2);padding:1px 7px;border-radius:10px;font-size:10px;font-weight:700}}
+.cat-tab.active .badge{{background:rgba(255,255,255,.3)}}
+.main{{max-width:1400px;margin:0 auto;padding:24px 28px}}
+.cat-panel[hidden]{{display:none}}
+.panel-header{{margin-bottom:16px}}
+.panel-header h2{{font-size:22px;color:#0d2145;font-weight:800}}
+.panel-header .meta{{color:#6b7280;font-size:12px;margin-top:4px}}
+.card{{background:#fff;border-radius:12px;padding:18px;border:1px solid #dde3f0;box-shadow:0 2px 10px rgba(0,0,0,.04);margin-bottom:18px}}
+.card h3{{font-size:13px;font-weight:700;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #eef2ff;color:#0d2145}}
+.card h3 .meta{{color:#6b7280;font-weight:400;font-size:11px;margin-left:8px}}
+.sec-best{{color:#0d6e3a}}
+.sec-worst{{color:#a3260a}}
+.sec-pages{{color:#5a3a8e}}
+.sec-new{{color:#a35a00}}
+.sec-budget{{color:#206040}}
+table{{width:100%;border-collapse:collapse;font-size:12px}}
+th{{background:#0d2145;color:#fff;padding:8px 10px;text-align:left;font-size:10px;letter-spacing:.3px;text-transform:uppercase}}
+th:not(:first-child){{text-align:center}}
+td{{padding:7px 10px;border-bottom:1px solid #eef2ff}}
+td:not(:first-child){{text-align:center;font-weight:600}}
+td a{{color:#1a3d7c;text-decoration:none;border-bottom:1px dotted #1a3d7c}}
+.rg{{color:#0d6e3a;font-weight:700}}
+.ro{{color:#a35a00;font-weight:700}}
+.rr{{color:#a3260a;font-weight:700}}
+.empty{{color:#888;font-size:12px;text-align:center;padding:20px;font-style:italic}}
+footer{{text-align:center;color:#6b7280;font-size:11px;padding:20px}}
+footer a{{color:#1a3d7c;text-decoration:none;border-bottom:1px dashed #1a3d7c}}
+</style>
+</head>
+<body>
+
+<div class="header">
+  <div>
+    <h1>📂 Category Heads — Meta Ads</h1>
+    <p>{datetime.strptime(date_str,'%Y-%m-%d').strftime('%A, %d %B %Y')} · SM portal · per-category live data</p>
+  </div>
+  <nav>
+    <a href="/">🏠 NTN Dashboard</a>
+    <a href="/today_live.html">🔴 Today Live</a>
+  </nav>
+</div>
+
+<div class="tabs">
+  <span style="font-size:11px;font-weight:700;color:#6b7280;text-transform:uppercase;letter-spacing:.5px;align-self:center;margin-right:8px">Category</span>
+  {tabs_html}
+</div>
+
+<div class="main">
+{panels_html}
+</div>
+
+<footer>
+  🤖 Auto-rebuilds with the daily pipeline (04:30 IST) · last update {ts_label} · <a href="{sheet_url}" target="_blank">Sheet source</a>
+</footer>
+
+<script>
+document.querySelectorAll('.cat-tab').forEach(btn => {{
+  btn.addEventListener('click', () => {{
+    const slug = btn.dataset.cat;
+    document.querySelectorAll('.cat-tab').forEach(b => b.classList.toggle('active', b === btn));
+    document.querySelectorAll('.cat-panel').forEach(p => {{
+      p.hidden = p.dataset.cat !== slug;
+    }});
+    window.scrollTo({{top: 0, behavior: 'smooth'}});
+  }});
+}});
+</script>
+
+</body>
+</html>
+'''
+
+    out_path = OUT_DIR / 'categories.html'
+    out_path.write_text(html, encoding='utf-8')
+    print(f"   ✅ Wrote {out_path}")
+
+
 # ── Main ──────────────────────────────────────────────────────────────────────
 def main():
     p = argparse.ArgumentParser()
@@ -538,19 +811,54 @@ def main():
     recent_ad_ids = fetch_recent_ads()
     print(f"   {len(recent_ad_ids)} recent ads found")
 
+    # History caching — fetching 7 days × 7 accounts is ~50 API calls; expensive
+    # to re-do every hourly run. Daily run does the full fetch and saves it to
+    # state/category_history.json (which the state-sync action persists across
+    # runs via the orphan `state` branch). Hourly runs use --no-history to load
+    # the cached file instead.
+    STATE_DIR = Path(os.environ.get('META_REPORTS_STATE_DIR') or (_REPO_ROOT / 'state'))
+    STATE_DIR.mkdir(parents=True, exist_ok=True)
+    HISTORY_CACHE = STATE_DIR / 'category_history.json'
+
     history = {}
-    if not args.no_history:
+    if args.no_history:
+        if HISTORY_CACHE.exists():
+            try:
+                history = json.loads(HISTORY_CACHE.read_text())
+                # JSON converts inner defaultdicts to plain dicts — that's fine
+                print(f"   📂 Loaded cached history ({len(history)} day(s)) from {HISTORY_CACHE}")
+            except Exception as e:
+                print(f"   ⚠️  Could not read cached history ({e}); budget section will be empty")
+        else:
+            print(f"   ⚠️  --no-history but no cache at {HISTORY_CACHE}; budget section will be empty")
+    else:
         print(f"→ Fetching {BUDGET_HISTORY_DAYS}-day history per category × type…")
         history = fetch_category_history(args.date, days=BUDGET_HISTORY_DAYS)
         print(f"   {len(history)} day(s) loaded")
+        # Convert defaultdicts → plain dicts for JSON serialisation
+        plain = {ds: {cat: dict(slots) for cat, slots in cat_dict.items()}
+                 for ds, cat_dict in history.items()}
+        HISTORY_CACHE.write_text(json.dumps(plain))
+        print(f"   💾 Cached to {HISTORY_CACHE}")
 
     target_cats = [args.category] if args.category else CATEGORIES
+    per_cat_ads = {}
     for cat in target_cats:
         cat_ads = [a for a in ads if a['category'] == cat]
+        per_cat_ads[cat] = cat_ads
         print(f"\n→ Building tab for {cat} ({len(cat_ads)} ads)…")
         rows = build_category_rows(cat, cat_ads, link_map, recent_ad_ids, history, ts_label)
         write_to_sheet(cat, rows, ts_label)
         time.sleep(1)  # avoid sheet API rate limits
+
+    # Also render an HTML dashboard with all categories — for Cloudflare Pages.
+    # Always render the full set (all CATEGORIES), even when --category was used,
+    # so the dashboard stays consistent.
+    if not args.category:
+        print("\n→ Rendering HTML dashboard (out/categories.html)…")
+        sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
+        render_categories_dashboard_html(per_cat_ads, link_map, recent_ad_ids,
+                                         history, ts_label, args.date, sheet_url)
 
     print(f"\n🎉 Done — {len(target_cats)} category tab(s) refreshed")
 

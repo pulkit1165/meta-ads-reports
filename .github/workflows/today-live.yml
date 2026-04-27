@@ -50,12 +50,21 @@ jobs:
           printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
           chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
 
+      - name: Restore state branch (gives us category_history.json from daily)
+        uses: ./.github/actions/state-sync
+        with:
+          direction: restore
+
       - name: Run today_live_report
         run: python3 scripts/today_live_report.py
 
       - name: Refresh KPI Daily (last 2 days — today + yesterday)
         if: ${{ success() }}
         run: python3 scripts/kpi_daily_builder.py --days 2
+
+      - name: Refresh Category Heads (--no-history, uses cached 7-day data)
+        if: ${{ success() }}
+        run: python3 scripts/category_reports.py --no-history
 
       - name: Rebuild NTN dashboard with today's live data embedded
         if: ${{ success() }}
@@ -69,6 +78,7 @@ jobs:
           path: |
             out/today_live*.html
             out/ntn_filtered.html
+            out/categories.html
           if-no-files-found: ignore
           retention-days: 7
 

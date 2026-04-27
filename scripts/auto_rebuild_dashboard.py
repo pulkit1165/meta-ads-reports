@@ -835,7 +835,13 @@ footer{{text-align:center;padding:16px;color:#9ca3af;font-size:10px;border-top:1
 <body>
 <div class="header">
   <div><h1>📊 NTN Performance Dashboard</h1><p>Day-wise Reporting · Apr 2026 · SM + SML + NBP</p></div>
-  <span class="last-upd">🕐 {D['updated']}</span>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+    <nav style="font-size:12px">
+      <a href="/today_live.html" style="color:#fff;text-decoration:none;border-bottom:1px dashed rgba(255,255,255,.5);margin-left:14px">🔴 Today Live</a>
+      <a href="/categories.html" style="color:#fff;text-decoration:none;border-bottom:1px dashed rgba(255,255,255,.5);margin-left:14px">📂 Category Heads</a>
+    </nav>
+    <span class="last-upd">🕐 {D['updated']}</span>
+  </div>
 </div>
 <div class="slicer">
   <span class="sl-label">📅 Date</span>
