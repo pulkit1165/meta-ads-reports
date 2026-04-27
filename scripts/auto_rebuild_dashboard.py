@@ -328,6 +328,107 @@ D = {
     'updated': datetime.now().strftime('%d %b %Y, %I:%M %p IST')
 }
 
+# ── Extend dates beyond NTN sheet using GHA sheet tracker tabs ────────────
+# The NTN source sheet is hand-maintained; when the operator hasn't updated
+# it past a recent date but the daily GHA pipeline has produced tracker tabs
+# for newer dates, the dashboard would otherwise stop at the NTN sheet's
+# latest date. Here we scan the GHA sheet for tracker tabs (e.g. 'SM 27 APR
+# 26') with dates AFTER the NTN sheet's latest, and append columns for them.
+# We can derive Adspend + weighted ROAS from tracker rows; Orders / Revenue
+# / New-vs-Returning / C1-C6 require Shopify data we don't have yet, so
+# those cells render as '—' for the derived dates.
+import re as _re
+def _extend_with_gha_dates():
+    gha_sid = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
+    try:
+        gha_sh = gc.open_by_key(gha_sid)
+    except Exception as e:
+        print(f"[date-extend] cannot open GHA sheet: {e}")
+        return
+
+    # Latest date currently in NTN sheet — anything later in GHA gets appended
+    ntn_latest = None
+    for raw in DATES_RAW:
+        try:
+            d = datetime.strptime(raw, '%d-%b-%Y')
+        except ValueError:
+            continue
+        if ntn_latest is None or d > ntn_latest:
+            ntn_latest = d
+    print(f"[date-extend] NTN latest = {ntn_latest.strftime('%d-%b-%Y') if ntn_latest else 'none'}")
+
+    # Find tracker tabs in GHA sheet with parseable dates after NTN latest
+    pat = _re.compile(r'^(SM|SML|NBP)\s+(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2})$')
+    new_dates = set()
+    for ws in gha_sh.worksheets():
+        m = pat.match(ws.title.strip())
+        if not m:
+            continue
+        try:
+            d = datetime.strptime(f"{m.group(2)} {m.group(3)} 20{m.group(4)}", '%d %b %Y')
+        except ValueError:
+            continue
+        if ntn_latest and d <= ntn_latest:
+            continue
+        new_dates.add(d)
+    if not new_dates:
+        print("[date-extend] no new GHA-only dates")
+        return
+
+    new_dates_sorted = sorted(new_dates)
+    print(f"[date-extend] adding {len(new_dates_sorted)} GHA-derived date(s): "
+          f"{[d.strftime('%-d-%b') for d in new_dates_sorted]}")
+
+    # For each new date, derive adspend + weighted ROAS by reading SM/SML/NBP
+    # tracker tabs (cols: 6 = Amount spent, 10 = Roas 7 days)
+    for d in new_dates_sorted:
+        tab_label = d.strftime('%d %b %y').upper()      # '27 APR 26'
+        dl_label  = d.strftime('%-d-%b')                # '27-Apr'
+        raw_label = d.strftime('%-d-%b-%Y')             # '27-Apr-2026'
+
+        total_spend = 0.0
+        weighted_rev = 0.0
+        for portal in ('SM', 'SML', 'NBP'):
+            try:
+                pws = gha_sh.worksheet(f'{portal} {tab_label}')
+            except Exception:
+                continue
+            for row in pws.get_all_values()[1:]:  # skip header
+                if len(row) < 11:
+                    continue
+                try:
+                    spend  = float((row[6] or '0').replace(',', '').replace('₹', ''))
+                    roas7d = float(row[10]) if (row[10] or '').strip() not in ('', '-') else 0.0
+                except (ValueError, IndexError):
+                    continue
+                total_spend  += spend
+                weighted_rev += spend * roas7d
+
+        if total_spend > 0:
+            spend_str = str(int(total_spend))
+            roas_str  = f"{(weighted_rev / total_spend):.2f}"
+        else:
+            spend_str = '-'
+            roas_str  = '-'
+
+        # Append to globals so downstream renderers pick them up
+        DATES_RAW.append(raw_label)
+        DL.append(dl_label)
+        D['dates'].append(raw_label)
+        D['adspend'].append(spend_str)
+        D['roas'].append(roas_str)
+        # Orders / Revenue / N-R / CPM rows — we can't derive these without
+        # Shopify, so they show as '-' (renders as '—' in the dashboard).
+        for k in ('orders', 'revenue',
+                  'new_m', 'ret_m',
+                  'sm_new', 'sm_ret', 'sml_new', 'sml_ret', 'nbp_new', 'nbp_ret',
+                  'sm_cpm', 'sml_cpm', 'nbp_cpm'):
+            arr = D.get(k)
+            if isinstance(arr, list):
+                arr.append('-')
+
+_extend_with_gha_dates()
+
 # ── C1-C6 targets (from GHA sheet, editable by user) ───────────────────────
 # Targets live in the GHA-owned sheet, tab 'C1-C6 Targets'. If the tab doesn't
 # exist yet we auto-create it with sensible defaults so the user can edit and
