@@ -2,7 +2,7 @@
 
 Automated Meta Ads reporting — duplicated from the workspace at `~/.openclaw/workspace/` for migration to GitHub Actions.
 
-> 📘 **For agents picking this up on a new machine:** read **[ARCHITECTURE.md](ARCHITECTURE.md)** first — single-source-of-truth for the system layout, workflows, sheets, secrets, open threads, and a bootstrap recipe. Then [docs/META_REPORTING_MASTER_DOC.md](docs/META_REPORTING_MASTER_DOC.md) for the business layer.
+> 📘 **For agents picking this up on a new machine:** read **[STATUS.md](STATUS.md)** first (what's actively in flight), then **[ARCHITECTURE.md](ARCHITECTURE.md)** (system layout, workflows, sheets, bootstrap recipe), then [docs/META_REPORTING_MASTER_DOC.md](docs/META_REPORTING_MASTER_DOC.md) for the business layer.
 >
 > 🌐 **To put dashboards on a permanent live URL:** see [docs/CLOUDFLARE_PAGES_SETUP.md](docs/CLOUDFLARE_PAGES_SETUP.md) — workflows are already wired; user does the one-time Cloudflare + GitHub UI setup.
 
