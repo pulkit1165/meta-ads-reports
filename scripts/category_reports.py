@@ -260,6 +260,48 @@ def fetch_category_history(date_today, days=BUDGET_HISTORY_DAYS):
 
 
 # ── Section builders ─────────────────────────────────────────────────────────
+def compute_category_summary(ads):
+    """Returns spend-weighted aggregate metrics for a category's ads today.
+    All ratios (CTR / CPM / CPV / CPR / ROAS) are properly weighted by spend
+    or impressions/reach — NOT a flat average of per-ad ratios.
+    """
+    if not ads:
+        return {
+            'active_ads': 0, 'spend': 0.0, 'budget': 0.0, 'impressions': 0, 'reach': 0,
+            'clicks': 0, 'thruplay': 0, 'purchases': 0, 'revenue': 0.0, 'lpv': 0,
+            'ctr': 0.0, 'cpm': 0.0, 'cpv': 0.0, 'cpr_1k': 0.0, 'cpc': 0.0,
+            'roas': 0.0, 'cvr': 0.0,
+        }
+    total_spend       = sum(a['spend']         for a in ads)
+    total_impressions = sum(a['impressions']   for a in ads)
+    total_reach       = sum(a['reach']         for a in ads)
+    total_clicks      = sum(a['clicks']        for a in ads)
+    total_thruplay    = sum(a['video_thruplay'] for a in ads)
+    total_purchases   = sum(a['purchases']     for a in ads)
+    total_revenue     = sum(a['revenue']       for a in ads)
+    total_lpv         = sum(a['lpv']           for a in ads)
+
+    return {
+        'active_ads':  len(ads),
+        'spend':       total_spend,
+        'impressions': total_impressions,
+        'reach':       total_reach,
+        'clicks':      total_clicks,
+        'thruplay':    total_thruplay,
+        'purchases':   total_purchases,
+        'revenue':     total_revenue,
+        'lpv':         total_lpv,
+        # Properly-weighted ratios:
+        'ctr':    (total_clicks    / total_impressions * 100) if total_impressions else 0.0,
+        'cpm':    (total_spend     / total_impressions * 1000) if total_impressions else 0.0,
+        'cpv':    (total_spend     / total_thruplay)            if total_thruplay   else 0.0,
+        'cpr_1k': (total_spend     / total_reach * 1000)        if total_reach     else 0.0,
+        'cpc':    (total_spend     / total_clicks)              if total_clicks    else 0.0,
+        'roas':   (total_revenue   / total_spend)               if total_spend     else 0.0,
+        'cvr':    (total_purchases / total_clicks * 100)        if total_clicks    else 0.0,
+    }
+
+
 def section_best_worst(ads, ts_label):
     """Returns (best_rows, worst_rows) for the category."""
     eligible = [a for a in ads if a['spend'] >= MIN_SPEND_FOR_TOP]
@@ -322,6 +364,22 @@ def build_category_rows(category, ads, link_map, recent_ad_ids, history, ts_labe
     rows.append([f'📂  CATEGORY — {category.upper()}  |  Live Meta data  |  {ts_label}', '', '', '', '', '', '', '', ''])
     rows.append([f'   {len(ads)} ad(s) with spend today, total spend ₹{int(sum(a["spend"] for a in ads)):,}',
                  '', '', '', '', '', '', '', ''])
+    rows.append([''])
+
+    # ── Summary Block (snapshot: spend-weighted CTR/CPM/CPV/CPR + totals) ────
+    s = compute_category_summary(ads)
+    rows.append([f'📊  SUMMARY  |  {category}  |  Spend-weighted aggregates', '', '', '', '', '', '', '', ''])
+    rows.append(['Metric', 'Value', 'Notes', '', '', '', '', '', ''])
+    rows.append(['Active Ads',     s['active_ads'],            'with spend today', '', '', '', '', '', ''])
+    rows.append(['Spend Today',    f"₹{int(s['spend']):,}",   '', '', '', '', '', '', ''])
+    rows.append(['Revenue',        f"₹{int(s['revenue']):,}", f"{s['purchases']:,} purchases", '', '', '', '', '', ''])
+    rows.append(['ROAS',           fmt_roas(s['roas']),        'spend-weighted', '', '', '', '', '', ''])
+    rows.append(['CTR',            fmt_pct(s['ctr']),          f"{s['clicks']:,} link clicks / {s['impressions']:,} imp", '', '', '', '', '', ''])
+    rows.append(['CPM',            f"₹{int(s['cpm']):,}",     'cost per 1k impressions', '', '', '', '', '', ''])
+    rows.append(['CPV',            (f"₹{s['cpv']:.2f}") if s['cpv'] else '—', f"{s['thruplay']:,} thruplays", '', '', '', '', '', ''])
+    rows.append(['CPR / 1k Reach', f"₹{int(s['cpr_1k']):,}", f"{s['reach']:,} unique reach", '', '', '', '', '', ''])
+    rows.append(['CPC',            f"₹{s['cpc']:.2f}" if s['cpc'] else '—', '', '', '', '', '', '', ''])
+    rows.append(['CVR (% of clicks)', fmt_pct(s['cvr']), '', '', '', '', '', '', ''])
     rows.append([''])
 
     # ── Section A: Best ──────────────────────────────────────────────────────
@@ -462,6 +520,7 @@ def write_to_sheet(category, rows, ts_label):
 
     SECTION_COLORS = {
         '📂': rgb(30, 60, 120),    # main header — navy
+        '📊': rgb(70, 90, 140),    # summary — slate blue
         '🏆': rgb(34, 139, 34),    # best — green
         '🚨': rgb(180, 30, 30),    # worst — red
         '🔗': rgb(120, 60, 130),   # landing pages — purple
@@ -485,8 +544,8 @@ def write_to_sheet(category, rows, ts_label):
                     'fields': 'userEnteredFormat(backgroundColor,textFormat)',
                 }})
                 break
-        # Column-header row (Rank | Ad Name | ...) — first cell is 'Rank' or 'Date' etc.
-        if first in ('Rank', 'Date'):
+        # Column-header row (Rank | Ad Name | ...) — first cell is 'Rank' or 'Date' or 'Metric' etc.
+        if first in ('Rank', 'Date', 'Metric', 'Created'):
             fmt_reqs.append({'repeatCell': {
                 'range': {'sheetId': sheet_id, 'startRowIndex': i-1, 'endRowIndex': i,
                           'startColumnIndex': 0, 'endColumnIndex': 9},
@@ -653,12 +712,52 @@ def render_categories_dashboard_html(per_cat_ads, link_map, recent_ad_ids, histo
             f'<button class="cat-tab{active}" data-cat="{slug}">'
             f'{cat} <span class="badge">{len(cat_ads)}</span></button>'
         )
+        # Summary metrics for the card grid at top of the panel
+        s = compute_category_summary(cat_ads)
+        roas_cls = cls(s['roas'])
+        summary_grid = f'''
+  <div class="summary-grid">
+    <div class="sumcard sumcard-ads"><div class="sumcard-icon">📊</div>
+      <div class="sumcard-lbl">Active Ads</div>
+      <div class="sumcard-val">{s['active_ads']}</div>
+      <div class="sumcard-sub">with spend today</div></div>
+    <div class="sumcard sumcard-spend"><div class="sumcard-icon">💰</div>
+      <div class="sumcard-lbl">Spend Today</div>
+      <div class="sumcard-val">₹{int(s['spend']):,}</div>
+      <div class="sumcard-sub">{s['purchases']:,} purchases</div></div>
+    <div class="sumcard sumcard-rev"><div class="sumcard-icon">💵</div>
+      <div class="sumcard-lbl">Revenue</div>
+      <div class="sumcard-val">₹{int(s['revenue']):,}</div>
+      <div class="sumcard-sub">CVR {s['cvr']:.2f}%</div></div>
+    <div class="sumcard sumcard-roas"><div class="sumcard-icon">🎯</div>
+      <div class="sumcard-lbl">ROAS</div>
+      <div class="sumcard-val {roas_cls}">{s['roas']:.2f}x</div>
+      <div class="sumcard-sub">spend-weighted</div></div>
+    <div class="sumcard sumcard-ctr"><div class="sumcard-icon">📈</div>
+      <div class="sumcard-lbl">CTR</div>
+      <div class="sumcard-val">{s['ctr']:.2f}%</div>
+      <div class="sumcard-sub">{s['clicks']:,} link clicks</div></div>
+    <div class="sumcard sumcard-cpm"><div class="sumcard-icon">📢</div>
+      <div class="sumcard-lbl">CPM</div>
+      <div class="sumcard-val">₹{int(s['cpm']):,}</div>
+      <div class="sumcard-sub">{s['impressions']:,} imp</div></div>
+    <div class="sumcard sumcard-cpv"><div class="sumcard-icon">🎬</div>
+      <div class="sumcard-lbl">CPV</div>
+      <div class="sumcard-val">{('₹' + f"{s['cpv']:.2f}") if s['cpv'] else '—'}</div>
+      <div class="sumcard-sub">{s['thruplay']:,} thruplays</div></div>
+    <div class="sumcard sumcard-cpr"><div class="sumcard-icon">👥</div>
+      <div class="sumcard-lbl">CPR / 1k Reach</div>
+      <div class="sumcard-val">₹{int(s['cpr_1k']):,}</div>
+      <div class="sumcard-sub">{s['reach']:,} reach</div></div>
+  </div>'''
         panels_html += f'''
 <div class="cat-panel" data-cat="{slug}"{hidden}>
   <div class="panel-header">
     <h2>📂 {cat}</h2>
     <div class="meta">{len(cat_ads)} ads with spend today · ₹{cat_spend:,} total</div>
   </div>
+
+  {summary_grid}
 
   <section class="card">
     <h3 class="sec-best">🏆 Top 10 Creatives by ROAS <span class="meta">— min ₹{MIN_SPEND_FOR_TOP} spend</span></h3>
@@ -713,6 +812,24 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:#f0f4fb;color:#1a1a
 .panel-header{{margin-bottom:16px}}
 .panel-header h2{{font-size:22px;color:#0d2145;font-weight:800}}
 .panel-header .meta{{color:#6b7280;font-size:12px;margin-top:4px}}
+.summary-grid{{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:18px}}
+@media(max-width:900px){{.summary-grid{{grid-template-columns:repeat(2,1fr)}}}}
+.sumcard{{background:#fff;border-radius:10px;padding:14px 16px;border:1px solid #dde3f0;box-shadow:0 2px 8px rgba(0,0,0,.04);position:relative;overflow:hidden;transition:transform .15s}}
+.sumcard:hover{{transform:translateY(-1px)}}
+.sumcard::before{{content:'';position:absolute;top:0;left:0;width:3px;height:100%}}
+.sumcard-ads::before{{background:#1a3d7c}}
+.sumcard-spend::before{{background:#f5c518}}
+.sumcard-rev::before{{background:#00a878}}
+.sumcard-roas::before{{background:#9b59b6}}
+.sumcard-ctr::before{{background:#3498db}}
+.sumcard-cpm::before{{background:#e67e22}}
+.sumcard-cpv::before{{background:#16a085}}
+.sumcard-cpr::before{{background:#7f8c8d}}
+.sumcard-icon{{font-size:18px;margin-bottom:4px}}
+.sumcard-lbl{{font-size:9px;color:#6b7280;text-transform:uppercase;letter-spacing:.6px;font-weight:700}}
+.sumcard-val{{font-size:22px;font-weight:900;color:#0d2145;margin:3px 0 2px}}
+.sumcard-val.rg{{color:#0d6e3a}}.sumcard-val.ro{{color:#a35a00}}.sumcard-val.rr{{color:#a3260a}}
+.sumcard-sub{{font-size:10px;color:#9ca3af}}
 .card{{background:#fff;border-radius:12px;padding:18px;border:1px solid #dde3f0;box-shadow:0 2px 10px rgba(0,0,0,.04);margin-bottom:18px}}
 .card h3{{font-size:13px;font-weight:700;margin-bottom:14px;padding-bottom:8px;border-bottom:2px solid #eef2ff;color:#0d2145}}
 .card h3 .meta{{color:#6b7280;font-weight:400;font-size:11px;margin-left:8px}}
