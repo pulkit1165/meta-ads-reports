@@ -803,9 +803,15 @@ footer a{{color:#1a3d7c;text-decoration:none;border-bottom:1px dashed #1a3d7c}}
     <h1>🔴 Today's Live — Meta Ads</h1>
     <p>{datetime.strptime(date_str,'%Y-%m-%d').strftime('%A, %d %B %Y')} · SM portal · Live data from Meta Marketing API</p>
   </div>
-  <div class="last-upd">
-    Last updated: {ts_label}<br>
-    <a href="{sheet_url}" target="_blank">Open in Sheets ↗</a>
+  <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px">
+    <nav style="font-size:12px">
+      <a href="/" style="color:rgba(255,255,255,.85);text-decoration:none;border-bottom:1px dashed rgba(255,255,255,.5);margin-right:14px">🏠 NTN Dashboard</a>
+      <a href="#" style="color:#fff;font-weight:700;border-bottom:2px solid #fff;text-decoration:none;margin-right:14px">🔴 Today Live</a>
+      <a href="/categories" style="color:rgba(255,255,255,.85);text-decoration:none;border-bottom:1px dashed rgba(255,255,255,.5)">📂 Category Heads</a>
+    </nav>
+    <div class="last-upd">
+      Last updated: {ts_label} · <a href="{sheet_url}" target="_blank">Open in Sheets ↗</a>
+    </div>
   </div>
 </div>
 

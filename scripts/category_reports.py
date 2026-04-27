@@ -799,8 +799,9 @@ body{{font-family:'Segoe UI',system-ui,sans-serif;background:#f0f4fb;color:#1a1a
 .header h1{{color:#fff;font-size:20px;font-weight:700}}
 .header p{{color:rgba(255,255,255,.6);font-size:11px;margin-top:3px}}
 .header nav{{color:rgba(255,255,255,.85);font-size:12px}}
-.header nav a{{color:#fff;text-decoration:none;border-bottom:1px dashed rgba(255,255,255,.5);margin-left:14px}}
-.header nav a:hover{{border-style:solid}}
+.header nav a{{color:rgba(255,255,255,.85);text-decoration:none;border-bottom:1px dashed rgba(255,255,255,.5);margin-left:14px}}
+.header nav a:hover{{border-style:solid;color:#fff}}
+.header nav a.active{{color:#fff;font-weight:700;border-bottom:2px solid #fff}}
 .tabs{{background:#fff;border-bottom:1px solid #dde3f0;padding:10px 28px;display:flex;gap:6px;flex-wrap:wrap;position:sticky;top:0;z-index:50;box-shadow:0 2px 8px rgba(0,0,0,.05)}}
 .cat-tab{{padding:7px 14px;border-radius:20px;border:2px solid #dde3f0;background:#fff;color:#6b7280;font-size:12px;font-weight:600;cursor:pointer;transition:all .15s;display:inline-flex;align-items:center;gap:6px}}
 .cat-tab:hover{{border-color:#1a3d7c;color:#1a3d7c}}
@@ -860,8 +861,9 @@ footer a{{color:#1a3d7c;text-decoration:none;border-bottom:1px dashed #1a3d7c}}
     <p>{datetime.strptime(date_str,'%Y-%m-%d').strftime('%A, %d %B %Y')} · SM portal · per-category live data</p>
   </div>
   <nav>
-    <a href="/">🏠 NTN Dashboard</a>
+    <a href="/">📊 NTN Dashboard</a>
     <a href="/today_live.html">🔴 Today Live</a>
+    <a href="#" class="active">📂 Category Heads</a>
   </nav>
 </div>
 
