@@ -2,12 +2,13 @@
 
 > Living document. The Claude on whichever machine the user is currently working on keeps this current. Read this after `git pull` to see what's actively in flight, what just got shipped, and what the user is thinking about next.
 
-**Last updated:** 2026-04-27 by Claude on machine 1 (`/Users/pulkitsharma/meta-ads-reports`)
+**Last updated:** 2026-04-30 by Claude on machine 3 (`/Users/navdeepsingh/meta-ads-reports`)
 
 ---
 
 ## What's just shipped (last few sessions)
 
+- **Active Budget by Product (per-portal) — scheduled twice daily 10 AM + 9 PM IST.** New script `scripts/active_budget_by_product.py` + workflow `.github/workflows/active-budget-by-product.yml`. Writes 3 date-stamped tabs to the operator's "Daily Camp Pushed" sheet (`1eW2_qPdsKJ8zAV5-hsXA5HtfVH9NwDhQLyHYGKz5hXk`): `📊 SM/SML/NBP — Active Budget by Product DD MMM YY`. Each tab has a PRODUCT ROLLUP + PER-CAMP DETAIL (Camp ID + real audience name from ad-set targeting + budget). SM cut excludes `SM_CREDIT_LINE_06`. Inline classifier fixes 2 catalogue bugs (wanda → Jewellery shortcut, `astro.*re` over-matching `astro_destiny_report`). Catalogue fix not yet ported back — see "in flight" below.
 - Cross-page nav on all 3 dashboards (NTN / Today Live / Categories) — current page highlighted, others linked
 - Category Heads summary KPI strip on top of each category panel + sheet tab — 8 spend-weighted cards: Active Ads, Spend, Revenue, ROAS, CTR, CPM, CPV, CPR/1k Reach
 - `/categories` Cloudflare Pages URL — single-page tabbed dashboard with all 8 category tabs, deploys hourly via `today-live.yml`
@@ -29,6 +30,11 @@
 4. **C1-C6 default targets** in the GHA sheet's `C1-C6 Targets` tab are placeholders (30/50/70/75/80/90) — user hasn't tuned them yet.
 
 5. **External cron pinger** for GHA reliability — discussed but not built. GHA's scheduled runs miss slots (today-live + closing-watchlist skipped 04:00 UTC slot 27-Apr). Could set up cron-job.org to hit `workflow_dispatch` API for guaranteed firing.
+
+6. **Port catalogue fixes back to `scripts/product_catalogue.py`** — `active_budget_by_product.py` currently does an inline override for two `derive_product_and_category()` bugs:
+   (a) `wanda` keyword in Jewellery rule fires before astro/crystal-specific rules, so e.g. `ntn_wanda_loose_astro_destiny_*` mis-tags as Jewellery instead of Astro Destiny Report.
+   (b) `astro.*re` rule (line 112) matches `astro_destiny_report` (because "report" contains "re"), shadowing the more specific `astro.*destiny` rule on line 128.
+   Permanent fix: in `PRODUCT_RULES`, move Jewellery rule below Astro/Crystal-specific rules, and reorder Astro rules so `astro.*destiny|destiny.*report` and `astro.*bot|chatbot` come before the broad `astro.*re`. Affects all reports that use `derive_product_and_category()` (creative, daily tracker, category reports). Don't push without re-running validate_reports.py against pre/post diffs.
 
 ## Other proposals offered but not built
 
