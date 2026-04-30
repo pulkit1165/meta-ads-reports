@@ -238,6 +238,63 @@ def segment_label(info):
 
 
 # ──────────────────────────────────────────────────────────────────────────────
+# 7-day ROAS from campaign-level insights
+# ──────────────────────────────────────────────────────────────────────────────
+
+def _extract_roas(pr_field, key='7d_click'):
+    if not pr_field:
+        return 0.0
+    for it in pr_field:
+        if isinstance(it, dict):
+            v = it.get(key) or it.get('value', 0)
+            try:
+                return float(v or 0)
+            except (TypeError, ValueError):
+                return 0.0
+    return 0.0
+
+
+def fetch_roas_map(cids):
+    """For each campaign id, pull 7d_click ROAS via the Insights API.
+
+    Returns dict: cid -> {'roas': float, 'spend': float}
+    """
+    today = datetime.now(timezone(timedelta(hours=5, minutes=30))).date()
+    since_7d = (today - timedelta(days=6)).isoformat()
+    today_s = today.isoformat()
+
+    out = {}
+    for i in range(0, len(cids), 50):
+        batch = cids[i:i+50]
+        d = get_with_retry("", {
+            'ids': ",".join(batch),
+            'fields': (
+                f"insights.time_range({{'since':'{since_7d}','until':'{today_s}'}})"
+                f".action_attribution_windows(['7d_click']){{spend,purchase_roas}}"
+            ),
+        })
+        for cid, obj in (d or {}).items():
+            if not isinstance(obj, dict) or 'error' in obj:
+                out[cid] = {'roas': 0.0, 'spend': 0.0}
+                continue
+            ins = (obj.get('insights') or {}).get('data', [])
+            if not ins:
+                out[cid] = {'roas': 0.0, 'spend': 0.0}
+                continue
+            row = ins[0]
+            try:
+                spend = float(row.get('spend', 0) or 0)
+            except (TypeError, ValueError):
+                spend = 0.0
+            out[cid] = {
+                'roas': _extract_roas(row.get('purchase_roas'), '7d_click'),
+                'spend': spend,
+            }
+        time.sleep(0.5)
+    return out
+
+
+# ──────────────────────────────────────────────────────────────────────────────
 # Data collection
 # ──────────────────────────────────────────────────────────────────────────────
 
@@ -285,8 +342,13 @@ def collect_camps():
             time.sleep(0.4)
 
     # Pull audience targeting for every camp
-    print(f"Fetching audience targeting for {len(set(all_cids))} unique camps...")
-    aud_map = fetch_audience_map(list(set(all_cids)))
+    unique_cids = list(set(all_cids))
+    print(f"Fetching audience targeting for {len(unique_cids)} unique camps...")
+    aud_map = fetch_audience_map(unique_cids)
+
+    # Pull 7d ROAS for every camp
+    print(f"Fetching 7d ROAS for {len(unique_cids)} unique camps...")
+    roas_map = fetch_roas_map(unique_cids)
 
     # Annotate + bucket
     for (portal, product, category), camps in raw_records.items():
@@ -294,6 +356,9 @@ def collect_camps():
         bp['cat'] = category
         for c in camps:
             c['segment'] = segment_label(aud_map.get(c['cid'], {}))
+            ri = roas_map.get(c['cid'], {})
+            c['roas_7d']  = ri.get('roas', 0.0)
+            c['spend_7d'] = ri.get('spend', 0.0)
             bp['camps'].append(c)
 
     return by_portal
@@ -347,24 +412,36 @@ def write_portal_tab(sh, portal, products, ist_date_label):
     rows.append(["TOTAL", "", portal_camp_count, portal_budget, 100.0])
     rows.append([])
 
-    # Section B — per-camp
+    # Section B — per-camp (camps within each product sorted by 7d ROAS desc)
     rows.append(["PER-CAMP DETAIL"])
-    rows.append(["Product / Camp Name", "Category", "Camp ID", "Account",
+    rows.append(["Product / Camp Name", "7d ROAS", "Category", "Camp ID", "Account",
                  "Segment (Real Audience)", "Budget (₹)"])
     for product, p in sorted(products.items(),
                               key=lambda kv: -sum(c['budget'] for c in kv[1]['camps'])):
         pb = sum(c['budget'] for c in p['camps'])
-        rows.append([f"▼ {product}  ({len(p['camps'])} camps)", p['cat'], "", "", "", pb])
-        for c in sorted(p['camps'], key=lambda x: -x['budget']):
-            rows.append(["    " + c['name'], p['cat'], c['cid'], c['account'],
+        # Product-level weighted ROAS for the rollup row
+        psp = sum(c.get('spend_7d', 0) for c in p['camps'])
+        prev = sum(c.get('spend_7d', 0) * c.get('roas_7d', 0) for c in p['camps'])
+        product_roas = round(prev / psp, 2) if psp else 0.0
+        rows.append([f"▼ {product}  ({len(p['camps'])} camps)",
+                     product_roas, p['cat'], "", "", "", pb])
+        for c in sorted(p['camps'], key=lambda x: -x.get('roas_7d', 0)):
+            rows.append(["    " + c['name'],
+                         round(c.get('roas_7d', 0), 2),
+                         p['cat'], c['cid'], c['account'],
                          c.get('segment', '?'), c['budget']])
-    rows.append(["TOTAL", "", "", "", "", portal_budget])
+    # Total row — weighted ROAS across whole portal
+    psp_all = sum(c.get('spend_7d', 0) for p in products.values() for c in p['camps'])
+    prev_all = sum(c.get('spend_7d', 0) * c.get('roas_7d', 0)
+                   for p in products.values() for c in p['camps'])
+    total_roas = round(prev_all / psp_all, 2) if psp_all else 0.0
+    rows.append(["TOTAL", total_roas, "", "", "", "", portal_budget])
 
     # Replace tab
     existing = {w.title: w for w in sh.worksheets()}
     if tab_title in existing:
         sh.del_worksheet(existing[tab_title])
-    ws = sh.add_worksheet(title=tab_title, rows=len(rows) + 10, cols=6)
+    ws = sh.add_worksheet(title=tab_title, rows=len(rows) + 10, cols=7)
     ws.update(range_name='A1', values=rows, value_input_option='USER_ENTERED')
 
     # Formatting
@@ -375,7 +452,7 @@ def write_portal_tab(sh, portal, products, ist_date_label):
     # Title row in portal color
     fmt.append({'repeatCell': {
         'range': {'sheetId': sheet_id, 'startRowIndex': 0, 'endRowIndex': 1,
-                  'startColumnIndex': 0, 'endColumnIndex': 6},
+                  'startColumnIndex': 0, 'endColumnIndex': 7},
         'cell': {'userEnteredFormat': {
             'backgroundColor': color,
             'textFormat': {'bold': True, 'fontSize': 12}}},
@@ -387,13 +464,13 @@ def write_portal_tab(sh, portal, products, ist_date_label):
                 return i
         return None
 
-    for label, ncols in [("PRODUCT ROLLUP", 5), ("PER-CAMP DETAIL", 6)]:
+    for label, ncols in [("PRODUCT ROLLUP", 5), ("PER-CAMP DETAIL", 7)]:
         r = find_row(label)
         if r is None:
             continue
         fmt.append({'repeatCell': {
             'range': {'sheetId': sheet_id, 'startRowIndex': r-1, 'endRowIndex': r,
-                      'startColumnIndex': 0, 'endColumnIndex': 6},
+                      'startColumnIndex': 0, 'endColumnIndex': 7},
             'cell': {'userEnteredFormat': {
                 'backgroundColor': {'red': 0.85, 'green': 0.85, 'blue': 0.95},
                 'textFormat': {'bold': True, 'fontSize': 11}}},
@@ -413,7 +490,7 @@ def write_portal_tab(sh, portal, products, ist_date_label):
         if first == 'TOTAL':
             fmt.append({'repeatCell': {
                 'range': {'sheetId': sheet_id, 'startRowIndex': i-1, 'endRowIndex': i,
-                          'startColumnIndex': 0, 'endColumnIndex': 6},
+                          'startColumnIndex': 0, 'endColumnIndex': 7},
                 'cell': {'userEnteredFormat': {
                     'textFormat': {'bold': True, 'fontSize': 11},
                     'backgroundColor': {'red': 0.93, 'green': 0.93, 'blue': 0.93}}},
@@ -421,7 +498,7 @@ def write_portal_tab(sh, portal, products, ist_date_label):
         elif first.startswith('▼ '):
             fmt.append({'repeatCell': {
                 'range': {'sheetId': sheet_id, 'startRowIndex': i-1, 'endRowIndex': i,
-                          'startColumnIndex': 0, 'endColumnIndex': 6},
+                          'startColumnIndex': 0, 'endColumnIndex': 7},
                 'cell': {'userEnteredFormat': {
                     'textFormat': {'bold': True},
                     'backgroundColor': {'red': 0.97, 'green': 0.97, 'blue': 0.97}}},
@@ -432,7 +509,7 @@ def write_portal_tab(sh, portal, products, ist_date_label):
         'fields': 'gridProperties.frozenRowCount'}})
     fmt.append({'autoResizeDimensions': {
         'dimensions': {'sheetId': sheet_id, 'dimension': 'COLUMNS',
-                       'startIndex': 0, 'endIndex': 6}}})
+                       'startIndex': 0, 'endIndex': 7}}})
 
     sh.batch_update({'requests': fmt})
     return tab_title, sheet_id, len(rows), portal_camp_count, portal_budget
