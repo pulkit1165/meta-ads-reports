@@ -56,6 +56,31 @@ ACCOUNTS = [
     (os.getenv('SM_CREDIT_LINE_06'), 'SM CL 06'),
 ]
 
+# Per-portal mapping for the new "Today ROAS Performance" header section.
+# Aggregates Meta spend/budget across all accounts of each portal, and pulls
+# today's orders/revenue from the matching Shopify store.
+PORTAL_ACCOUNTS = {
+    'NBP': [
+        (os.getenv('NBP_SKIN'),         'NBP Skin'),
+        (os.getenv('NBP_HAIR_PERFUME'), 'NBP Hair Perfume'),
+        (os.getenv('NBP_CRYSTALS'),     'NBP Crystals'),
+    ],
+    'SM': ACCOUNTS,
+    'SML': [
+        (os.getenv('SML_SKIN'),     'SML Skin'),
+        (os.getenv('SML_HAIR'),     'SML Hair'),
+        (os.getenv('SML_CRYSTALS'), 'SML Crystals'),
+        (os.getenv('SML_CL_06'),    'SML CL 06'),
+        (os.getenv('SML_CL_07'),    'SML CL 07'),
+    ],
+}
+
+PORTAL_SHOPIFY = {
+    'NBP': (os.getenv('SHOPIFY_STORE_URL_NBP'), os.getenv('SHOPIFY_ACCESS_TOKEN_NBP')),
+    'SM':  (os.getenv('SHOPIFY_STORE_URL'),     os.getenv('SHOPIFY_ACCESS_TOKEN')),
+    'SML': (os.getenv('SHOPIFY_STORE_URL_SML'), os.getenv('SHOPIFY_ACCESS_TOKEN_SML')),
+}
+
 # ROAS buckets for the success-rate section (ascending)
 ROAS_BUCKETS = [1.0, 1.5, 1.75, 2.0, 3.0]
 
@@ -765,16 +790,210 @@ def render_today_inner(agg, date_str, ts_label, sheet_url, heading=None):
 """
 
 
-def render_html(camps, ads, date_str, ts_label, active_ads=None):
+def fetch_portal_meta(date_str):
+    """Per portal: today's ad spend (account-level insights) plus active &
+    total daily-budget summed from campaigns + their adsets (CBO + ABO).
+
+    Returns: {portal: {ad_spent, active_budget, all_budget}}
+    """
+    out = {p: {'ad_spent': 0.0, 'active_budget': 0.0, 'all_budget': 0.0}
+           for p in PORTAL_ACCOUNTS}
+    for portal, accts in PORTAL_ACCOUNTS.items():
+        for acct_id, acct_name in accts:
+            if not acct_id: continue
+
+            # Today's spend (account-level — fast, one call per account)
+            try:
+                spend_data = paginate(f'{GRAPH}/{acct_id}/insights', {
+                    'level': 'account', 'fields': 'spend',
+                    'time_range': json.dumps({'since': date_str, 'until': date_str}),
+                }, max_pages=2)
+                for row in spend_data:
+                    out[portal]['ad_spent'] += safe_float(row.get('spend'))
+            except Exception as e:
+                print(f"   ⚠️  spend fetch failed for {acct_name}: {e}")
+
+            # Currently-active campaigns + their active-adset budgets (CBO & ABO).
+            # Filtering to effective_status=ACTIVE keeps the budget reflective of
+            # what's actually running — historical PAUSED budgets are noise.
+            try:
+                camps = paginate(f'{GRAPH}/{acct_id}/campaigns', {
+                    'fields': 'effective_status,daily_budget,adsets.limit(50){daily_budget,effective_status}',
+                    'effective_status': json.dumps(['ACTIVE']),
+                    'limit': 200,
+                })
+            except Exception as e:
+                print(f"   ⚠️  campaign fetch failed for {acct_name}: {e}")
+                continue
+
+            for c in camps:
+                # CBO: campaign-level daily_budget; ABO: sum active adset budgets
+                cbo = safe_float(c.get('daily_budget')) / 100
+                abo = sum(
+                    safe_float(a.get('daily_budget')) / 100
+                    for a in (c.get('adsets', {}).get('data') or [])
+                    if a.get('effective_status') == 'ACTIVE'
+                )
+                budget = cbo if cbo > 0 else abo
+                out[portal]['active_budget'] += budget
+                out[portal]['all_budget']    += budget   # currently same — only active counted
+    return out
+
+
+def fetch_portal_shopify(date_str):
+    """Per portal: today's order count + total invoice value from Shopify.
+    'Today' = since 00:00 IST on date_str.
+    Returns: {portal: {order_count, revenue}}
+    """
+    out = {p: {'order_count': 0, 'revenue': 0.0} for p in PORTAL_SHOPIFY}
+    since = f"{date_str}T00:00:00+05:30"   # IST midnight
+    for portal, (url, token) in PORTAL_SHOPIFY.items():
+        if not (url and token):
+            print(f"   ⚠️  Shopify creds missing for {portal} — skipping")
+            continue
+        api = f'https://{url}/admin/api/2024-01/orders.json'
+        params = {'created_at_min': since, 'limit': 250, 'status': 'any',
+                  'fields': 'id,total_price,financial_status,cancelled_at'}
+        headers = {'X-Shopify-Access-Token': token}
+        try:
+            page = 0
+            while api:
+                page += 1
+                r = requests.get(api, params=params, headers=headers, timeout=60)
+                if r.status_code != 200:
+                    print(f"   ⚠️  Shopify {portal} HTTP {r.status_code} on page {page}")
+                    break
+                for o in r.json().get('orders', []):
+                    if o.get('cancelled_at'): continue   # exclude cancelled
+                    out[portal]['order_count'] += 1
+                    out[portal]['revenue']     += safe_float(o.get('total_price'))
+                # Cursor pagination via Link header
+                link = r.headers.get('Link', '')
+                nxt = None
+                for part in link.split(','):
+                    if 'rel="next"' in part:
+                        nxt = part.split(';')[0].strip(' <>')
+                api = nxt
+                params = None  # next URL already has the page token
+                time.sleep(0.4)
+        except Exception as e:
+            print(f"   ⚠️  Shopify {portal} fetch failed: {e}")
+    return out
+
+
+def compute_today_roas_perf(meta_data, shopify_data):
+    """Combine Meta + Shopify into per-portal rows + grand totals."""
+    portals = list(PORTAL_ACCOUNTS.keys())
+    rows = {}
+    grand = {'order_count': 0, 'revenue': 0.0,
+             'ad_spent': 0.0, 'active_budget': 0.0, 'all_budget': 0.0}
+    for p in portals:
+        m = meta_data.get(p, {})
+        s = shopify_data.get(p, {})
+        ad_spent      = m.get('ad_spent', 0.0)
+        revenue       = s.get('revenue', 0.0)
+        rows[p] = {
+            'order_count':   s.get('order_count', 0),
+            'revenue':       revenue,
+            'ad_spent':      ad_spent,
+            'active_budget': m.get('active_budget', 0.0),
+            'all_budget':    m.get('all_budget', 0.0),
+            'roas':          round(revenue / ad_spent, 2) if ad_spent > 0 else 0.0,
+        }
+        for k in ('order_count', 'revenue', 'ad_spent', 'active_budget', 'all_budget'):
+            grand[k] += rows[p][k]
+    grand['roas'] = round(grand['revenue'] / grand['ad_spent'], 2) if grand['ad_spent'] > 0 else 0.0
+    return {'rows': rows, 'grand': grand, 'portals': portals}
+
+
+def render_today_roas_section(perf, ts_label):
+    """HTML for the new 'Today ROAS Performance' header section
+    (5 summary cards + per-portal breakdown table). Mirrors Eagle-ads layout."""
+    g = perf['grand']
+    def inr(n):     return f"₹{n:,.2f}" if isinstance(n, float) else f"₹{n:,}"
+    def roas_cls(r): return 'pos' if r >= 1 else 'neg'
+
+    cards = f"""
+    <div class="trp-cards">
+      <div class="trp-card"><h3>Total Orders</h3><p>{g['order_count']:,}</p></div>
+      <div class="trp-card"><h3>Total Revenue</h3><p>{inr(g['revenue'])}</p></div>
+      <div class="trp-card"><h3>Ad Spent</h3><p>{inr(g['ad_spent'])}</p></div>
+      <div class="trp-card"><h3>Total Active budget</h3><p>{inr(g['active_budget'])}</p></div>
+      <div class="trp-card"><h3>ROAS</h3><p class="trp-{roas_cls(g['roas'])}">{g['roas']:.2f}</p></div>
+    </div>"""
+
+    body_rows = ""
+    for p in perf['portals']:
+        d = perf['rows'][p]
+        body_rows += f"""
+        <tr>
+          <td class="trp-store">{p}</td>
+          <td>{d['order_count']:,}</td>
+          <td>{inr(d['revenue'])}</td>
+          <td>{inr(d['ad_spent'])}</td>
+          <td>{inr(d['active_budget'])}</td>
+          <td>{inr(d['all_budget'])}</td>
+          <td class="trp-{roas_cls(d['roas'])}"><strong>{d['roas']:.2f}</strong></td>
+        </tr>"""
+
+    table = f"""
+    <div class="trp-table-wrap">
+      <h3 class="trp-subhead">📍 Store Wise Breakdown</h3>
+      <table class="trp-table">
+        <thead><tr>
+          <th>Store</th><th>Orders</th><th>Revenue (₹)</th><th>Ad Spent (₹)</th>
+          <th>Active Budget (₹)</th><th>Total Budget (₹)</th><th>ROAS</th>
+        </tr></thead>
+        <tbody>{body_rows}
+        </tbody>
+      </table>
+    </div>"""
+
+    return f"""
+  <section class="trp-section">
+    <h2 class="trp-heading">📊 Today ROAS Performance</h2>
+    {cards}
+    {table}
+    <p class="trp-note">All-portal view (NBP + SM + SML) · Updated {ts_label} · Refreshes hourly</p>
+  </section>"""
+
+
+# CSS appended to render_today_styles() output via render_html()
+TRP_STYLES = """
+.trp-section{margin-bottom:32px}
+.trp-heading{font-size:20px;font-weight:700;color:#0d2145;margin-bottom:14px}
+.trp-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:16px;margin-bottom:20px}
+.trp-card{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:18px;text-align:center}
+.trp-card h3{color:#6b7280;font-size:12px;font-weight:500;margin-bottom:8px;text-transform:none}
+.trp-card p{font-size:22px;font-weight:700;color:#0d2145}
+.trp-card .trp-pos{color:#059669}
+.trp-card .trp-neg{color:#dc2626}
+.trp-table-wrap{background:#fff;border-radius:12px;box-shadow:0 1px 3px rgba(0,0,0,.08);padding:20px;overflow-x:auto}
+.trp-subhead{font-size:15px;font-weight:600;color:#0d2145;margin-bottom:12px}
+.trp-table{width:100%;border-collapse:collapse;font-size:13px}
+.trp-table th{background:#f3f4f6;text-align:left;padding:10px 14px;font-weight:600;color:#374151;border-bottom:1px solid #e5e7eb}
+.trp-table td{padding:10px 14px;border-bottom:1px solid #f3f4f6}
+.trp-table .trp-store{font-weight:600;color:#0d2145}
+.trp-table .trp-pos{color:#059669;font-weight:700}
+.trp-table .trp-neg{color:#dc2626;font-weight:700}
+.trp-note{font-size:11px;color:#6b7280;margin-top:8px;text-align:right}
+"""
+
+
+def render_html(camps, ads, date_str, ts_label, active_ads=None, perf=None):
     """Build a single-page HTML dashboard mirroring the NTN dashboard's style.
     Output goes to out/today_live.html (always-current) AND out/today_live_<date>.html.
     `active_ads` is optional; when passed, the Creative Type Mix section shows
     real active counts alongside spent-today counts.
+    `perf` is optional all-portal Today-ROAS-Performance data; when passed,
+    a header section is rendered above the SM-only "Today's Live Tracker".
     """
     agg = compute_today_aggregates(camps, ads, active_ads=active_ads)
     sheet_url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}"
     inner = render_today_inner(agg, date_str, ts_label, sheet_url)
-    styles = render_today_styles()
+    if perf is not None:
+        inner = render_today_roas_section(perf, ts_label) + inner
+    styles = render_today_styles() + TRP_STYLES
 
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -862,9 +1081,19 @@ def main():
 
     write(rows, args.date, ts_label)
 
+    # All-portal Today ROAS Performance section (Meta + Shopify per portal)
+    print("→ Fetching all-portal Meta data (NBP / SM / SML)…")
+    portal_meta = fetch_portal_meta(args.date)
+    print("→ Fetching all-portal Shopify orders…")
+    portal_shopify = fetch_portal_shopify(args.date)
+    perf = compute_today_roas_perf(portal_meta, portal_shopify)
+    for p in perf['portals']:
+        d = perf['rows'][p]
+        print(f"   {p:<4} {d['order_count']:>4} orders · ₹{d['revenue']:>10,.0f} rev · ₹{d['ad_spent']:>10,.0f} spend · ROAS {d['roas']:.2f}")
+
     # Also produce an HTML dashboard alongside the sheet update.
     print("→ Rendering HTML dashboard…")
-    html = render_html(camps, ads, args.date, ts_label, active_ads=active_ads)
+    html = render_html(camps, ads, args.date, ts_label, active_ads=active_ads, perf=perf)
     out_now    = OUT_DIR / 'today_live.html'                     # always-current (overwritten)
     out_dated  = OUT_DIR / f'today_live_{args.date}.html'        # date-stamped history
     out_now.write_text(html, encoding='utf-8')
