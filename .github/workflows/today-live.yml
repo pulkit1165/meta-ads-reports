@@ -2,9 +2,11 @@ name: Today's Live Report (hourly, IST business hours)
 
 on:
   schedule:
-    # Fires at HH:30 UTC = (HH+1):00 IST. Range 03:30–13:30 UTC = 09:00–19:00 IST.
-    # 11 runs per day, all on the top of the IST hour (09:00, 10:00, …, 19:00).
-    - cron: "30 3-13 * * *"
+    # Fires every 30 min UTC, between 03:00 and 13:30 UTC = 08:30–19:00 IST.
+    # That's 22 attempts per day. GitHub Actions cron is best-effort and silently
+    # drops 50–70% of scheduled firings under load — doubling the firing rate
+    # gets us to roughly hourly actual updates in practice.
+    - cron: "0,30 3-13 * * *"
   workflow_dispatch:
 
 concurrency:
@@ -67,16 +69,23 @@ jobs:
         id: today_live
         run: python3 scripts/today_live_report.py
 
+      # The next 3 steps refresh secondary dashboards (NTN, KPI, Categories).
+      # They hit Sheets heavily and occasionally fail with 429 read-quota errors.
+      # continue-on-error keeps the workflow green so the Cloudflare deploy still
+      # runs — the today_live dashboard the operator watches always gets fresh data.
       - name: Refresh KPI Daily (last 2 days — today + yesterday)
-        if: ${{ success() }}
+        if: ${{ steps.today_live.outcome == 'success' }}
+        continue-on-error: true
         run: python3 scripts/kpi_daily_builder.py --days 2
 
       - name: Refresh Category Heads (--no-history, uses cached 7-day data)
-        if: ${{ success() }}
+        if: ${{ steps.today_live.outcome == 'success' }}
+        continue-on-error: true
         run: python3 scripts/category_reports.py --no-history
 
       - name: Rebuild NTN dashboard with today's live data embedded
-        if: ${{ success() }}
+        if: ${{ steps.today_live.outcome == 'success' }}
+        continue-on-error: true
         run: python3 scripts/auto_rebuild_dashboard.py
 
       - name: Upload HTML dashboard artifacts
