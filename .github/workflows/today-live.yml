@@ -22,6 +22,14 @@ jobs:
     env:
       GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
       META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      # Shopify creds for the Today ROAS Performance per-portal section.
+      # Script tolerates missing values (orders/revenue render as 0 with a warning).
+      SHOPIFY_STORE_URL:        ${{ secrets.SHOPIFY_STORE_URL }}
+      SHOPIFY_ACCESS_TOKEN:     ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+      SHOPIFY_STORE_URL_SML:    ${{ secrets.SHOPIFY_STORE_URL_SML }}
+      SHOPIFY_ACCESS_TOKEN_SML: ${{ secrets.SHOPIFY_ACCESS_TOKEN_SML }}
+      SHOPIFY_STORE_URL_NBP:    ${{ secrets.SHOPIFY_STORE_URL_NBP }}
+      SHOPIFY_ACCESS_TOKEN_NBP: ${{ secrets.SHOPIFY_ACCESS_TOKEN_NBP }}
       TZ: Asia/Kolkata
 
     steps:
