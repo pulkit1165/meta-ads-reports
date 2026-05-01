@@ -64,6 +64,7 @@ jobs:
           direction: restore
 
       - name: Run today_live_report
+        id: today_live
         run: python3 scripts/today_live_report.py
 
       - name: Refresh KPI Daily (last 2 days — today + yesterday)
@@ -96,14 +97,21 @@ jobs:
       # (Settings → Secrets and variables → Actions → Variables), these steps
       # are silently skipped. Once set, every workflow run pushes a fresh build
       # to <project-name>.pages.dev.
-      - name: Prepare landing page (NTN as index.html)
-        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && success() }}
+      - name: Prepare landing page (NTN as index.html, fallback to today_live)
+        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
         run: |
-          [ -f out/ntn_filtered.html ] && cp out/ntn_filtered.html out/index.html
+          if [ -f out/ntn_filtered.html ]; then
+            cp out/ntn_filtered.html out/index.html
+          elif [ -f out/today_live.html ]; then
+            # NTN rebuild failed (e.g., Sheets quota) — fall back so site root still loads.
+            cp out/today_live.html out/index.html
+          fi
           ls -la out/
 
+      # Deploy as long as today_live succeeded — don't let a downstream NTN-rebuild
+      # failure block the dashboard refresh that the operator actually watches.
       - name: Deploy to Cloudflare Pages
-        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && success() }}
+        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
