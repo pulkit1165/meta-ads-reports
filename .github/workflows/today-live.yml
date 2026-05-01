@@ -97,8 +97,11 @@ jobs:
       # (Settings → Secrets and variables → Actions → Variables), these steps
       # are silently skipped. Once set, every workflow run pushes a fresh build
       # to <project-name>.pages.dev.
+      # always() is required — without it, GHA's default behavior skips this step
+      # when ANY prior step failed (e.g. NTN-rebuild's Sheets read quota), even
+      # though our `if` condition is otherwise true.
       - name: Prepare landing page (NTN as index.html, fallback to today_live)
-        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
+        if: ${{ always() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
         run: |
           if [ -f out/ntn_filtered.html ]; then
             cp out/ntn_filtered.html out/index.html
@@ -111,7 +114,7 @@ jobs:
       # Deploy as long as today_live succeeded — don't let a downstream NTN-rebuild
       # failure block the dashboard refresh that the operator actually watches.
       - name: Deploy to Cloudflare Pages
-        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
+        if: ${{ always() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
