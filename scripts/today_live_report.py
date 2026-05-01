@@ -13,7 +13,7 @@ Sections:
                            type (Paras / Partnership / Static / Motion / Catalogue
                            / Testing / Others).
 
-Cadence: every hour during IST business hours 09:30–19:30 IST (managed by today-live.yml).
+Cadence: every hour on the top of IST hour, 09:00–19:00 IST (managed by today-live.yml).
 """
 
 import os, sys, json, argparse, requests, time
@@ -1037,7 +1037,7 @@ footer a{{color:#1a3d7c;text-decoration:none;border-bottom:1px dashed #1a3d7c}}
 <div class="main">{inner}</div>
 
 <footer>
-  🤖 Auto-rebuilds hourly during IST business hours (09:30–19:30) · <a href="{sheet_url}" target="_blank">Sheet source</a> · {ts_label}
+  🤖 Auto-rebuilds hourly during IST business hours (09:00–19:00) · <a href="{sheet_url}" target="_blank">Sheet source</a> · {ts_label}
 </footer>
 
 </body>
