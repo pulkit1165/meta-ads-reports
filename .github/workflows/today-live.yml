@@ -2,15 +2,19 @@ name: Today's Live Report (hourly, IST business hours)
 
 on:
   schedule:
-    # Fires every 30 min UTC, between 03:00 and 13:30 UTC = 08:30–19:00 IST.
-    # That's 22 attempts per day. GitHub Actions cron is best-effort and silently
-    # drops 50–70% of scheduled firings under load — doubling the firing rate
-    # gets us to roughly hourly actual updates in practice.
-    - cron: "0,30 3-13 * * *"
+    # Fires every 15 min UTC, between 03:00–13:45 UTC = 08:30–19:15 IST.
+    # That's 44 attempts/day. GitHub Actions cron is best-effort and on
+    # 2026-05-02 dropped 100% of scheduled firings before 10:00 IST. Pushing
+    # to 4 attempts/hour means even at GHA's 30% reliability we hit ~1
+    # successful run per hour. The concurrency group below prevents pile-up.
+    - cron: "0,15,30,45 3-13 * * *"
   workflow_dispatch:
 
 concurrency:
   group: today-live
+  # Cancel any queued duplicate. With every-15-min cron + 5-min run time, this
+  # prevents stale dispatches from queueing up if multiple cron firings land
+  # close together. The currently-running build always wins.
   cancel-in-progress: false
 
 permissions:
