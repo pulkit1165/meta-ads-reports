@@ -2,12 +2,11 @@ name: Today's Live Report (hourly, IST business hours)
 
 on:
   schedule:
-    # Fires every 15 min UTC, between 03:00–13:45 UTC = 08:30–19:15 IST.
-    # That's 44 attempts/day. GitHub Actions cron is best-effort and on
-    # 2026-05-02 dropped 100% of scheduled firings before 10:00 IST. Pushing
-    # to 4 attempts/hour means even at GHA's 30% reliability we hit ~1
-    # successful run per hour. The concurrency group below prevents pile-up.
-    - cron: "0,15,30,45 3-13 * * *"
+    # Fires at HH:05, HH:20, HH:35, HH:50 UTC = IST :35, :50, :05, :20.
+    # The :20 UTC firing = IST :50 of the previous hour — operator's preferred
+    # check time (data fresh ~10 min before each hour ticks). 4 attempts/hour
+    # so even at GHA's ~30% cron reliability, we land at least one near :50.
+    - cron: "5,20,35,50 4-14 * * *"
   workflow_dispatch:
 
 concurrency:
