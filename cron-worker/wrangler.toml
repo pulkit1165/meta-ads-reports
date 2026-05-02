@@ -1,0 +1,14 @@
+name = "meta-ads-cron-pinger"
+main = "worker.js"
+compatibility_date = "2024-12-01"
+
+# Cron triggers — Cloudflare Workers schedule is reliable to within ~1 min.
+# Pattern: "20 4-14 * * *" fires at UTC :20 hourly between 04:20 and 14:20 UTC,
+# which is IST 09:50 through 19:50 — operator's preferred dashboard refresh time
+# (data fresh ~10 min before each hour ticks over).
+[triggers]
+crons = ["20 4-14 * * *"]
+
+# Logs (optional — useful for debugging dispatch failures)
+[observability]
+enabled = true

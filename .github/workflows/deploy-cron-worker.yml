@@ -1,0 +1,35 @@
+name: Deploy Cron Pinger Worker
+
+# Auto-deploys the Cloudflare Worker that pings the today-live workflow
+# every hour at IST :50. See cron-worker/README.md for setup details.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'cron-worker/**'
+      - '.github/workflows/deploy-cron-worker.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Worker via wrangler
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: cron-worker
+          command: deploy
+          # Stream the GH PAT into Worker secrets at deploy time so the Worker
+          # can authenticate to the GitHub API. The secret is never logged.
+          secrets: |
+            GITHUB_PAT
+        env:
+          GITHUB_PAT: ${{ secrets.WORKFLOW_DISPATCH_PAT }}
