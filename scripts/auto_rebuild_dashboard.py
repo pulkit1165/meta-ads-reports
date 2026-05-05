@@ -524,10 +524,28 @@ print(f"[rolling] 3D ROAS: {D['roas_3d']} on {D['spend_3d']} ({D['days_3d']} day
 def _long_running_campaigns():
     out = []
     gha_sid = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
-    try:
-        gha_sh = gc.open_by_key(gha_sid)
-    except Exception as e:
-        print(f"[long-run] cannot open GHA sheet: {e}")
+    # The KPI Daily + date-extend steps before us burn through Sheets API
+    # quota, so this open_by_key often hits 429. Retry with backoff to avoid
+    # losing the section every run.
+    gha_sh = None
+    for attempt in range(3):
+        try:
+            gha_sh = gc.open_by_key(gha_sid)
+            break
+        except gspread.exceptions.APIError as e:
+            msg = str(e)
+            if '429' in msg or 'Quota exceeded' in msg:
+                wait = 30 * (attempt + 1)
+                print(f"[long-run] 429 on open — sleep {wait}s ({attempt+1}/3)")
+                time.sleep(wait)
+                continue
+            print(f"[long-run] cannot open GHA sheet: {e}")
+            return out
+        except Exception as e:
+            print(f"[long-run] cannot open GHA sheet: {e}")
+            return out
+    if gha_sh is None:
+        print("[long-run] gave up on open_by_key after retries")
         return out
 
     # Find the most recent tracker date that has tabs for all 3 portals.
