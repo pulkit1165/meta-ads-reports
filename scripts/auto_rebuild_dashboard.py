@@ -428,7 +428,12 @@ def _extend_with_gha_dates():
         return []
 
     for d in new_dates_sorted:
-        tab_label = d.strftime('%d %b %y').upper()      # '27 APR 26'
+        # IMPORTANT: campaign_tracker_builder.py writes tab names with
+        # `date_obj.day` (no zero-padding) — e.g. 'NBP 4 MAY 26' not 'NBP 04 MAY 26'.
+        # Using d.strftime('%d ...') here would zero-pad and silently miss
+        # single-digit-day tabs (1-9), which is why May 1-4 dates were
+        # showing '-' in the dashboard while April 25-30 worked.
+        tab_label = f"{d.day} {d.strftime('%b %y').upper()}"  # '27 APR 26' or '4 MAY 26'
         dl_label  = d.strftime('%-d-%b')                # '27-Apr'
         raw_label = d.strftime('%-d-%b-%Y')             # '27-Apr-2026'
 
