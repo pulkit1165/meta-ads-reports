@@ -1,0 +1,76 @@
+name: Shopify UTM Orders Report
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Lookback days (default 7). Ignored if 'since' is set."
+        required: false
+        default: "7"
+      since:
+        description: "Start date YYYY-MM-DD (overrides days)"
+        required: false
+        default: ""
+      until:
+        description: "End date YYYY-MM-DD (overrides days; inclusive)"
+        required: false
+        default: ""
+      portal:
+        description: "Limit to one portal (SM/SML/NBP). Empty = all 3."
+        required: false
+        default: ""
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      TZ: Asia/Kolkata
+      # Reports sheet ID (GHA-owned)
+      REPORTS_SHEET_ID: 1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4
+      # All 3 Shopify stores
+      SHOPIFY_STORE_URL:        ${{ secrets.SHOPIFY_STORE_URL }}
+      SHOPIFY_ACCESS_TOKEN:     ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+      SHOPIFY_STORE_URL_SML:    ${{ secrets.SHOPIFY_STORE_URL_SML }}
+      SHOPIFY_ACCESS_TOKEN_SML: ${{ secrets.SHOPIFY_ACCESS_TOKEN_SML }}
+      SHOPIFY_STORE_URL_NBP:    ${{ secrets.SHOPIFY_STORE_URL_NBP }}
+      SHOPIFY_ACCESS_TOKEN_NBP: ${{ secrets.SHOPIFY_ACCESS_TOKEN_NBP }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
+      - name: Run Shopify UTM extractor
+        run: |
+          ARGS=""
+          [ -n "${{ inputs.since }}" ] && ARGS="$ARGS --since ${{ inputs.since }}"
+          [ -n "${{ inputs.until }}" ] && ARGS="$ARGS --until ${{ inputs.until }}"
+          [ -n "${{ inputs.portal }}" ] && ARGS="$ARGS --portal ${{ inputs.portal }}"
+          # Only pass --days if no explicit since/until
+          if [ -z "${{ inputs.since }}" ] && [ -z "${{ inputs.until }}" ]; then
+            ARGS="$ARGS --days ${{ inputs.days }}"
+          fi
+          echo "Running with args: $ARGS"
+          python3 scripts/shopify_utm_orders.py $ARGS
