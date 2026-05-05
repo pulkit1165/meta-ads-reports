@@ -2,12 +2,13 @@
 
 > Living document. The Claude on whichever machine the user is currently working on keeps this current. Read this after `git pull` to see what's actively in flight, what just got shipped, and what the user is thinking about next.
 
-**Last updated:** 2026-04-30 by Claude on machine 3 (`/Users/navdeepsingh/meta-ads-reports`)
+**Last updated:** 2026-05-05 by Claude on machine 1 (`/Users/pulkitsharma/meta-ads-reports`)
 
 ---
 
 ## What's just shipped (last few sessions)
 
+- **🔧 NTN dashboard 429 quota fix (2026-05-05)** — `auto_rebuild_dashboard.py` was crashing mid-build inside `_extend_with_gha_dates()` with Google Sheets API 429 errors. The crash happened BEFORE `ntn_filtered.html` was written, so the deploy fell back to copying `today_live.html` as `index.html` — which is why the live site only showed today's section, no historical date columns. Fix: `_read_values_with_retry()` helper with 30/60/90s backoff on 429, `time.sleep(1.2)` between portal reads (~50/min cap, under 60/min quota), wrapped the call site in try/except so any future API glitch doesn't crash the whole build. Live site rebuilt to 117KB with all 32 date columns (2-Apr → 4-May).
 - **Active Budget by Product (per-portal) — scheduled twice daily 10 AM + 9 PM IST.** New script `scripts/active_budget_by_product.py` + workflow `.github/workflows/active-budget-by-product.yml`. Writes 3 date-stamped tabs to the operator's "Daily Camp Pushed" sheet (`1eW2_qPdsKJ8zAV5-hsXA5HtfVH9NwDhQLyHYGKz5hXk`): `📊 SM/SML/NBP — Active Budget by Product DD MMM YY`. Each tab has a PRODUCT ROLLUP + PER-CAMP DETAIL (Camp ID + real audience name from ad-set targeting + budget). SM cut excludes `SM_CREDIT_LINE_06`. Inline classifier fixes 2 catalogue bugs (wanda → Jewellery shortcut, `astro.*re` over-matching `astro_destiny_report`). Catalogue fix not yet ported back — see "in flight" below.
 - Cross-page nav on all 3 dashboards (NTN / Today Live / Categories) — current page highlighted, others linked
 - Category Heads summary KPI strip on top of each category panel + sheet tab — 8 spend-weighted cards: Active Ads, Spend, Revenue, ROAS, CTR, CPM, CPV, CPR/1k Reach
