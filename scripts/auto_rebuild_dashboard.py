@@ -488,6 +488,128 @@ except Exception as _ext_err:
     # missing dates will be backfilled on the next successful run.
     print(f"[date-extend] failed (non-fatal): {_ext_err}")
 
+# ── Rolling 3-day & 7-day blended ROAS (spend-weighted) ──────────────────
+# Walk the historical Ad Spend + ROAS arrays from newest backwards; collect
+# the most recent N days that have BOTH spend>0 and roas>0, then compute
+# spend-weighted ROAS. Skips '-' / empty / zero days so partial backfills
+# don't poison the average.
+def _rolling_roas(n_days):
+    pairs = []
+    for i in range(len(DL) - 1, -1, -1):
+        try:
+            spend = float((D['adspend'][i] or '0').replace(',', '').replace('₹', ''))
+            roas  = float((D['roas'][i]    or '0').replace(',', '').replace('x', ''))
+        except (ValueError, IndexError):
+            continue
+        if spend > 0 and roas > 0:
+            pairs.append((spend, roas))
+            if len(pairs) >= n_days:
+                break
+    if not pairs:
+        return ('—', '—', 0)
+    total_spend = sum(p[0] for p in pairs)
+    total_rev   = sum(p[0] * p[1] for p in pairs)
+    blended     = round(total_rev / total_spend, 2) if total_spend > 0 else 0
+    return (f'{blended}x', f'₹{int(total_spend):,}', len(pairs))
+
+D['roas_3d'], D['spend_3d'], D['days_3d'] = _rolling_roas(3)
+D['roas_7d'], D['spend_7d'], D['days_7d'] = _rolling_roas(7)
+print(f"[rolling] 3D ROAS: {D['roas_3d']} on {D['spend_3d']} ({D['days_3d']} days)  |  "
+      f"7D ROAS: {D['roas_7d']} on {D['spend_7d']} ({D['days_7d']} days)")
+
+# ── Long-running campaigns (Day 7+) ──────────────────────────────────────
+# Read the latest GHA tracker tabs (SM / SML / NBP) and surface campaigns
+# with Day Taken > 10  (Day Taken = report_date - start_date + 3, so >10
+# means age > 7 days). Returns a list of dicts ready for HTML rendering.
+def _long_running_campaigns():
+    out = []
+    gha_sid = os.environ.get('REPORTS_SHEET_ID') or '1hJ3IS2VDtTAEyyJIV__jvts9CMQdYhyxKAfWKtrkUH4'
+    try:
+        gha_sh = gc.open_by_key(gha_sid)
+    except Exception as e:
+        print(f"[long-run] cannot open GHA sheet: {e}")
+        return out
+
+    # Find the most recent tracker date that has tabs for all 3 portals.
+    pat = _re.compile(r'^(SM|SML|NBP)\s+(\d{1,2})\s+([A-Za-z]{3})\s+(\d{2})$')
+    by_date = {}  # {date: set(portals)}
+    title_by_date_portal = {}  # {(date, portal): title}
+    for ws in gha_sh.worksheets():
+        m = pat.match(ws.title.strip())
+        if not m: continue
+        try:
+            d = datetime.strptime(f"{m.group(2)} {m.group(3)} 20{m.group(4)}", '%d %b %Y').date()
+        except ValueError:
+            continue
+        portal = m.group(1)
+        by_date.setdefault(d, set()).add(portal)
+        title_by_date_portal[(d, portal)] = ws.title
+
+    if not by_date:
+        print("[long-run] no tracker tabs found")
+        return out
+
+    # Pick the most recent date that has at least one portal tab — we'll
+    # iterate dates from newest backwards until we find one we can read.
+    target_date = max(by_date.keys())
+    print(f"[long-run] reading tracker tabs for {target_date}")
+
+    for portal in ('SM', 'SML', 'NBP'):
+        title = title_by_date_portal.get((target_date, portal))
+        if not title:
+            print(f"  [long-run] no {portal} tab for {target_date}")
+            continue
+        try:
+            ws = gha_sh.worksheet(title)
+            time.sleep(1.0)  # rate-limit guard
+            rows = ws.get_all_values()
+        except Exception as e:
+            print(f"  [long-run] failed reading {title}: {e}")
+            continue
+        if not rows: continue
+        # Expect HEADERS = ['Account name', 'Campaign name', 'Attribution setting',
+        # 'Status', 'Start date', 'Day Taken', 'Amount spent (INR)', 'Roas 1 Day',
+        # 'Roas 2 days', 'Roas 3 days', 'Roas 7 days', 'Budget', ...]
+        # Indices: A=0 account, B=1 name, E=4 start, F=5 day_taken,
+        # G=6 spend, H=7 roas1d, K=10 roas7d, L=11 budget
+        for row in rows[1:]:
+            if len(row) < 12: continue
+            try:
+                day_taken = float((row[5] or '0').replace(',', '').strip())
+            except ValueError:
+                continue
+            age_days = day_taken - 3
+            if age_days <= 7:
+                continue
+            try:
+                spend  = float((row[6]  or '0').replace(',', '').replace('₹', ''))
+                roas1d = float((row[7]  or '0').replace(',', '').replace('x', '')) if (row[7] or '').strip() not in ('', '-') else 0.0
+                roas7d = float((row[10] or '0').replace(',', '').replace('x', '')) if (row[10] or '').strip() not in ('', '-') else 0.0
+                budget = float((row[11] or '0').replace(',', '').replace('₹', ''))
+            except (ValueError, IndexError):
+                continue
+            out.append({
+                'portal':    portal,
+                'account':   row[0].strip(),
+                'name':      row[1].strip(),
+                'start':     row[4].strip(),
+                'age':       int(age_days),
+                'spend':     spend,
+                'budget':    budget,
+                'roas_1d':   roas1d,
+                'roas_7d':   roas7d,
+            })
+    # Sort by budget desc — highest-cost long-runners surface first
+    out.sort(key=lambda c: -c['budget'])
+    print(f"[long-run] found {len(out)} campaigns with age > 7 days")
+    return out
+
+try:
+    LONG_RUNNERS = _long_running_campaigns()
+except Exception as _lr_err:
+    print(f"[long-run] failed (non-fatal): {_lr_err}")
+    LONG_RUNNERS = []
+
 # ── C1-C6 targets (from GHA sheet, editable by user) ───────────────────────
 # Targets live in the GHA-owned sheet, tab 'C1-C6 Targets'. If the tab doesn't
 # exist yet we auto-create it with sensible defaults so the user can edit and
@@ -766,6 +888,72 @@ def sb_rows():
             rows+=f'<tr><td>{tof}</td><td style="font-size:11px">{rem}</td><td>{fmt(nbp)}</td><td>{fmt(sm)}</td><td>{fmt(sml)}</td><td>{fmt(tot)}</td></tr>'
     return rows
 
+def build_long_runners_section():
+    """Renders the 'Long-Running Campaigns (Age > 7 days)' table.
+    Sorted by daily budget descending. Color-codes ROAS columns:
+    green ≥2.5, amber 1.5-2.5, red <1.5.
+    """
+    if not LONG_RUNNERS:
+        return ''
+    def roas_class(v):
+        if v >= 2.5: return 'val-good'
+        if v >= 1.5: return 'val-warn'
+        return 'val-bad'
+    def portal_badge(p):
+        colors = {'SM': '#1d4ed8', 'SML': '#065f46', 'NBP': '#92400e'}
+        bgs    = {'SM': '#dbeafe', 'SML': '#d1fae5', 'NBP': '#fef3c7'}
+        return f'<span style="background:{bgs.get(p,"#eee")};color:{colors.get(p,"#333")};padding:2px 8px;border-radius:6px;font-size:10px;font-weight:700">{p}</span>'
+
+    body_rows = []
+    for c in LONG_RUNNERS[:50]:  # cap at 50 — top long-runners by budget
+        body_rows.append(
+            f'<tr>'
+            f'<td>{portal_badge(c["portal"])}</td>'
+            f'<td style="font-size:11px">{c["account"]}</td>'
+            f'<td style="font-size:11px;max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="{c["name"]}">{c["name"]}</td>'
+            f'<td>{c["age"]}d</td>'
+            f'<td>₹{int(c["budget"]):,}</td>'
+            f'<td>₹{int(c["spend"]):,}</td>'
+            f'<td class="{roas_class(c["roas_1d"])}">{c["roas_1d"]:.2f}x</td>'
+            f'<td class="{roas_class(c["roas_7d"])}">{c["roas_7d"]:.2f}x</td>'
+            f'</tr>'
+        )
+
+    # Summary stats
+    total_budget = sum(c['budget'] for c in LONG_RUNNERS)
+    total_spend  = sum(c['spend']  for c in LONG_RUNNERS)
+    weighted_1d  = sum(c['spend'] * c['roas_1d'] for c in LONG_RUNNERS) / total_spend if total_spend > 0 else 0
+    weighted_7d  = sum(c['spend'] * c['roas_7d'] for c in LONG_RUNNERS) / total_spend if total_spend > 0 else 0
+    below_15_today = sum(1 for c in LONG_RUNNERS if c['roas_1d'] < 1.5)
+    below_15_pct   = round(100 * below_15_today / len(LONG_RUNNERS), 1) if LONG_RUNNERS else 0
+
+    return f"""
+  <div class="tbl-card full" style="margin-top:18px">
+    <div class="sec-ttl">⏳ Long-Running Campaigns (Age &gt; 7 days) <span style="font-weight:400;font-size:11px;color:#6b7280">·
+      {len(LONG_RUNNERS)} camps · ₹{int(total_budget):,} daily budget · ₹{int(total_spend):,} spent today ·
+      blended Today ROAS <b style="color:{'#059669' if weighted_1d>=2.0 else '#d97706' if weighted_1d>=1.0 else '#dc2626'}">{weighted_1d:.2f}x</b> ·
+      7D ROAS <b>{weighted_7d:.2f}x</b> ·
+      <b style="color:#dc2626">{below_15_today} ({below_15_pct}%)</b> below 1.5x today
+    </span></div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead>
+        <tr style="background:#f3e8ff">
+          <th style="padding:8px 10px;text-align:left;color:#6d28d9">Portal</th>
+          <th style="padding:8px 10px;text-align:left;color:#6d28d9">Account</th>
+          <th style="padding:8px 10px;text-align:left;color:#6d28d9">Campaign</th>
+          <th style="padding:8px 10px;color:#6d28d9">Age</th>
+          <th style="padding:8px 10px;color:#6d28d9">Budget</th>
+          <th style="padding:8px 10px;color:#6d28d9">Today Spend</th>
+          <th style="padding:8px 10px;color:#6d28d9">Today ROAS</th>
+          <th style="padding:8px 10px;color:#6d28d9">7D ROAS</th>
+        </tr>
+      </thead>
+      <tbody>{''.join(body_rows)}</tbody>
+    </table>
+    <p style="margin-top:8px;font-size:10px;color:#6b7280">Showing top {min(50, len(LONG_RUNNERS))} by daily budget · per the same-day kill protocol, anything below 1.5x today (Day 7+) is a kill candidate.</p>
+  </div>
+"""
+
 def ch_arr(key): return json.dumps([float(x) if x not in ['-',''] else None for x in D.get(key,[])])
 def ord_arr(): return json.dumps([float(str(x).replace(',','')) if x not in ['-',''] else None for x in D['orders']])
 
@@ -890,6 +1078,13 @@ footer{{text-align:center;padding:16px;color:#9ca3af;font-size:10px;border-top:1
     <div class="kpi spend"><div class="kpi-icon">📢</div><div class="kpi-lbl">Ad Spend</div><div class="kpi-val" id="v-s">—</div><div class="kpi-sub">Meta Ads</div></div>
     <div class="kpi rk"><div class="kpi-icon">🎯</div><div class="kpi-lbl">ROAS</div><div class="kpi-val" id="v-roas">—</div><div class="kpi-sub" id="v-badge"></div></div>
   </div>
+  <div class="kpi-grid" style="margin-top:14px">
+    <div class="kpi rk"><div class="kpi-icon">📈</div><div class="kpi-lbl">3-Day Rolling ROAS</div><div class="kpi-val">{D['roas_3d']}</div><div class="kpi-sub">All portals · {D['spend_3d']} on {D['days_3d']}d</div></div>
+    <div class="kpi rk"><div class="kpi-icon">📊</div><div class="kpi-lbl">7-Day Rolling ROAS</div><div class="kpi-val">{D['roas_7d']}</div><div class="kpi-sub">All portals · {D['spend_7d']} on {D['days_7d']}d</div></div>
+    <div class="kpi orders"><div class="kpi-icon">⏳</div><div class="kpi-lbl">Long-running Camps (Age &gt; 7d)</div><div class="kpi-val">{len(LONG_RUNNERS)}</div><div class="kpi-sub">Total daily budget: ₹{int(sum(c['budget'] for c in LONG_RUNNERS)):,}</div></div>
+    <div class="kpi spend"><div class="kpi-icon">💸</div><div class="kpi-lbl">Long-runner Spend Today</div><div class="kpi-val">₹{int(sum(c['spend'] for c in LONG_RUNNERS)):,}</div><div class="kpi-sub">{sum(1 for c in LONG_RUNNERS if c['roas_1d']<1.0)} below 1.0x today</div></div>
+  </div>
+  {build_long_runners_section()}
   <div class="tables-row">
     <div class="tbl-card full">
       <div class="sec-ttl">📊 Orders & Revenue Summary</div>
