@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Auto-rebuild NTN Dashboard — polls Google Sheet and rebuilds HTML on change"""
 
-import os, re, json, requests, subprocess, sys
+import os, re, json, requests, subprocess, sys, time
 from datetime import datetime
 from pathlib import Path
 from google.oauth2.service_account import Credentials
@@ -406,6 +406,27 @@ def _extend_with_gha_dates():
 
     # For each new date, derive adspend + weighted ROAS by reading SM/SML/NBP
     # tracker tabs (cols: 6 = Amount spent, 10 = Roas 7 days)
+    # Rate-limit guard: Google Sheets API allows 60 reads/minute/user. With 10
+    # dates × 3 portals × 2 reads (worksheet + values) we hit ~60+ reads here
+    # alone. Sleep + retry-on-429 keeps us under the limit and prevents the
+    # dashboard build from crashing mid-way (which leaves the live site stuck
+    # on today_live.html with no historical date columns).
+    def _read_values_with_retry(ws, max_tries=3):
+        for attempt in range(max_tries):
+            try:
+                return ws.get_all_values()
+            except gspread.exceptions.APIError as e:
+                msg = str(e)
+                if '429' in msg or 'Quota exceeded' in msg:
+                    sleep_s = 30 * (attempt + 1)
+                    print(f"[date-extend] 429 quota — sleep {sleep_s}s then retry ({attempt+1}/{max_tries})")
+                    time.sleep(sleep_s)
+                    continue
+                raise
+        # Final fallback: return empty so caller continues with other dates
+        print(f"[date-extend] giving up on {ws.title} after {max_tries} retries")
+        return []
+
     for d in new_dates_sorted:
         tab_label = d.strftime('%d %b %y').upper()      # '27 APR 26'
         dl_label  = d.strftime('%-d-%b')                # '27-Apr'
@@ -418,7 +439,9 @@ def _extend_with_gha_dates():
                 pws = gha_sh.worksheet(f'{portal} {tab_label}')
             except Exception:
                 continue
-            for row in pws.get_all_values()[1:]:  # skip header
+            time.sleep(1.2)  # ~50 reads/min cap; stays under 60/min quota
+            rows = _read_values_with_retry(pws)
+            for row in rows[1:]:  # skip header
                 if len(row) < 11:
                     continue
                 try:
@@ -452,7 +475,13 @@ def _extend_with_gha_dates():
             if isinstance(arr, list):
                 arr.append('-')
 
-_extend_with_gha_dates()
+try:
+    _extend_with_gha_dates()
+except Exception as _ext_err:
+    # Defensive: never let a quota/network glitch in date-extend crash the
+    # whole build. The dashboard renders with whatever NTN sheet has; the
+    # missing dates will be backfilled on the next successful run.
+    print(f"[date-extend] failed (non-fatal): {_ext_err}")
 
 # ── C1-C6 targets (from GHA sheet, editable by user) ───────────────────────
 # Targets live in the GHA-owned sheet, tab 'C1-C6 Targets'. If the tab doesn't
