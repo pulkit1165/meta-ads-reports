@@ -91,6 +91,17 @@ jobs:
         continue-on-error: true
         run: python3 scripts/auto_rebuild_dashboard.py
 
+      - name: Build v2 categories dashboard from SQLite (if DB present)
+        if: ${{ success() }}
+        continue-on-error: true
+        run: |
+          if [ -f state/ntn.db ]; then
+            mkdir -p out/v2
+            python3 scripts/v2/build_dashboard.py --days 30 --out out/v2/categories.html || echo "v2 build failed (non-fatal)"
+          else
+            echo "state/ntn.db not present yet — skipping v2 dashboard"
+          fi
+
       - name: Upload HTML dashboard artifacts
         if: always()
         uses: actions/upload-artifact@v4

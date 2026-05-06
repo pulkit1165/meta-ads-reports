@@ -95,6 +95,12 @@ jobs:
         if: ${{ success() }}
         run: python3 scripts/v2/classify_ads.py
 
+      - name: Build v2 dashboard (categories_v2.html)
+        if: ${{ success() }}
+        run: |
+          mkdir -p out/v2
+          python3 scripts/v2/build_dashboard.py --days 30 --out out/v2/categories.html
+
       - name: Print DB summary
         if: always()
         run: |
