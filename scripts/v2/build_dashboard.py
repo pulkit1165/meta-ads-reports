@@ -154,50 +154,77 @@ def render_html(payload_json: str, since: str, until: str) -> str:
         '__SINCE__', since).replace('__UNTIL__', until)
 
 
+
 HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>NTN Analytics — Categories v2</title>
+<title>NTN Analytics</title>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
 body { font-family:-apple-system,'Segoe UI',Roboto,sans-serif; background:#f0f4fb; color:#1a1a2e; font-size:13px; }
 a { color:#1a3d7c; text-decoration:none; }
-.header { background:linear-gradient(135deg,#0d2145,#1a3d7c); padding:14px 22px; color:#fff; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
-.header h1 { font-size:18px; }
-.header-meta { font-size:11px; color:rgba(255,255,255,.7); }
-.last-upd { font-size:10px; color:rgba(255,255,255,.5); }
 
-.controls { background:#fff; padding:14px 22px; border-bottom:1px solid #dde3f0; display:flex; gap:14px; flex-wrap:wrap; align-items:center; position:sticky; top:0; z-index:50; box-shadow:0 1px 4px rgba(0,0,0,.04); }
+/* Sidebar */
+.sidebar { position:fixed; top:0; left:0; height:100vh; width:220px; background:#0d2145; color:#fff; padding:18px 0; overflow-y:auto; box-shadow:2px 0 8px rgba(0,0,0,.08); z-index:100; }
+.sidebar-brand { padding:0 18px 14px; border-bottom:1px solid rgba(255,255,255,.1); margin-bottom:10px; }
+.sidebar-brand h1 { font-size:15px; font-weight:800; }
+.sidebar-brand p { font-size:10px; color:rgba(255,255,255,.5); margin-top:2px; }
+.menu { list-style:none; }
+.menu li a { display:flex; align-items:center; gap:10px; padding:10px 18px; color:rgba(255,255,255,.75); font-size:12px; font-weight:600; cursor:pointer; border-left:3px solid transparent; transition:all .12s; }
+.menu li a:hover { background:rgba(255,255,255,.05); color:#fff; }
+.menu li a.active { background:rgba(255,255,255,.08); color:#fff; border-left-color:#5b8def; font-weight:800; }
+.menu-icon { font-size:14px; width:18px; text-align:center; }
+.menu-section-lbl { padding:14px 18px 6px; font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.6px; color:rgba(255,255,255,.4); }
+.sidebar-footer { position:absolute; bottom:0; left:0; right:0; padding:14px 18px; border-top:1px solid rgba(255,255,255,.1); font-size:9px; color:rgba(255,255,255,.4); }
+.sidebar-footer a { color:rgba(255,255,255,.6); }
+
+/* Main wrapper */
+.wrap { margin-left:220px; min-height:100vh; }
+
+/* Top filter bar */
+.topbar { background:#fff; padding:12px 20px; border-bottom:1px solid #dde3f0; position:sticky; top:0; z-index:50; box-shadow:0 1px 4px rgba(0,0,0,.04); }
+.topbar-row { display:flex; gap:14px; flex-wrap:wrap; align-items:center; }
 .ctrl-group { display:flex; flex-direction:column; gap:3px; }
 .ctrl-lbl { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#6b7280; }
-.ctrl-input, .ctrl-select { padding:6px 9px; border:1px solid #dde3f0; border-radius:6px; font-size:12px; min-width:120px; background:#fff; }
-.preset-btns { display:flex; gap:5px; }
-.preset-btn { padding:6px 10px; border:1px solid #dde3f0; background:#fff; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600; }
+.ctrl-input, .ctrl-select { padding:5px 9px; border:1px solid #dde3f0; border-radius:6px; font-size:12px; min-width:120px; background:#fff; }
+.preset-btns { display:flex; gap:4px; }
+.preset-btn { padding:5px 10px; border:1px solid #dde3f0; background:#fff; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600; }
 .preset-btn.active { background:#1a3d7c; color:#fff; border-color:#1a3d7c; }
-.btn-clear { background:#fff5f5; color:#a3260a; border:1px solid #fed7d7; padding:6px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:700; }
+.btn-clear { background:#fff5f5; color:#a3260a; border:1px solid #fed7d7; padding:5px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:700; }
 .multi-sel { display:flex; gap:4px; flex-wrap:wrap; max-width:280px; }
 .chip { padding:3px 8px; border-radius:14px; background:#eef2ff; color:#1a3d7c; font-size:10px; font-weight:700; cursor:pointer; border:1px solid #dde3f0; }
 .chip.active { background:#1a3d7c; color:#fff; border-color:#1a3d7c; }
 
-.main { max-width:1700px; margin:0 auto; padding:18px 22px; }
+/* Page content */
+.page-area { padding:18px 20px; max-width:1700px; }
+.page { display:none; }
+.page.active { display:block; }
+.page h2 { font-size:18px; font-weight:800; color:#0d2145; margin-bottom:5px; }
+.page h2 .subtle { font-weight:400; font-size:12px; color:#6b7280; margin-left:8px; }
+.page-intro { color:#6b7280; margin-bottom:14px; font-size:12px; }
+
+/* KPI cards */
 .kpi-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:18px; }
 .kpi-card { background:#fff; padding:12px 14px; border-radius:10px; border:1px solid #dde3f0; }
 .kpi-lbl { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:#6b7280; font-weight:700; }
 .kpi-val { font-size:22px; font-weight:800; color:#0d2145; margin-top:2px; }
-.kpi-sub { font-size:10px; color:#6b7280; margin-top:2px; display:flex; gap:6px; align-items:center; }
-.delta-up { color:#059669; }
-.delta-down { color:#dc2626; }
+.kpi-sub { font-size:10px; color:#6b7280; margin-top:2px; }
+.delta-up { color:#059669; font-weight:700; }
+.delta-down { color:#dc2626; font-weight:700; }
 
-.section { background:#fff; border-radius:10px; padding:14px 16px; border:1px solid #dde3f0; margin-bottom:14px; }
-.section h2 { font-size:13px; font-weight:800; color:#0d2145; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid #eef2ff; display:flex; align-items:center; justify-content:space-between; }
-.section h2 .meta { font-weight:400; font-size:10px; color:#6b7280; }
+/* Cards/sections within a page */
+.card { background:#fff; border-radius:10px; padding:14px 16px; border:1px solid #dde3f0; margin-bottom:14px; }
+.card h3 { font-size:13px; font-weight:800; color:#0d2145; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid #eef2ff; display:flex; align-items:center; justify-content:space-between; }
+.card h3 .meta { font-weight:400; font-size:10px; color:#6b7280; }
+
 .charts-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
 @media (max-width:1100px) { .charts-row { grid-template-columns:1fr; } }
 .chart-wrap { position:relative; height:240px; }
 
+/* Tables */
 table { width:100%; border-collapse:collapse; font-size:11px; }
 th { background:#f8faff; color:#374151; padding:7px 9px; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px; border-bottom:1px solid #dde3f0; cursor:pointer; user-select:none; white-space:nowrap; }
 th:not(:first-child) { text-align:right; }
@@ -219,166 +246,304 @@ tr:hover td { background:#fafbff; }
 .btn-csv { background:#1a3d7c; color:#fff; border:none; padding:6px 11px; border-radius:6px; font-size:10px; cursor:pointer; font-weight:700; }
 .btn-csv:hover { background:#0d2145; }
 
-/* Heatmap-ish coloring for success rate cells */
-.sr-0 { background:#fef2f2; color:#7f1d1d; }
-.sr-low { background:#fef3c7; color:#78350f; }
-.sr-med { background:#dcfce7; color:#14532d; }
-.sr-hi { background:#bbf7d0; color:#065f46; font-weight:700; }
+/* Heatmap success cells */
+.sr-0 { background:#fef2f2; color:#7f1d1d; padding:2px 6px; border-radius:4px; }
+.sr-low { background:#fef3c7; color:#78350f; padding:2px 6px; border-radius:4px; }
+.sr-med { background:#dcfce7; color:#14532d; padding:2px 6px; border-radius:4px; }
+.sr-hi { background:#bbf7d0; color:#065f46; font-weight:700; padding:2px 6px; border-radius:4px; }
 </style>
 </head>
 <body>
 
-<div class="header">
-  <div>
-    <h1>📊 NTN Categories — Analytics</h1>
-    <div class="header-meta">DB-backed · Period: __SINCE__ → __UNTIL__ · all filters operate on the embedded dataset</div>
-    <div class="last-upd" id="last-upd"></div>
+<aside class="sidebar">
+  <div class="sidebar-brand">
+    <h1>📊 NTN Analytics</h1>
+    <p>SQLite-backed · Hourly refresh</p>
   </div>
-  <nav style="font-size:11px">
-    <a href="/" style="color:rgba(255,255,255,.85);border-bottom:1px dashed rgba(255,255,255,.5)">📊 NTN</a>&nbsp;&nbsp;
-    <a href="/today_live.html" style="color:rgba(255,255,255,.85);border-bottom:1px dashed rgba(255,255,255,.5)">🔴 Today</a>&nbsp;&nbsp;
-    <a href="/categories" style="color:rgba(255,255,255,.85);border-bottom:1px dashed rgba(255,255,255,.5)">📂 Old Categories</a>&nbsp;&nbsp;
-    <span style="color:#fff;border-bottom:2px solid #fff">📂 v2</span>
-  </nav>
-</div>
 
-<div class="controls">
-  <div class="ctrl-group">
-    <span class="ctrl-lbl">Date Range</span>
-    <div class="preset-btns" id="preset-btns">
-      <button class="preset-btn" data-days="1">Today</button>
-      <button class="preset-btn" data-days="3">3D</button>
-      <button class="preset-btn active" data-days="7">7D</button>
-      <button class="preset-btn" data-days="14">14D</button>
-      <button class="preset-btn" data-days="30">30D</button>
-      <button class="preset-btn" data-days="all">All</button>
+  <ul class="menu">
+    <li class="menu-section-lbl">Performance</li>
+    <li><a data-page="overview" class="active"><span class="menu-icon">📊</span>Overview</a></li>
+    <li><a data-page="trends"><span class="menu-icon">📈</span>Trends</a></li>
+
+    <li class="menu-section-lbl">Breakdowns</li>
+    <li><a data-page="categories"><span class="menu-icon">📂</span>Categories</a></li>
+    <li><a data-page="creatives"><span class="menu-icon">🎨</span>Creative Types</a></li>
+    <li><a data-page="sentiments"><span class="menu-icon">💬</span>Sentiments</a></li>
+    <li><a data-page="heatmap"><span class="menu-icon">🔥</span>Heatmap</a></li>
+
+    <li class="menu-section-lbl">Drill-Down</li>
+    <li><a data-page="products"><span class="menu-icon">🛍️</span>Products</a></li>
+    <li><a data-page="topads"><span class="menu-icon">🏆</span>Top Ads</a></li>
+    <li><a data-page="bottomads"><span class="menu-icon">🥶</span>Bottom Ads</a></li>
+
+    <li class="menu-section-lbl">Other Dashboards</li>
+    <li><a href="/" target="_self"><span class="menu-icon">🏠</span>NTN Home</a></li>
+    <li><a href="/today_live.html" target="_self"><span class="menu-icon">🔴</span>Today Live</a></li>
+    <li><a href="/categories" target="_self"><span class="menu-icon">📁</span>Old Categories</a></li>
+  </ul>
+
+  <div class="sidebar-footer" id="sidebar-footer">Loading…</div>
+</aside>
+
+<div class="wrap">
+
+  <!-- Top filter bar (sticky, applies to all pages) -->
+  <div class="topbar">
+    <div class="topbar-row">
+      <div class="ctrl-group">
+        <span class="ctrl-lbl">Date Range</span>
+        <div class="preset-btns" id="preset-btns">
+          <button class="preset-btn" data-days="1">Today</button>
+          <button class="preset-btn" data-days="3">3D</button>
+          <button class="preset-btn active" data-days="7">7D</button>
+          <button class="preset-btn" data-days="14">14D</button>
+          <button class="preset-btn" data-days="30">30D</button>
+          <button class="preset-btn" data-days="all">All</button>
+        </div>
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-lbl">From</span>
+        <input type="date" class="ctrl-input" id="from-date">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-lbl">To</span>
+        <input type="date" class="ctrl-input" id="to-date">
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-lbl">Portal</span>
+        <div class="multi-sel" id="filter-portals"></div>
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-lbl">Category</span>
+        <div class="multi-sel" id="filter-categories"></div>
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-lbl">Creative</span>
+        <div class="multi-sel" id="filter-creatives"></div>
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-lbl">Product</span>
+        <select class="ctrl-select" id="filter-product"><option value="">All Products</option></select>
+      </div>
+      <div class="ctrl-group">
+        <span class="ctrl-lbl">&nbsp;</span>
+        <button class="btn-clear" id="btn-clear">Clear Filters</button>
+      </div>
     </div>
   </div>
-  <div class="ctrl-group">
-    <span class="ctrl-lbl">Custom From</span>
-    <input type="date" class="ctrl-input" id="from-date">
-  </div>
-  <div class="ctrl-group">
-    <span class="ctrl-lbl">Custom To</span>
-    <input type="date" class="ctrl-input" id="to-date">
-  </div>
-  <div class="ctrl-group">
-    <span class="ctrl-lbl">Portal</span>
-    <div class="multi-sel" id="filter-portals"></div>
-  </div>
-  <div class="ctrl-group">
-    <span class="ctrl-lbl">Category</span>
-    <div class="multi-sel" id="filter-categories"></div>
-  </div>
-  <div class="ctrl-group">
-    <span class="ctrl-lbl">Creative Type</span>
-    <div class="multi-sel" id="filter-creatives"></div>
-  </div>
-  <div class="ctrl-group">
-    <span class="ctrl-lbl">Product</span>
-    <select class="ctrl-select" id="filter-product">
-      <option value="">All Products</option>
-    </select>
-  </div>
-  <div class="ctrl-group">
-    <span class="ctrl-lbl">&nbsp;</span>
-    <button class="btn-clear" id="btn-clear">Clear All Filters</button>
-  </div>
-</div>
 
-<div class="main">
-  <div class="kpi-strip" id="kpi-strip"></div>
+  <div class="page-area">
 
-  <div class="section">
-    <h2>📈 Trends Over Time <span class="meta" id="trend-meta"></span></h2>
-    <div class="charts-row">
-      <div class="chart-wrap"><canvas id="chart-spend-rev"></canvas></div>
-      <div class="chart-wrap"><canvas id="chart-roas"></canvas></div>
-    </div>
-    <div class="charts-row" style="margin-top:14px">
-      <div class="chart-wrap"><canvas id="chart-orders"></canvas></div>
-      <div class="chart-wrap"><canvas id="chart-cat-spend"></canvas></div>
-    </div>
-  </div>
+    <!-- ── PAGE: Overview ─────────────────────────────────────────── -->
+    <section class="page active" id="page-overview">
+      <h2>📊 Overview <span class="subtle" id="ov-meta"></span></h2>
+      <p class="page-intro">Top-line KPIs and high-level breakdown for the selected period. Use sidebar to drill deeper.</p>
 
-  <div class="section">
-    <h2>📂 Per-Category Breakdown <span class="meta">click rows to drill</span></h2>
-    <table id="tbl-categories">
-      <thead><tr>
-        <th data-col="category" data-type="str">Category</th>
-        <th data-col="active_ads" data-type="num">Active Ads</th>
-        <th data-col="active_camps" data-type="num">Camps</th>
-        <th data-col="spend" data-type="num">Spend (₹)</th>
-        <th data-col="revenue" data-type="num">Revenue (₹)</th>
-        <th data-col="purchases" data-type="num">Orders</th>
-        <th data-col="roas" data-type="num">ROAS</th>
-        <th data-col="cpm" data-type="num">CPM (₹)</th>
-        <th data-col="ctr" data-type="num">CTR (%)</th>
-        <th data-col="atc_rate" data-type="num">ATC%</th>
-        <th data-col="success_rate" data-type="num">Success% (7d)</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
+      <div class="kpi-strip" id="kpi-strip"></div>
 
-  <div class="section">
-    <h2>🎨 Creative Type × Category Heatmap <span class="meta">spend-weighted ROAS — green ≥2.5, amber 1.5-2.5, red &lt;1.5</span></h2>
-    <div style="overflow-x:auto"><table id="tbl-heatmap"></table></div>
-  </div>
+      <div class="card">
+        <h3>📈 Spend & ROAS by Day <span class="meta">spend-weighted, current filter</span></h3>
+        <div class="charts-row">
+          <div class="chart-wrap"><canvas id="chart-spend-rev"></canvas></div>
+          <div class="chart-wrap"><canvas id="chart-roas"></canvas></div>
+        </div>
+      </div>
 
-  <div class="section">
-    <h2>🛍️ Product Performance <button class="btn-csv" onclick="exportCSV('products')">↓ CSV</button></h2>
-    <table id="tbl-products">
-      <thead><tr>
-        <th data-col="product" data-type="str">Product</th>
-        <th data-col="category" data-type="str">Cat</th>
-        <th data-col="active_ads" data-type="num">Ads</th>
-        <th data-col="spend" data-type="num">Spend</th>
-        <th data-col="revenue" data-type="num">Revenue</th>
-        <th data-col="orders" data-type="num">Orders</th>
-        <th data-col="roas" data-type="num">ROAS</th>
-        <th data-col="hit_15" data-type="num">≥1.5x</th>
-        <th data-col="hit_20" data-type="num">≥2.0x</th>
-        <th data-col="hit_25" data-type="num">≥2.5x</th>
-        <th data-col="hit_30" data-type="num">≥3.0x</th>
-        <th data-col="hit_40" data-type="num">≥4.0x</th>
-        <th data-col="hit_50" data-type="num">≥5.0x</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
+      <div class="card">
+        <h3>📂 Top Categories</h3>
+        <table id="tbl-cat-mini">
+          <thead><tr><th>Category</th><th>Active Ads</th><th>Spend</th><th>Revenue</th><th>ROAS</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
 
-  <div class="section">
-    <h2>🏆 Top + Bottom Ads <button class="btn-csv" onclick="exportCSV('ads')">↓ CSV</button></h2>
-    <table id="tbl-ads">
-      <thead><tr>
-        <th data-col="portal" data-type="str">Portal</th>
-        <th data-col="category" data-type="str">Cat</th>
-        <th data-col="creative_type" data-type="str">Type</th>
-        <th data-col="ad_name" data-type="str">Ad / Campaign</th>
-        <th data-col="days_active" data-type="num">Days</th>
-        <th data-col="spend" data-type="num">Spend</th>
-        <th data-col="revenue" data-type="num">Revenue</th>
-        <th data-col="orders" data-type="num">Orders</th>
-        <th data-col="roas" data-type="num">ROAS</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
-  </div>
+    <!-- ── PAGE: Trends ───────────────────────────────────────────── -->
+    <section class="page" id="page-trends">
+      <h2>📈 Trends Over Time</h2>
+      <p class="page-intro">Time-series view of spend, revenue, ROAS, and orders.</p>
 
-  <div class="section">
-    <h2>💬 Sentiment × Creative Type <span class="meta">Edit sentiment_labels table to set readable names</span></h2>
-    <table id="tbl-sentiment">
-      <thead><tr>
-        <th data-col="sentiment" data-type="str">Sentiment</th>
-        <th data-col="creative_type" data-type="str">Creative Type</th>
-        <th data-col="active_ads" data-type="num">Ads</th>
-        <th data-col="spend" data-type="num">Spend</th>
-        <th data-col="revenue" data-type="num">Revenue</th>
-        <th data-col="roas" data-type="num">ROAS</th>
-      </tr></thead>
-      <tbody></tbody>
-    </table>
+      <div class="card">
+        <h3>Spend vs Revenue</h3>
+        <div class="chart-wrap" style="height:300px"><canvas id="chart-trend-spend-rev"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Daily ROAS</h3>
+        <div class="chart-wrap" style="height:280px"><canvas id="chart-trend-roas"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Daily Orders</h3>
+        <div class="chart-wrap" style="height:280px"><canvas id="chart-trend-orders"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Day-by-Day Table</h3>
+        <table id="tbl-daily">
+          <thead><tr><th>Date</th><th>Active Ads</th><th>Spend</th><th>Revenue</th><th>Orders</th><th>ROAS</th><th>CPM</th><th>CTR</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── PAGE: Categories ───────────────────────────────────────── -->
+    <section class="page" id="page-categories">
+      <h2>📂 Per-Category Breakdown</h2>
+      <p class="page-intro">All metrics by product category. Click any column header to sort.</p>
+
+      <div class="card">
+        <h3>📊 Spend & ROAS by Category</h3>
+        <div class="chart-wrap" style="height:280px"><canvas id="chart-cat-bar"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Full Table</h3>
+        <table id="tbl-categories">
+          <thead><tr>
+            <th data-col="category" data-type="str">Category</th>
+            <th data-col="active_ads" data-type="num">Active Ads</th>
+            <th data-col="active_camps" data-type="num">Camps</th>
+            <th data-col="spend" data-type="num">Spend (₹)</th>
+            <th data-col="revenue" data-type="num">Revenue (₹)</th>
+            <th data-col="purchases" data-type="num">Orders</th>
+            <th data-col="roas" data-type="num">ROAS</th>
+            <th data-col="cpm" data-type="num">CPM</th>
+            <th data-col="ctr" data-type="num">CTR</th>
+            <th data-col="atc_rate" data-type="num">ATC%</th>
+            <th data-col="success_rate" data-type="num">Success% (7d)</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── PAGE: Creative Types ───────────────────────────────────── -->
+    <section class="page" id="page-creatives">
+      <h2>🎨 Creative Types</h2>
+      <p class="page-intro">Performance by creative origin: Paras, Wanda (AI), Partnership, Motion, Static, etc.</p>
+
+      <div class="card">
+        <h3>Comparison</h3>
+        <div class="chart-wrap" style="height:280px"><canvas id="chart-ct-bar"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>Detail Table</h3>
+        <table id="tbl-creatives">
+          <thead><tr>
+            <th data-col="creative_type" data-type="str">Type</th>
+            <th data-col="active_ads" data-type="num">Ads</th>
+            <th data-col="spend" data-type="num">Spend</th>
+            <th data-col="revenue" data-type="num">Revenue</th>
+            <th data-col="purchases" data-type="num">Orders</th>
+            <th data-col="roas" data-type="num">ROAS</th>
+            <th data-col="success_rate" data-type="num">Success% (7d)</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── PAGE: Sentiments ───────────────────────────────────────── -->
+    <section class="page" id="page-sentiments">
+      <h2>💬 Sentiments × Creative Type</h2>
+      <p class="page-intro">Sentiment codes (st1, st2…) come from <code>_st\d+_</code> tags in ad/campaign names. Update <code>sentiment_labels</code> table to set readable labels.</p>
+
+      <div class="card">
+        <h3>Sentiment Detail</h3>
+        <table id="tbl-sentiment">
+          <thead><tr>
+            <th data-col="sentiment" data-type="str">Sentiment</th>
+            <th data-col="creative_type" data-type="str">Creative Type</th>
+            <th data-col="active_ads" data-type="num">Ads</th>
+            <th data-col="spend" data-type="num">Spend</th>
+            <th data-col="revenue" data-type="num">Revenue</th>
+            <th data-col="roas" data-type="num">ROAS</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── PAGE: Heatmap ──────────────────────────────────────────── -->
+    <section class="page" id="page-heatmap">
+      <h2>🔥 Creative Type × Category Heatmap</h2>
+      <p class="page-intro">Spend-weighted ROAS for each (category, creative) cell. Green ≥2.5x, amber 1.5-2.5x, red &lt;1.5x.</p>
+
+      <div class="card" style="overflow-x:auto">
+        <table id="tbl-heatmap"></table>
+      </div>
+    </section>
+
+    <!-- ── PAGE: Products ─────────────────────────────────────────── -->
+    <section class="page" id="page-products">
+      <h2>🛍️ Products <button class="btn-csv" onclick="exportCSV('products')">↓ CSV</button></h2>
+      <p class="page-intro">Per-product performance with success-at-ROAS rates. Use the Product filter at top to drill into one.</p>
+
+      <div class="card">
+        <h3>Product Performance <span class="meta">success-at-roas % = of ads launched in period, fraction whose lifetime ROAS hit threshold</span></h3>
+        <table id="tbl-products">
+          <thead><tr>
+            <th data-col="product" data-type="str">Product</th>
+            <th data-col="category" data-type="str">Cat</th>
+            <th data-col="active_ads" data-type="num">Ads</th>
+            <th data-col="spend" data-type="num">Spend</th>
+            <th data-col="revenue" data-type="num">Revenue</th>
+            <th data-col="orders" data-type="num">Orders</th>
+            <th data-col="roas" data-type="num">ROAS</th>
+            <th data-col="hit_15" data-type="num">≥1.5x</th>
+            <th data-col="hit_20" data-type="num">≥2.0x</th>
+            <th data-col="hit_25" data-type="num">≥2.5x</th>
+            <th data-col="hit_30" data-type="num">≥3.0x</th>
+            <th data-col="hit_40" data-type="num">≥4.0x</th>
+            <th data-col="hit_50" data-type="num">≥5.0x</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── PAGE: Top Ads ──────────────────────────────────────────── -->
+    <section class="page" id="page-topads">
+      <h2>🏆 Top Ads <button class="btn-csv" onclick="exportCSV('topads')">↓ CSV</button></h2>
+      <p class="page-intro">Top 50 by ROAS. Min ₹2K spend filter to skip flukes.</p>
+      <div class="card">
+        <table id="tbl-topads">
+          <thead><tr>
+            <th data-col="portal" data-type="str">Portal</th>
+            <th data-col="category" data-type="str">Cat</th>
+            <th data-col="creative_type" data-type="str">Type</th>
+            <th data-col="ad_name" data-type="str">Ad / Campaign</th>
+            <th data-col="days_active" data-type="num">Days</th>
+            <th data-col="spend" data-type="num">Spend</th>
+            <th data-col="revenue" data-type="num">Revenue</th>
+            <th data-col="orders" data-type="num">Orders</th>
+            <th data-col="roas" data-type="num">ROAS</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── PAGE: Bottom Ads ───────────────────────────────────────── -->
+    <section class="page" id="page-bottomads">
+      <h2>🥶 Bottom Ads <span class="subtle">kill candidates</span> <button class="btn-csv" onclick="exportCSV('bottomads')">↓ CSV</button></h2>
+      <p class="page-intro">Worst 50 by ROAS, min ₹2K spend (avoids surfacing tiny test ads). These are kill candidates per your same-day kill protocol.</p>
+      <div class="card">
+        <table id="tbl-bottomads">
+          <thead><tr>
+            <th data-col="portal" data-type="str">Portal</th>
+            <th data-col="category" data-type="str">Cat</th>
+            <th data-col="creative_type" data-type="str">Type</th>
+            <th data-col="ad_name" data-type="str">Ad / Campaign</th>
+            <th data-col="days_active" data-type="num">Days</th>
+            <th data-col="spend" data-type="num">Spend</th>
+            <th data-col="revenue" data-type="num">Revenue</th>
+            <th data-col="orders" data-type="num">Orders</th>
+            <th data-col="roas" data-type="num">ROAS</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
   </div>
 </div>
 
@@ -387,24 +552,24 @@ const PAYLOAD = __PAYLOAD__;
 const RAW = PAYLOAD.rows;
 const DIM = PAYLOAD.dimensions;
 const FRESH = PAYLOAD.freshness;
-document.getElementById('last-upd').textContent = `Built ${PAYLOAD.updated_at} · ${RAW.length.toLocaleString()} ad-day rows · ${Object.keys(FRESH).length} ingest jobs tracked`;
+document.getElementById('sidebar-footer').innerHTML =
+  `Built ${PAYLOAD.updated_at.slice(0, 16)}<br>${RAW.length.toLocaleString()} ad-day rows · ${DIM.products.length} products · ${DIM.categories.length} categories`;
 
 // ── Filter state ─────────────────────────────────────────────────────────
 const F = {
   fromDate: PAYLOAD.since,
   toDate:   PAYLOAD.until,
-  portals:  new Set(),       // empty = all
+  portals:  new Set(),
   categories: new Set(),
   creative_types: new Set(),
-  product:  '',              // single-select
+  product:  '',
 };
 
-// ── Helpers ─────────────────────────────────────────────────────────────
 const fmt = {
-  inr: n => n == null ? '—' : '₹' + Math.round(n).toLocaleString('en-IN'),
-  num: n => n == null ? '—' : Math.round(n).toLocaleString('en-IN'),
+  inr:  n => n == null ? '—' : '₹' + Math.round(n).toLocaleString('en-IN'),
+  num:  n => n == null ? '—' : Math.round(n).toLocaleString('en-IN'),
   num1: n => n == null ? '—' : Number(n).toFixed(1),
-  pct: n => n == null ? '—' : Number(n).toFixed(1) + '%',
+  pct:  n => n == null ? '—' : Number(n).toFixed(1) + '%',
   roas: n => {
     if (n == null) return '—';
     const cls = n >= 2.5 ? 'rg' : n >= 1.5 ? 'ro' : 'rr';
@@ -420,7 +585,7 @@ const fmt = {
 };
 function tag(p) { return `<span class="tag tag-${(p||'').toLowerCase()}">${p||'?'}</span>`; }
 
-// ── Initial filter UI population ────────────────────────────────────────
+// ── Filter UI population ────────────────────────────────────────────────
 function buildChips(containerId, values, set) {
   const c = document.getElementById(containerId);
   c.innerHTML = '';
@@ -428,7 +593,6 @@ function buildChips(containerId, values, set) {
     const chip = document.createElement('span');
     chip.className = 'chip';
     chip.textContent = v;
-    chip.dataset.val = v;
     chip.addEventListener('click', () => {
       if (set.has(v)) { set.delete(v); chip.classList.remove('active'); }
       else { set.add(v); chip.classList.add('active'); }
@@ -441,7 +605,6 @@ buildChips('filter-portals',    DIM.portals,        F.portals);
 buildChips('filter-categories', DIM.categories,     F.categories);
 buildChips('filter-creatives',  DIM.creative_types, F.creative_types);
 
-// Product dropdown
 const prodSel = document.getElementById('filter-product');
 DIM.products.forEach(p => {
   const o = document.createElement('option');
@@ -450,21 +613,18 @@ DIM.products.forEach(p => {
 });
 prodSel.addEventListener('change', e => { F.product = e.target.value; apply(); });
 
-// Date inputs
 document.getElementById('from-date').value = F.fromDate;
 document.getElementById('to-date').value   = F.toDate;
 document.getElementById('from-date').addEventListener('change', e => { F.fromDate = e.target.value; clearActivePreset(); apply(); });
 document.getElementById('to-date').addEventListener('change',   e => { F.toDate   = e.target.value; clearActivePreset(); apply(); });
 
-// Date presets
 document.querySelectorAll('.preset-btn').forEach(b => {
   b.addEventListener('click', () => {
     document.querySelectorAll('.preset-btn').forEach(x => x.classList.remove('active'));
     b.classList.add('active');
     const days = b.dataset.days;
     if (days === 'all') {
-      F.fromDate = PAYLOAD.since;
-      F.toDate   = PAYLOAD.until;
+      F.fromDate = PAYLOAD.since; F.toDate = PAYLOAD.until;
     } else {
       const end = new Date(PAYLOAD.until + 'T00:00:00');
       const n = parseInt(days, 10);
@@ -488,6 +648,27 @@ document.getElementById('btn-clear').addEventListener('click', () => {
   apply();
 });
 
+// ── Sidebar routing ─────────────────────────────────────────────────────
+document.querySelectorAll('.menu a[data-page]').forEach(a => {
+  a.addEventListener('click', () => {
+    const page = a.dataset.page;
+    location.hash = page;
+    document.querySelectorAll('.menu a').forEach(x => x.classList.remove('active'));
+    a.classList.add('active');
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + page).classList.add('active');
+    // Re-render charts for the now-visible page (Chart.js needs a visible canvas)
+    apply();
+  });
+});
+
+function activatePageFromHash() {
+  const hash = location.hash.replace('#', '') || 'overview';
+  const link = document.querySelector(`.menu a[data-page="${hash}"]`);
+  if (link) link.click();
+}
+window.addEventListener('hashchange', activatePageFromHash);
+
 // ── Filter logic ────────────────────────────────────────────────────────
 function applyFilters(rows) {
   return rows.filter(r => {
@@ -501,7 +682,6 @@ function applyFilters(rows) {
 }
 
 function getCompareSet() {
-  // For trend deltas: compare to previous equal-length window
   const start = new Date(F.fromDate + 'T00:00:00');
   const end   = new Date(F.toDate   + 'T00:00:00');
   const ms    = end - start;
@@ -541,20 +721,19 @@ function aggregate(rows, groupKey) {
     a.lpv         += r.landing_page_views || 0;
   }
   return [...map.values()].map(a => ({
-    key:a.key,
+    key: a.key,
     active_ads: a.active_ads.size,
     active_camps: a.active_camps.size,
     spend: a.spend, revenue: a.revenue, purchases: a.purchases,
     impressions: a.impressions, clicks: a.clicks,
     atc: a.atc, lpv: a.lpv,
     roas: a.spend > 0 ? a.revenue / a.spend : 0,
-    cpm: a.impressions > 0 ? (a.spend / a.impressions) * 1000 : 0,
-    ctr: a.impressions > 0 ? (a.clicks / a.impressions) * 100 : 0,
+    cpm:  a.impressions > 0 ? (a.spend / a.impressions) * 1000 : 0,
+    ctr:  a.impressions > 0 ? (a.clicks / a.impressions) * 100 : 0,
     atc_rate: a.clicks > 0 ? (a.atc / a.clicks) * 100 : 0,
   }));
 }
 
-// ── Success rate: for ads first_seen in window, fraction that ran 7+ days
 function successRate(rows, threshold = 7) {
   const seen = new Set();
   const buckets = { launched: 0, survived: 0 };
@@ -568,109 +747,36 @@ function successRate(rows, threshold = 7) {
   return buckets.launched > 0 ? (100 * buckets.survived / buckets.launched) : null;
 }
 
-// ── KPI strip render ─────────────────────────────────────────────────────
-function renderKPI(rows, prevRows) {
-  const a = aggregate(rows)[0] || { spend:0, revenue:0, purchases:0, active_ads:0, active_camps:0, roas:0, cpm:0, ctr:0 };
-  const p = aggregate(prevRows)[0] || { spend:0, revenue:0, purchases:0, roas:0 };
-  const cards = [
-    { l:'Active Ads',  v: fmt.num(a.active_ads), s: a.active_camps + ' campaigns' },
-    { l:'Spend',       v: fmt.inr(a.spend), s: fmt.delta(a.spend, p.spend) + ' vs prev' },
-    { l:'Revenue',     v: fmt.inr(a.revenue), s: fmt.delta(a.revenue, p.revenue) + ' vs prev' },
-    { l:'Orders',      v: fmt.num(a.purchases), s: fmt.delta(a.purchases, p.purchases) + ' vs prev' },
-    { l:'ROAS',        v: fmt.roas(a.roas), s: 'spend-weighted' },
-    { l:'CPM',         v: fmt.inr(a.cpm), s: 'cost / 1k impr' },
-    { l:'CTR',         v: fmt.pct(a.ctr), s: 'click-through' },
-    { l:'Success Rate (7d)', v: (() => { const s = successRate(rows); return s == null ? '—' : fmt.pct(s); })(), s: 'ads launched in period · survived 7d' },
-  ];
-  document.getElementById('kpi-strip').innerHTML = cards.map(c =>
-    `<div class="kpi-card"><div class="kpi-lbl">${c.l}</div>` +
-    `<div class="kpi-val">${c.v}</div><div class="kpi-sub">${c.s}</div></div>`
-  ).join('');
-}
-
-// ── Time series ─────────────────────────────────────────────────────────
-let charts = {};
-function destroyCharts() {
-  Object.values(charts).forEach(c => c.destroy());
-  charts = {};
-}
-
-function buildTimeSeries(rows) {
+function timeSeries(rows) {
   const by = new Map();
   for (const r of rows) {
-    if (!by.has(r.date)) by.set(r.date, { spend:0, revenue:0, orders:0 });
+    if (!by.has(r.date)) by.set(r.date, { spend:0, revenue:0, orders:0, ads: new Set(), impressions:0, clicks:0 });
     const b = by.get(r.date);
-    b.spend     += r.spend     || 0;
-    b.revenue   += r.revenue   || 0;
-    b.orders    += r.purchases || 0;
+    b.spend       += r.spend       || 0;
+    b.revenue     += r.revenue     || 0;
+    b.orders      += r.purchases   || 0;
+    b.impressions += r.impressions || 0;
+    b.clicks      += r.clicks      || 0;
+    b.ads.add(r.ad_id);
   }
   const sorted = [...by.entries()].sort((a, b) => a[0].localeCompare(b[0]));
-  return {
-    labels: sorted.map(([d]) => d.slice(5)),  // MM-DD
-    spend: sorted.map(([_, v]) => Math.round(v.spend)),
-    revenue: sorted.map(([_, v]) => Math.round(v.revenue)),
-    orders: sorted.map(([_, v]) => v.orders),
-    roas: sorted.map(([_, v]) => v.spend > 0 ? +(v.revenue / v.spend).toFixed(2) : 0),
-  };
+  return sorted.map(([d, v]) => ({
+    date: d,
+    active_ads: v.ads.size,
+    spend: Math.round(v.spend),
+    revenue: Math.round(v.revenue),
+    orders: v.orders,
+    roas: v.spend > 0 ? +(v.revenue / v.spend).toFixed(2) : 0,
+    cpm: v.impressions > 0 ? +((v.spend / v.impressions) * 1000).toFixed(2) : 0,
+    ctr: v.impressions > 0 ? +((v.clicks / v.impressions) * 100).toFixed(2) : 0,
+  }));
 }
 
-function renderCharts(rows) {
-  destroyCharts();
-  const ts = buildTimeSeries(rows);
-  document.getElementById('trend-meta').textContent =
-    `${ts.labels.length} days · spend-weighted`;
-
-  charts.spendRev = new Chart(document.getElementById('chart-spend-rev'), {
-    type:'line',
-    data:{ labels: ts.labels, datasets: [
-      { label:'Spend',   data: ts.spend,   borderColor:'#1a3d7c', backgroundColor:'#1a3d7c33', fill:true, tension:.25 },
-      { label:'Revenue', data: ts.revenue, borderColor:'#059669', backgroundColor:'#05966933', fill:true, tension:.25 },
-    ]},
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ title:{ display:true, text:'Spend vs Revenue (₹)'} },
-      scales:{ y:{ ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v.toLocaleString()) } } } },
-  });
-  charts.roas = new Chart(document.getElementById('chart-roas'), {
-    type:'line',
-    data:{ labels: ts.labels, datasets: [
-      { label:'Daily ROAS', data: ts.roas, borderColor:'#d97706', backgroundColor:'#d9770633', fill:true, tension:.25 },
-    ]},
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ title:{ display:true, text:'Blended ROAS by Day'} } },
-  });
-  charts.orders = new Chart(document.getElementById('chart-orders'), {
-    type:'bar',
-    data:{ labels: ts.labels, datasets: [
-      { label:'Orders', data: ts.orders, backgroundColor:'#1a3d7c' },
-    ]},
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ title:{ display:true, text:'Orders by Day'} } },
-  });
-
-  // Category bar chart
-  const cats = aggregate(rows, 'category').filter(x => x.key).sort((a, b) => b.spend - a.spend);
-  charts.catSpend = new Chart(document.getElementById('chart-cat-spend'), {
-    type:'bar',
-    data:{ labels: cats.map(c => c.key),
-      datasets:[
-        { label:'Spend (₹)', data: cats.map(c => Math.round(c.spend)), backgroundColor:'#1a3d7c', yAxisID:'y' },
-        { label:'ROAS',      data: cats.map(c => +c.roas.toFixed(2)),  backgroundColor:'#059669', type:'line', yAxisID:'y1', tension:.25 },
-      ]},
-    options:{ responsive:true, maintainAspectRatio:false,
-      plugins:{ title:{ display:true, text:'Spend & ROAS by Category'} },
-      scales:{
-        y:{ beginAtZero:true, position:'left', ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v) } },
-        y1:{ beginAtZero:true, position:'right', grid:{ drawOnChartArea:false } },
-      } },
-  });
-}
-
-// ── Tables ──────────────────────────────────────────────────────────────
-const sortState = {};   // tableId → {col, dir}
+// ── Sort state per table ────────────────────────────────────────────────
+const sortState = {};
 function setupSort(tableId, defaultCol, defaultDir = 'desc') {
   sortState[tableId] = { col: defaultCol, dir: defaultDir };
-  const ths = document.querySelectorAll(`#${tableId} thead th`);
-  ths.forEach(th => {
+  document.querySelectorAll(`#${tableId} thead th`).forEach(th => {
     th.addEventListener('click', () => {
       const col = th.dataset.col;
       const cur = sortState[tableId];
@@ -688,7 +794,9 @@ function applySortHeaders(tableId) {
   });
 }
 function sortRows(rows, tableId) {
-  const { col, dir } = sortState[tableId];
+  const st = sortState[tableId];
+  if (!st) return rows;
+  const { col, dir } = st;
   const factor = dir === 'asc' ? 1 : -1;
   return rows.slice().sort((a, b) => {
     const va = a[col], vb = b[col];
@@ -698,34 +806,185 @@ function sortRows(rows, tableId) {
   });
 }
 
-function renderCategoriesTable(rows) {
-  const cats = aggregate(rows, 'category').filter(x => x.key);
-  // Add success rate per category
+// ── Chart pool ──────────────────────────────────────────────────────────
+let charts = {};
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+
+function lineChart(canvasId, ts, datasets, opts = {}) {
+  destroyChart(canvasId);
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+  charts[canvasId] = new Chart(el, {
+    type: 'line',
+    data: { labels: ts.map(t => t.date.slice(5)), datasets },
+    options: { responsive:true, maintainAspectRatio:false, ...opts },
+  });
+}
+function barChart(canvasId, labels, datasets, opts = {}) {
+  destroyChart(canvasId);
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+  charts[canvasId] = new Chart(el, {
+    data: { labels, datasets },
+    options: { responsive:true, maintainAspectRatio:false, ...opts },
+  });
+}
+
+// ── Page renderers ──────────────────────────────────────────────────────
+function renderOverview(rows, prevRows) {
+  // KPI strip
+  const a = aggregate(rows)[0] || { spend:0, revenue:0, purchases:0, active_ads:0, active_camps:0, roas:0, cpm:0, ctr:0 };
+  const p = aggregate(prevRows)[0] || { spend:0, revenue:0, purchases:0, roas:0 };
+  document.getElementById('ov-meta').textContent = `· ${F.fromDate} → ${F.toDate}`;
+  const cards = [
+    { l:'Active Ads',  v: fmt.num(a.active_ads), s: a.active_camps + ' campaigns' },
+    { l:'Spend',       v: fmt.inr(a.spend), s: fmt.delta(a.spend, p.spend) + ' vs prev' },
+    { l:'Revenue',     v: fmt.inr(a.revenue), s: fmt.delta(a.revenue, p.revenue) + ' vs prev' },
+    { l:'Orders',      v: fmt.num(a.purchases), s: fmt.delta(a.purchases, p.purchases) + ' vs prev' },
+    { l:'ROAS',        v: fmt.roas(a.roas), s: 'spend-weighted' },
+    { l:'CPM',         v: fmt.inr(a.cpm), s: 'cost / 1k impr' },
+    { l:'CTR',         v: fmt.pct(a.ctr), s: 'click-through' },
+    { l:'Success Rate (7d)', v: (() => { const s = successRate(rows); return s == null ? '—' : fmt.pct(s); })(), s: 'launched in period · survived 7d' },
+  ];
+  document.getElementById('kpi-strip').innerHTML = cards.map(c =>
+    `<div class="kpi-card"><div class="kpi-lbl">${c.l}</div>` +
+    `<div class="kpi-val">${c.v}</div><div class="kpi-sub">${c.s}</div></div>`
+  ).join('');
+
+  // Mini charts
+  if (document.getElementById('page-overview').classList.contains('active')) {
+    const ts = timeSeries(rows);
+    lineChart('chart-spend-rev', ts, [
+      { label:'Spend',   data: ts.map(t => t.spend),   borderColor:'#1a3d7c', backgroundColor:'#1a3d7c33', fill:true, tension:.25 },
+      { label:'Revenue', data: ts.map(t => t.revenue), borderColor:'#059669', backgroundColor:'#05966933', fill:true, tension:.25 },
+    ], { plugins:{ title:{ display:true, text:'Spend vs Revenue (₹)'} },
+         scales:{ y:{ ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v) } } } });
+    lineChart('chart-roas', ts, [
+      { label:'ROAS', data: ts.map(t => t.roas), borderColor:'#d97706', backgroundColor:'#d9770633', fill:true, tension:.25 },
+    ], { plugins:{ title:{ display:true, text:'Daily ROAS'} } });
+  }
+
+  // Mini category table
+  const cats = aggregate(rows, 'category').filter(c => c.key).sort((a, b) => b.spend - a.spend).slice(0, 8);
+  document.querySelector('#tbl-cat-mini tbody').innerHTML = cats.map(c =>
+    `<tr><td><strong>${c.key}</strong></td><td>${fmt.num(c.active_ads)}</td>` +
+    `<td>${fmt.inr(c.spend)}</td><td>${fmt.inr(c.revenue)}</td><td>${fmt.roas(c.roas)}</td></tr>`
+  ).join('') || '<tr><td colspan="5" class="empty">No data.</td></tr>';
+}
+
+function renderTrends(rows) {
+  if (!document.getElementById('page-trends').classList.contains('active')) return;
+  const ts = timeSeries(rows);
+  lineChart('chart-trend-spend-rev', ts, [
+    { label:'Spend',   data: ts.map(t => t.spend),   borderColor:'#1a3d7c', backgroundColor:'#1a3d7c33', fill:true, tension:.25 },
+    { label:'Revenue', data: ts.map(t => t.revenue), borderColor:'#059669', backgroundColor:'#05966933', fill:true, tension:.25 },
+  ], { scales:{ y:{ ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v) } } } });
+  lineChart('chart-trend-roas', ts, [
+    { label:'ROAS', data: ts.map(t => t.roas), borderColor:'#d97706', backgroundColor:'#d9770633', fill:true, tension:.25 },
+  ]);
+  barChart('chart-trend-orders', ts.map(t => t.date.slice(5)), [
+    { label:'Orders', data: ts.map(t => t.orders), backgroundColor:'#1a3d7c' },
+  ], { type: 'bar' });
+
+  // Daily table
+  document.querySelector('#tbl-daily tbody').innerHTML = ts.slice().reverse().map(t =>
+    `<tr><td>${t.date}</td><td>${fmt.num(t.active_ads)}</td>` +
+    `<td>${fmt.inr(t.spend)}</td><td>${fmt.inr(t.revenue)}</td><td>${fmt.num(t.orders)}</td>` +
+    `<td>${fmt.roas(t.roas)}</td><td>${fmt.inr(t.cpm)}</td><td>${fmt.num1(t.ctr)}</td></tr>`
+  ).join('') || '<tr><td colspan="8" class="empty">No data.</td></tr>';
+}
+
+function renderCategoriesPage(rows) {
+  const cats = aggregate(rows, 'category').filter(c => c.key);
   for (const c of cats) {
     const subset = rows.filter(r => r.category === c.key);
     c.success_rate = successRate(subset);
     c.category = c.key;
   }
+  if (document.getElementById('page-categories').classList.contains('active')) {
+    barChart('chart-cat-bar',
+      cats.map(c => c.category),
+      [
+        { label:'Spend (₹)', data: cats.map(c => Math.round(c.spend)), backgroundColor:'#1a3d7c', yAxisID:'y' },
+        { label:'ROAS',      data: cats.map(c => +c.roas.toFixed(2)),  backgroundColor:'#059669', type:'line', yAxisID:'y1', tension:.25 },
+      ],
+      { type:'bar', scales:{
+        y:{ beginAtZero:true, position:'left', ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v) } },
+        y1:{ beginAtZero:true, position:'right', grid:{ drawOnChartArea:false } },
+      } });
+  }
   const sorted = sortRows(cats, 'tbl-categories');
   applySortHeaders('tbl-categories');
   document.querySelector('#tbl-categories tbody').innerHTML = sorted.map(c =>
-    `<tr>
-      <td><strong>${c.category}</strong></td>
-      <td>${fmt.num(c.active_ads)}</td>
-      <td>${fmt.num(c.active_camps)}</td>
-      <td>${fmt.inr(c.spend)}</td>
-      <td>${fmt.inr(c.revenue)}</td>
-      <td>${fmt.num(c.purchases)}</td>
-      <td>${fmt.roas(c.roas)}</td>
-      <td>${fmt.inr(c.cpm)}</td>
-      <td>${fmt.num1(c.ctr)}</td>
-      <td>${fmt.num1(c.atc_rate)}</td>
-      <td>${c.success_rate == null ? '<span class="subtle">—</span>' : fmt.pct(c.success_rate)}</td>
-    </tr>`
-  ).join('') || '<tr><td colspan="11" class="empty">No data for current filter.</td></tr>';
+    `<tr><td><strong>${c.category}</strong></td>` +
+    `<td>${fmt.num(c.active_ads)}</td><td>${fmt.num(c.active_camps)}</td>` +
+    `<td>${fmt.inr(c.spend)}</td><td>${fmt.inr(c.revenue)}</td><td>${fmt.num(c.purchases)}</td>` +
+    `<td>${fmt.roas(c.roas)}</td><td>${fmt.inr(c.cpm)}</td><td>${fmt.num1(c.ctr)}</td>` +
+    `<td>${fmt.num1(c.atc_rate)}</td>` +
+    `<td>${c.success_rate == null ? '<span class="subtle">—</span>' : fmt.pct(c.success_rate)}</td></tr>`
+  ).join('') || '<tr><td colspan="11" class="empty">No data.</td></tr>';
 }
 
-function renderHeatmap(rows) {
+function renderCreativesPage(rows) {
+  const cts = aggregate(rows, 'creative_type').filter(c => c.key);
+  for (const c of cts) {
+    const subset = rows.filter(r => r.creative_type === c.key);
+    c.success_rate = successRate(subset);
+    c.creative_type = c.key;
+  }
+  if (document.getElementById('page-creatives').classList.contains('active')) {
+    barChart('chart-ct-bar',
+      cts.map(c => c.creative_type),
+      [
+        { label:'Spend (₹)', data: cts.map(c => Math.round(c.spend)), backgroundColor:'#1a3d7c', yAxisID:'y' },
+        { label:'ROAS',      data: cts.map(c => +c.roas.toFixed(2)),  backgroundColor:'#059669', type:'line', yAxisID:'y1', tension:.25 },
+      ],
+      { type:'bar', scales:{
+        y:{ beginAtZero:true, position:'left', ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v) } },
+        y1:{ beginAtZero:true, position:'right', grid:{ drawOnChartArea:false } },
+      } });
+  }
+  const sorted = sortRows(cts, 'tbl-creatives');
+  applySortHeaders('tbl-creatives');
+  document.querySelector('#tbl-creatives tbody').innerHTML = sorted.map(c =>
+    `<tr><td><strong>${c.creative_type}</strong></td>` +
+    `<td>${fmt.num(c.active_ads)}</td><td>${fmt.inr(c.spend)}</td><td>${fmt.inr(c.revenue)}</td>` +
+    `<td>${fmt.num(c.purchases)}</td><td>${fmt.roas(c.roas)}</td>` +
+    `<td>${c.success_rate == null ? '<span class="subtle">—</span>' : fmt.pct(c.success_rate)}</td></tr>`
+  ).join('') || '<tr><td colspan="7" class="empty">No data.</td></tr>';
+}
+
+function renderSentimentsPage(rows) {
+  const map = new Map();
+  for (const r of rows) {
+    const key = (r.sentiment || '(unset)') + '||' + (r.creative_type || '?');
+    if (!map.has(key)) map.set(key, {
+      sentiment: r.sentiment || '(unset)',
+      creative_type: r.creative_type || '?',
+      ads: new Set(), spend:0, revenue:0,
+    });
+    const a = map.get(key);
+    a.ads.add(r.ad_id);
+    a.spend   += r.spend   || 0;
+    a.revenue += r.revenue || 0;
+  }
+  const arr = [...map.values()].map(a => ({
+    sentiment: a.sentiment,
+    creative_type: a.creative_type,
+    active_ads: a.ads.size,
+    spend: a.spend, revenue: a.revenue,
+    roas: a.spend > 0 ? a.revenue / a.spend : 0,
+  }));
+  const sorted = sortRows(arr, 'tbl-sentiment');
+  applySortHeaders('tbl-sentiment');
+  document.querySelector('#tbl-sentiment tbody').innerHTML = sorted.map(s =>
+    `<tr><td><strong>${s.sentiment}</strong></td><td>${s.creative_type}</td>` +
+    `<td>${fmt.num(s.active_ads)}</td><td>${fmt.inr(s.spend)}</td>` +
+    `<td>${fmt.inr(s.revenue)}</td><td>${fmt.roas(s.roas)}</td></tr>`
+  ).join('') || '<tr><td colspan="6" class="empty">No data.</td></tr>';
+}
+
+function renderHeatmapPage(rows) {
   const cats = [...new Set(rows.map(r => r.category).filter(Boolean))].sort();
   const cts  = [...new Set(rows.map(r => r.creative_type).filter(Boolean))].sort();
   let html = '<thead><tr><th>Category ↓ / Creative Type →</th>';
@@ -751,10 +1010,8 @@ function renderHeatmap(rows) {
   document.getElementById('tbl-heatmap').innerHTML = html;
 }
 
-function renderProductsTable(rows) {
-  // Aggregate by product (within current filter)
+function renderProductsPage(rows) {
   const prods = aggregate(rows, 'product').filter(x => x.key);
-  // For each product, compute success-at-ROAS thresholds for ads launched in window
   const adIdsByProd = new Map();
   const adFirstSeen = new Map();
   const adCategory  = new Map();
@@ -781,7 +1038,6 @@ function renderProductsTable(rows) {
       }
     }
     p.product = p.key;
-    // Pick first category seen for this product as representative
     const adIds = [...(adIdsByProd.get(p.key) || new Map()).keys()];
     p.category = adIds.length ? (adCategory.get(adIds[0]) || '') : '';
     p.orders = p.purchases;
@@ -800,29 +1056,22 @@ function renderProductsTable(rows) {
     const v = r[key];
     if (v == null) return '<span class="subtle">—</span>';
     const cls = v >= 50 ? 'sr-hi' : v >= 25 ? 'sr-med' : v >= 10 ? 'sr-low' : 'sr-0';
-    return `<span class="${cls}" style="padding:2px 6px;border-radius:4px">${v.toFixed(0)}%</span><br><span class="subtle">${r[key + '_h']}/${r[key + '_n']}</span>`;
+    return `<span class="${cls}">${v.toFixed(0)}%</span><br><span class="subtle">${r[key + '_h']}/${r[key + '_n']}</span>`;
   }
   document.querySelector('#tbl-products tbody').innerHTML = sorted.map(p =>
     `<tr>
       <td><strong class="cell-name" title="${p.product}">${p.product}</strong></td>
       <td>${p.category || '<span class="subtle">—</span>'}</td>
-      <td>${fmt.num(p.active_ads)}</td>
-      <td>${fmt.inr(p.spend)}</td>
-      <td>${fmt.inr(p.revenue)}</td>
-      <td>${fmt.num(p.orders)}</td>
+      <td>${fmt.num(p.active_ads)}</td><td>${fmt.inr(p.spend)}</td>
+      <td>${fmt.inr(p.revenue)}</td><td>${fmt.num(p.orders)}</td>
       <td>${fmt.roas(p.roas)}</td>
-      <td>${rateCell(p, 1.5)}</td>
-      <td>${rateCell(p, 2.0)}</td>
-      <td>${rateCell(p, 2.5)}</td>
-      <td>${rateCell(p, 3.0)}</td>
-      <td>${rateCell(p, 4.0)}</td>
-      <td>${rateCell(p, 5.0)}</td>
+      <td>${rateCell(p, 1.5)}</td><td>${rateCell(p, 2.0)}</td><td>${rateCell(p, 2.5)}</td>
+      <td>${rateCell(p, 3.0)}</td><td>${rateCell(p, 4.0)}</td><td>${rateCell(p, 5.0)}</td>
     </tr>`
   ).join('') || '<tr><td colspan="13" class="empty">No data.</td></tr>';
 }
 
-function renderAdsTable(rows) {
-  // Aggregate per ad (within current filter)
+function renderAdsPage(rows, which) {
   const map = new Map();
   for (const r of rows) {
     if (!map.has(r.ad_id)) map.set(r.ad_id, {
@@ -838,58 +1087,22 @@ function renderAdsTable(rows) {
   }
   const ads = [...map.values()].filter(a => a.spend >= 2000);
   for (const a of ads) a.roas = a.spend > 0 ? a.revenue / a.spend : 0;
-  const sorted = sortRows(ads, 'tbl-ads').slice(0, 30);  // top 30 by current sort
-  applySortHeaders('tbl-ads');
-  document.querySelector('#tbl-ads tbody').innerHTML = sorted.map(a =>
+  ads.sort((a, b) => which === 'top' ? b.roas - a.roas : a.roas - b.roas);
+  const top50 = ads.slice(0, 50);
+  const tableId = which === 'top' ? 'tbl-topads' : 'tbl-bottomads';
+  const sorted = sortRows(top50, tableId);
+  applySortHeaders(tableId);
+  document.querySelector(`#${tableId} tbody`).innerHTML = sorted.map(a =>
     `<tr>
       <td>${tag(a.portal)}</td>
       <td>${a.category || '<span class="subtle">—</span>'}</td>
       <td>${a.creative_type || '<span class="subtle">—</span>'}</td>
       <td><div class="cell-name" title="${(a.ad_name||'').replace(/"/g,'&quot;')}"><strong>${a.ad_name||'?'}</strong><br><span class="subtle">${a.campaign_name||''}</span></div></td>
       <td>${a.days_active != null ? a.days_active + 'd' : '—'}</td>
-      <td>${fmt.inr(a.spend)}</td>
-      <td>${fmt.inr(a.revenue)}</td>
-      <td>${fmt.num(a.orders)}</td>
-      <td>${fmt.roas(a.roas)}</td>
+      <td>${fmt.inr(a.spend)}</td><td>${fmt.inr(a.revenue)}</td>
+      <td>${fmt.num(a.orders)}</td><td>${fmt.roas(a.roas)}</td>
     </tr>`
-  ).join('') || '<tr><td colspan="9" class="empty">No ads with >= ₹2K spend in selection.</td></tr>';
-}
-
-function renderSentimentTable(rows) {
-  // Group by (sentiment, creative_type)
-  const map = new Map();
-  for (const r of rows) {
-    const key = (r.sentiment || '(unset)') + '||' + (r.creative_type || '?');
-    if (!map.has(key)) map.set(key, {
-      sentiment: r.sentiment || '(unset)',
-      sentiment_code: r.sentiment_code,
-      creative_type: r.creative_type || '?',
-      ads: new Set(), spend:0, revenue:0,
-    });
-    const a = map.get(key);
-    a.ads.add(r.ad_id);
-    a.spend   += r.spend   || 0;
-    a.revenue += r.revenue || 0;
-  }
-  const arr = [...map.values()].map(a => ({
-    sentiment: a.sentiment,
-    creative_type: a.creative_type,
-    active_ads: a.ads.size,
-    spend: a.spend, revenue: a.revenue,
-    roas: a.spend > 0 ? a.revenue / a.spend : 0,
-  }));
-  const sorted = sortRows(arr, 'tbl-sentiment');
-  applySortHeaders('tbl-sentiment');
-  document.querySelector('#tbl-sentiment tbody').innerHTML = sorted.map(s =>
-    `<tr>
-      <td><strong>${s.sentiment}</strong></td>
-      <td>${s.creative_type}</td>
-      <td>${fmt.num(s.active_ads)}</td>
-      <td>${fmt.inr(s.spend)}</td>
-      <td>${fmt.inr(s.revenue)}</td>
-      <td>${fmt.roas(s.roas)}</td>
-    </tr>`
-  ).join('') || '<tr><td colspan="6" class="empty">No data.</td></tr>';
+  ).join('') || `<tr><td colspan="9" class="empty">No ads with ≥ ₹2K spend in selection.</td></tr>`;
 }
 
 // ── CSV export ──────────────────────────────────────────────────────────
@@ -900,7 +1113,7 @@ function exportCSV(which) {
     const prods = aggregate(rows, 'product').filter(x => x.key);
     csv = 'Product,Active Ads,Spend,Revenue,Orders,ROAS\n' +
       prods.map(p => `"${p.key}",${p.active_ads},${Math.round(p.spend)},${Math.round(p.revenue)},${p.purchases},${p.roas.toFixed(2)}`).join('\n');
-  } else if (which === 'ads') {
+  } else {
     csv = 'Portal,Category,Creative,Ad,Campaign,Spend,Revenue,Orders,ROAS,DaysActive\n';
     const map = new Map();
     for (const r of rows) {
@@ -908,8 +1121,9 @@ function exportCSV(which) {
       const a = map.get(r.ad_id);
       a._spend += r.spend; a._revenue += r.revenue; a._orders += r.purchases || 0;
     }
-    const ads = [...map.values()].filter(a => a._spend >= 1000)
-      .sort((a, b) => (b._revenue / Math.max(b._spend, 1)) - (a._revenue / Math.max(a._spend, 1)));
+    let ads = [...map.values()].filter(a => a._spend >= 1000);
+    if (which === 'topads') ads.sort((a, b) => (b._revenue / Math.max(b._spend, 1)) - (a._revenue / Math.max(a._spend, 1)));
+    if (which === 'bottomads') ads.sort((a, b) => (a._revenue / Math.max(a._spend, 1)) - (b._revenue / Math.max(b._spend, 1)));
     csv += ads.map(a => {
       const roas = a._spend > 0 ? (a._revenue / a._spend).toFixed(2) : '0';
       return `"${a.portal}","${a.category||''}","${a.creative_type||''}","${(a.ad_name||'').replace(/"/g, '""')}","${(a.campaign_name||'').replace(/"/g, '""')}",${Math.round(a._spend)},${Math.round(a._revenue)},${a._orders},${roas},${a.days_active||''}`;
@@ -923,33 +1137,41 @@ function exportCSV(which) {
   URL.revokeObjectURL(url);
 }
 
-// ── Main render ─────────────────────────────────────────────────────────
+// ── Master apply (re-renders every page-relevant section) ───────────────
 function apply() {
   const rows = applyFilters(RAW);
   const prevRows = getCompareSet();
-  renderKPI(rows, prevRows);
-  renderCharts(rows);
-  renderCategoriesTable(rows);
-  renderHeatmap(rows);
-  renderProductsTable(rows);
-  renderAdsTable(rows);
-  renderSentimentTable(rows);
+  // Always render Overview KPI strip (visible on Overview page)
+  renderOverview(rows, prevRows);
+  // Render whichever page is active for charts/tables that need a visible canvas
+  const activePage = document.querySelector('.page.active');
+  const id = activePage ? activePage.id.replace('page-', '') : 'overview';
+  if (id === 'trends')      renderTrends(rows);
+  if (id === 'categories')  renderCategoriesPage(rows);
+  if (id === 'creatives')   renderCreativesPage(rows);
+  if (id === 'sentiments')  renderSentimentsPage(rows);
+  if (id === 'heatmap')     renderHeatmapPage(rows);
+  if (id === 'products')    renderProductsPage(rows);
+  if (id === 'topads')      renderAdsPage(rows, 'top');
+  if (id === 'bottomads')   renderAdsPage(rows, 'bottom');
+  // Always pre-compute non-chart tables for unsorted state — cheap
+  // (charts skip themselves when their canvas is hidden)
 }
 
-// Initialize sort defaults
+// ── Setup sorts + initial render ────────────────────────────────────────
 setupSort('tbl-categories', 'spend');
+setupSort('tbl-creatives',  'spend');
 setupSort('tbl-products',   'spend');
-setupSort('tbl-ads',        'roas');
+setupSort('tbl-topads',     'roas', 'desc');
+setupSort('tbl-bottomads',  'roas', 'asc');
 setupSort('tbl-sentiment',  'spend');
 
-// Trigger 7D preset on load
 document.querySelector('.preset-btn[data-days="7"]').click();
+activatePageFromHash();
 </script>
 </body>
 </html>
 """
-
-
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--days', type=int, default=30,
