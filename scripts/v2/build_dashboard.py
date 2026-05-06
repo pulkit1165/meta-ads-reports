@@ -274,6 +274,7 @@ tr:hover td { background:#fafbff; }
 
     <li class="menu-section-lbl">Drill-Down</li>
     <li><a data-page="products"><span class="menu-icon">🛍️</span>Products</a></li>
+    <li><a data-page="prodsuccess"><span class="menu-icon">🎯</span>Product Success</a></li>
     <li><a data-page="topads"><span class="menu-icon">🏆</span>Top Ads</a></li>
     <li><a data-page="bottomads"><span class="menu-icon">🥶</span>Bottom Ads</a></li>
 
@@ -488,6 +489,35 @@ tr:hover td { background:#fafbff; }
             <th data-col="revenue" data-type="num">Revenue</th>
             <th data-col="orders" data-type="num">Orders</th>
             <th data-col="roas" data-type="num">ROAS</th>
+            <th data-col="hit_15" data-type="num">≥1.5x</th>
+            <th data-col="hit_20" data-type="num">≥2.0x</th>
+            <th data-col="hit_25" data-type="num">≥2.5x</th>
+            <th data-col="hit_30" data-type="num">≥3.0x</th>
+            <th data-col="hit_40" data-type="num">≥4.0x</th>
+            <th data-col="hit_50" data-type="num">≥5.0x</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- ── PAGE: Product Success Rate (campaign-level) ─────────────── -->
+    <section class="page" id="page-prodsuccess">
+      <h2>🎯 Product Success Rate <span class="subtle">campaign-level</span> <button class="btn-csv" onclick="exportCSV('prodsuccess')">↓ CSV</button></h2>
+      <p class="page-intro">For each product: how many <strong>campaigns</strong> were published in the selected period, what their lifetime ROAS distribution looks like, and what % cleared each ROAS bar. Different from the Products page (which counts ads). Useful for "is this product worth scaling?" decisions.</p>
+
+      <div class="card">
+        <h3>Per-Product Campaign Success <span class="meta">campaigns w/ ≥ ₹500 spend in period · ROAS = period revenue / period spend per campaign</span></h3>
+        <table id="tbl-prodsuccess">
+          <thead><tr>
+            <th data-col="product" data-type="str">Product</th>
+            <th data-col="category" data-type="str">Cat</th>
+            <th data-col="campaigns" data-type="num">Camps Pub.</th>
+            <th data-col="spend" data-type="num">Spend</th>
+            <th data-col="revenue" data-type="num">Revenue</th>
+            <th data-col="orders" data-type="num">Orders</th>
+            <th data-col="roas" data-type="num">Agg ROAS</th>
+            <th data-col="best_roas" data-type="num">Best Camp</th>
             <th data-col="hit_15" data-type="num">≥1.5x</th>
             <th data-col="hit_20" data-type="num">≥2.0x</th>
             <th data-col="hit_25" data-type="num">≥2.5x</th>
@@ -1071,6 +1101,78 @@ function renderProductsPage(rows) {
   ).join('') || '<tr><td colspan="13" class="empty">No data.</td></tr>';
 }
 
+function renderProdSuccessPage(rows) {
+  // Campaign-level success: for each product, group ad-days into campaigns,
+  // compute campaign ROAS (over the selected period), then bucket campaigns
+  // by ROAS thresholds.
+  const ROASBKT = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+  const MIN_CAMP_SPEND = 500;
+  // product -> Map<campaign_id, {spend, revenue, purchases, name, category}>
+  const byProd = new Map();
+  for (const r of rows) {
+    if (!r.product) continue;
+    if (!byProd.has(r.product)) byProd.set(r.product, new Map());
+    const camps = byProd.get(r.product);
+    if (!camps.has(r.campaign_id)) camps.set(r.campaign_id, {
+      spend:0, revenue:0, purchases:0,
+      campaign_name:r.campaign_name, category:r.category,
+    });
+    const c = camps.get(r.campaign_id);
+    c.spend     += r.spend     || 0;
+    c.revenue   += r.revenue   || 0;
+    c.purchases += r.purchases || 0;
+  }
+  const out = [];
+  for (const [product, camps] of byProd) {
+    const list = [...camps.values()].filter(c => c.spend >= MIN_CAMP_SPEND);
+    if (list.length === 0) continue;
+    let spend = 0, revenue = 0, orders = 0, bestRoas = 0;
+    for (const c of list) {
+      spend += c.spend; revenue += c.revenue; orders += c.purchases;
+      const cr = c.spend > 0 ? c.revenue / c.spend : 0;
+      if (cr > bestRoas) bestRoas = cr;
+    }
+    const row = {
+      product, category: list[0].category || '',
+      campaigns: list.length,
+      spend, revenue, orders,
+      roas: spend > 0 ? revenue / spend : 0,
+      best_roas: bestRoas,
+    };
+    ROASBKT.forEach(thr => {
+      const key = 'hit_' + String(thr).replace('.', '').padEnd(2, '0').slice(0, 2);
+      const hit = list.filter(c => (c.spend > 0 ? c.revenue / c.spend : 0) >= thr).length;
+      row[key] = list.length > 0 ? Math.round(100 * hit / list.length * 10) / 10 : null;
+      row[key + '_n'] = list.length;
+      row[key + '_h'] = hit;
+    });
+    out.push(row);
+  }
+  const sorted = sortRows(out, 'tbl-prodsuccess');
+  applySortHeaders('tbl-prodsuccess');
+  function rateCell(r, thr) {
+    const key = 'hit_' + String(thr).replace('.', '').padEnd(2, '0').slice(0, 2);
+    const v = r[key];
+    if (v == null) return '<span class="subtle">—</span>';
+    const cls = v >= 50 ? 'sr-hi' : v >= 25 ? 'sr-med' : v >= 10 ? 'sr-low' : 'sr-0';
+    return `<span class="${cls}">${v.toFixed(0)}%</span><br><span class="subtle">${r[key + '_h']}/${r[key + '_n']}</span>`;
+  }
+  document.querySelector('#tbl-prodsuccess tbody').innerHTML = sorted.map(p =>
+    `<tr>
+      <td><strong class="cell-name" title="${p.product}">${p.product}</strong></td>
+      <td>${p.category || '<span class="subtle">—</span>'}</td>
+      <td><strong>${fmt.num(p.campaigns)}</strong></td>
+      <td>${fmt.inr(p.spend)}</td>
+      <td>${fmt.inr(p.revenue)}</td>
+      <td>${fmt.num(p.orders)}</td>
+      <td>${fmt.roas(p.roas)}</td>
+      <td>${fmt.roas(p.best_roas)}</td>
+      <td>${rateCell(p, 1.5)}</td><td>${rateCell(p, 2.0)}</td><td>${rateCell(p, 2.5)}</td>
+      <td>${rateCell(p, 3.0)}</td><td>${rateCell(p, 4.0)}</td><td>${rateCell(p, 5.0)}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="14" class="empty">No products with campaigns ≥ ₹500 spend in selection.</td></tr>';
+}
+
 function renderAdsPage(rows, which) {
   const map = new Map();
   for (const r of rows) {
@@ -1113,6 +1215,31 @@ function exportCSV(which) {
     const prods = aggregate(rows, 'product').filter(x => x.key);
     csv = 'Product,Active Ads,Spend,Revenue,Orders,ROAS\n' +
       prods.map(p => `"${p.key}",${p.active_ads},${Math.round(p.spend)},${Math.round(p.revenue)},${p.purchases},${p.roas.toFixed(2)}`).join('\n');
+  } else if (which === 'prodsuccess') {
+    const ROASBKT = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+    const MIN = 500;
+    const byProd = new Map();
+    for (const r of rows) {
+      if (!r.product) continue;
+      if (!byProd.has(r.product)) byProd.set(r.product, new Map());
+      const m = byProd.get(r.product);
+      if (!m.has(r.campaign_id)) m.set(r.campaign_id, { spend:0, revenue:0, purchases:0, category:r.category });
+      const c = m.get(r.campaign_id);
+      c.spend += r.spend||0; c.revenue += r.revenue||0; c.purchases += r.purchases||0;
+    }
+    csv = 'Product,Category,CampaignsPublished,Spend,Revenue,Orders,AggROAS,BestCampROAS,' +
+          ROASBKT.map(t => `Hit${t}x_pct,Hit${t}x_count,Hit${t}x_total`).join(',') + '\n';
+    for (const [product, camps] of byProd) {
+      const list = [...camps.values()].filter(c => c.spend >= MIN);
+      if (!list.length) continue;
+      let s=0,r=0,o=0,b=0;
+      for (const c of list) { s+=c.spend; r+=c.revenue; o+=c.purchases; const cr=c.spend>0?c.revenue/c.spend:0; if (cr>b)b=cr; }
+      const buckets = ROASBKT.map(t => {
+        const h = list.filter(c => (c.spend>0?c.revenue/c.spend:0) >= t).length;
+        return `${list.length>0?(100*h/list.length).toFixed(1):0},${h},${list.length}`;
+      }).join(',');
+      csv += `"${product}","${list[0].category||''}",${list.length},${Math.round(s)},${Math.round(r)},${o},${(s>0?r/s:0).toFixed(2)},${b.toFixed(2)},${buckets}\n`;
+    }
   } else {
     csv = 'Portal,Category,Creative,Ad,Campaign,Spend,Revenue,Orders,ROAS,DaysActive\n';
     const map = new Map();
@@ -1152,6 +1279,7 @@ function apply() {
   if (id === 'sentiments')  renderSentimentsPage(rows);
   if (id === 'heatmap')     renderHeatmapPage(rows);
   if (id === 'products')    renderProductsPage(rows);
+  if (id === 'prodsuccess') renderProdSuccessPage(rows);
   if (id === 'topads')      renderAdsPage(rows, 'top');
   if (id === 'bottomads')   renderAdsPage(rows, 'bottom');
   // Always pre-compute non-chart tables for unsorted state — cheap
@@ -1162,6 +1290,7 @@ function apply() {
 setupSort('tbl-categories', 'spend');
 setupSort('tbl-creatives',  'spend');
 setupSort('tbl-products',   'spend');
+setupSort('tbl-prodsuccess','spend');
 setupSort('tbl-topads',     'roas', 'desc');
 setupSort('tbl-bottomads',  'roas', 'asc');
 setupSort('tbl-sentiment',  'spend');

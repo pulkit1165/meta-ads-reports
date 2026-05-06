@@ -32,7 +32,81 @@ from _utils import db_connect, log_ingest_start, log_ingest_finish  # noqa: E402
 from product_catalogue import derive_category_v2  # noqa: E402
 
 # Bump this when classification rules change — forces re-classification on next run
-CLASSIFICATION_VERSION = 3   # v3: expanded brand keywords + NTN sheet sync
+CLASSIFICATION_VERSION = 4   # v4: Path B — product name matcher (ad name → NTN code)
+
+
+# Words that appear in product names but are too generic to match on
+# (would cause false positives across many ads).
+GENERIC_TOKEN_BLACKLIST = {
+    'skin', 'hair', 'perfume', 'crystal', 'ad', 'sale', 'sales',
+    'retarget', 'reel', 'clp', 'ntn', 'paras', 'wanda', 'motion',
+    'static', 'partnership', 'inde', 'web', 'conv', 'combo',
+    'pack', 'set', 'kit', 'bundle', 'gift', 'free', 'new',
+    'special', 'edition', 'series', 'range', 'collection', 'pro',
+    'plus', 'mini', 'large', 'small', 'big', 'oil', 'cream',
+    'serum', 'mask', 'wash', 'gel', 'lotion', 'mist', 'spray',
+    'bracelet', 'pendant', 'plate', 'frame', 'clock', 'horse',
+    'tree', 'sphere', 'wand', 'leaf', 'tower', 'cluster',
+    'pyrite', 'selenite', 'amethyst', 'rose_quartz', 'citrine',
+    'obsidian', 'tigereye', 'opalite', 'hematite',
+    'face', 'lip', 'eye', 'body', 'scrub', 'powder', 'tablet',
+    'capsule', 'capsules', 'st1', 'st2', 'st3', 'st4', 'st5',
+}
+
+MIN_KEYWORD_LEN = 5     # below this, too noisy to match
+
+
+def _normalize_product_to_keywords(product_name: str) -> list:
+    """Convert a product name from the SKU sheet into matching keywords.
+    Returns list of variants ordered longest-first (so longer/more-specific
+    matches win)."""
+    if not product_name: return []
+    n = product_name.lower()
+    # Drop punctuation except letters/digits/spaces/underscores/+
+    n = re.sub(r'[^a-z0-9 _+]', ' ', n)
+    n = re.sub(r'\s+', ' ', n).strip()
+    if not n: return []
+    # Common product noise suffixes
+    n = re.sub(r'\s+(combo|pack|set|kit|bundle|special|edition).*$', '', n)
+    n = n.strip()
+    if not n: return []
+    variants = set()
+    underscored = n.replace(' ', '_').strip('_')
+    if underscored: variants.add(underscored)
+    # Collapsed (no spaces)
+    collapsed = n.replace(' ', '')
+    if collapsed and collapsed != underscored: variants.add(collapsed)
+    # Filter: must be long enough + not on blacklist + not just digits
+    out = [v for v in variants
+           if len(v) >= MIN_KEYWORD_LEN
+           and v not in GENERIC_TOKEN_BLACKLIST
+           and not v.isdigit()]
+    out.sort(key=lambda x: -len(x))   # longest first
+    return out
+
+
+def build_product_keyword_index(ntn_to_product: dict) -> list:
+    """Returns list of (keyword, ntn_code) sorted by keyword length DESC.
+    Longer keywords win first → 'richie_rich_combo' beats 'richie_rich'."""
+    idx = {}     # keyword → ntn_code (first writer wins)
+    for ntn_code, product in ntn_to_product.items():
+        if not product: continue
+        for kw in _normalize_product_to_keywords(product):
+            if kw not in idx:
+                idx[kw] = ntn_code
+    return sorted(idx.items(), key=lambda kv: -len(kv[0]))
+
+
+def match_product_from_name(text: str, keyword_index: list) -> str | None:
+    """Scan text for any product keyword. Returns NTN code on first match
+    (which is also the longest because keyword_index is sorted desc)."""
+    if not text: return None
+    t = text.lower()
+    for kw, ntn in keyword_index:
+        # Token-aware boundary check (same pattern as creative_type)
+        if re.search(rf'(?:^|_|\s){re.escape(kw)}(?:$|_|\s)', t):
+            return ntn
+    return None
 
 # ── Regex patterns ────────────────────────────────────────────────────────
 # NTN code: matches NTN1234, ntn1234 (case-insensitive). Word boundary on both
@@ -134,17 +208,28 @@ def derive_category_with_ntn(ad_name: str, campaign_name: str,
 
 
 def classify_one(ad_name: str, campaign_name: str,
-                 ntn_to_category: dict = None) -> dict:
-    """Returns dict of all derived fields for one ad."""
+                 ntn_to_category: dict = None,
+                 product_keyword_index: list = None) -> dict:
+    """Returns dict of all derived fields for one ad.
+    Path B (v4+): if no NTN code from regex, fall back to product name
+    matching against the SKU sheet keyword index."""
     ntn_to_category = ntn_to_category or {}
+    product_keyword_index = product_keyword_index or []
     combined = f"{ad_name or ''} {campaign_name or ''}"
+    # 1. Regex-extract NTN code (most reliable when present)
     ntn_code = extract_ntn_code(combined)
+    # 2. Path B: if no NTN code, scan for product name keywords in ad text
+    matched_via_name = False
+    if not ntn_code and product_keyword_index:
+        ntn_code = match_product_from_name(combined, product_keyword_index)
+        if ntn_code: matched_via_name = True
     return {
         'category':       derive_category_with_ntn(ad_name, campaign_name,
                                                    ntn_code, ntn_to_category),
         'creative_type':  extract_creative_type(ad_name, campaign_name),
         'sentiment':      extract_sentiment(combined),
         'ntn_code':       ntn_code,
+        'matched_via_name': matched_via_name,   # diagnostic only
     }
 
 
@@ -180,17 +265,24 @@ def classify_all(conn, *, reclassify: bool = False, single_ad_id: str = None):
     ).fetchall()
     ntn_to_product  = {r[0]: r[1] for r in ntn_lookup_rows if r[1]}
     ntn_to_category = {r[0]: r[2] for r in ntn_lookup_rows if r[2]}
+    # Path B: build product-keyword index for ad-name fallback matching
+    product_keyword_index = build_product_keyword_index(ntn_to_product)
+    print(f"  Built product keyword index: {len(product_keyword_index)} keywords")
 
     print(f"Classifying {len(ads)} ad(s)...")
     rows = []
     counts = {
         'category': {}, 'creative_type': {}, 'sentiment_set': 0,
-        'ntn_set': 0, 'product_set': 0,
+        'ntn_set': 0, 'product_set': 0, 'matched_via_name': 0,
     }
     for ad_id, ad_name, campaign_id in ads:
         cname = camp_names.get(campaign_id, '')
-        cls = classify_one(ad_name, cname, ntn_to_category=ntn_to_category)
+        cls = classify_one(ad_name, cname,
+                           ntn_to_category=ntn_to_category,
+                           product_keyword_index=product_keyword_index)
         product = ntn_to_product.get(cls['ntn_code']) if cls['ntn_code'] else None
+        if cls.get('matched_via_name'):
+            counts['matched_via_name'] += 1
 
         rows.append((
             cls['category'],
@@ -229,6 +321,8 @@ def classify_all(conn, *, reclassify: bool = False, single_ad_id: str = None):
         print(f"     {k:25s} {v:>5}")
     print(f"   Sentiment tagged:  {counts['sentiment_set']} of {len(ads)}")
     print(f"   NTN code found:    {counts['ntn_set']} of {len(ads)}")
+    print(f"     · via regex:     {counts['ntn_set'] - counts['matched_via_name']}")
+    print(f"     · via name match (Path B): {counts['matched_via_name']}")
     print(f"   Product mapped:    {counts['product_set']} of {len(ads)}")
     print(f"\n✅ classify_ads complete — {len(rows)} ads updated to v{CLASSIFICATION_VERSION}")
     return len(rows)
