@@ -57,6 +57,13 @@ jobs:
       - name: Install deps
         run: pip install -r requirements.txt
 
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
       - name: Restore SQLite from state branch
         uses: ./.github/actions/state-sync
         with:
