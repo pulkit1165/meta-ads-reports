@@ -91,6 +91,10 @@ jobs:
             --days ${{ steps.cfg.outputs.days }} \
             ${{ steps.cfg.outputs.portal_arg }}
 
+      - name: Classify ads (category, creative type, sentiment, NTN, product)
+        if: ${{ success() }}
+        run: python3 scripts/v2/classify_ads.py
+
       - name: Print DB summary
         if: always()
         run: |
