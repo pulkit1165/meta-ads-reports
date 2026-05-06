@@ -281,7 +281,12 @@ def derive_category_v2(campaign_or_ad_name):
 
     # Crystal — Accessory (worn on body)
     if any(kw in n for kw in ['bracelet', 'sutra', 'keyring', 'pendant', 'necklace',
-                              'mala', 'rudraksha', 'half_n_half', 'wrist']):
+                              'mala', 'rudraksha', 'half_n_half', 'wrist',
+                              # Brand/product names that are accessories
+                              'richie_rich', 'richierich', 'riche_rich',
+                              'anxiety_free', 'anxiety free',
+                              'evil_eye', 'evil eye',
+                              'tiger_eye_bracelet']):
         return 'Crystal Accessory'
 
     # Crystal — Home Decor (frames, idols, plates, clocks, etc.)
@@ -290,7 +295,15 @@ def derive_category_v2(campaign_or_ad_name):
                               'horse_frame', 'peacock_frame', 'money_bowl', 'geode',
                               'tortoise', 'pyramid', 'butterfly', 'tree', 'sphere', 'wand',
                               'hanuman', 'ganesha', 'shiva', 'durga', 'lakshmi',
-                              'leaf', 'mountain', 'cluster', 'tower']):
+                              'leaf', 'mountain', 'cluster', 'tower',
+                              # Additions from operator name patterns
+                              'lapis_peacock', 'lapiz_peacock', 'peacock_plate',
+                              'trishul', 'mahadev', 'kamdhenu',
+                              'koi_fish', 'koifish', 'horses_of_harmony',
+                              'pyrite_owl', 'baby_buddha', 'buddha',
+                              'nazar_protection', 'wealth_success', 'fortune_flow',
+                              'astro_destiny', 'tree_of_life',
+                              'horses', 'horse']):
         return 'Crystal Home Decor'
 
     # Generic crystal mention without specific item type → default to Home Decor

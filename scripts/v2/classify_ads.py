@@ -32,7 +32,7 @@ from _utils import db_connect, log_ingest_start, log_ingest_finish  # noqa: E402
 from product_catalogue import derive_category_v2  # noqa: E402
 
 # Bump this when classification rules change — forces re-classification on next run
-CLASSIFICATION_VERSION = 2
+CLASSIFICATION_VERSION = 3   # v3: expanded brand keywords + NTN sheet sync
 
 # ── Regex patterns ────────────────────────────────────────────────────────
 # NTN code: matches NTN1234, ntn1234 (case-insensitive). Word boundary on both

@@ -68,6 +68,10 @@ jobs:
       - name: Seed lookup tables (NTN codes + sentiment placeholders)
         run: python3 scripts/v2/seed_lookups.py
 
+      - name: Sync NTN codes from master SKU sheet
+        continue-on-error: true   # if sheet access blips, don't fail the whole run
+        run: python3 scripts/v2/sync_ntn_from_sheet.py
+
       - name: Determine backfill days
         id: cfg
         run: |
