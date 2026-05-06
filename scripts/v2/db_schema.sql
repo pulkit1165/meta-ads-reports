@@ -1,0 +1,204 @@
+-- NTN Dashboard v2 — SQLite schema
+-- All Meta + Shopify data lives here. Dashboard reads ONLY from this DB,
+-- never directly from APIs, so it never breaks on rate limits.
+--
+-- Apply with: python3 scripts/v2/db_init.py
+-- DB file: state/ntn.db (gitignored — synced via state branch)
+
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+
+-- ── Meta: per-day ad-level snapshot ───────────────────────────────────────
+-- One row per (ad_id, date). UPSERT on re-run (idempotent).
+CREATE TABLE IF NOT EXISTS meta_ads_daily (
+    date          TEXT NOT NULL,            -- YYYY-MM-DD
+    ad_id         TEXT NOT NULL,
+    portal        TEXT NOT NULL,            -- SM / SML / NBP
+    account_id    TEXT NOT NULL,
+    account_name  TEXT,
+    campaign_id   TEXT,
+    campaign_name TEXT,
+    adset_id      TEXT,
+    adset_name    TEXT,
+    ad_name       TEXT,
+    spend         REAL DEFAULT 0,
+    impressions   INTEGER DEFAULT 0,
+    reach         INTEGER DEFAULT 0,
+    clicks        INTEGER DEFAULT 0,
+    inline_link_clicks INTEGER DEFAULT 0,
+    outbound_clicks INTEGER DEFAULT 0,
+    ctr           REAL,                     -- already in % (Meta convention)
+    cpm           REAL,
+    cpc           REAL,
+    frequency     REAL,
+    purchases     INTEGER DEFAULT 0,
+    revenue       REAL DEFAULT 0,
+    roas          REAL,                     -- spend > 0 ? revenue/spend : null
+    purchase_roas_default REAL,             -- Meta's purchase_roas (default attribution)
+    purchase_roas_1d_click REAL,            -- 1-day click attribution window
+    purchase_roas_7d_click REAL,            -- 7-day click attribution window
+    landing_page_views INTEGER DEFAULT 0,
+    add_to_cart   INTEGER DEFAULT 0,
+    initiate_checkout INTEGER DEFAULT 0,
+    video_p25_views INTEGER DEFAULT 0,
+    video_p50_views INTEGER DEFAULT 0,
+    video_p75_views INTEGER DEFAULT 0,
+    video_thruplay  INTEGER DEFAULT 0,
+    video_avg_time_watched_sec REAL,
+    fetched_at    TEXT,                     -- ISO timestamp of this fetch
+    PRIMARY KEY (date, ad_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mad_date         ON meta_ads_daily(date);
+CREATE INDEX IF NOT EXISTS idx_mad_portal_date  ON meta_ads_daily(portal, date);
+CREATE INDEX IF NOT EXISTS idx_mad_campaign     ON meta_ads_daily(campaign_id, date);
+CREATE INDEX IF NOT EXISTS idx_mad_adid         ON meta_ads_daily(ad_id);
+
+-- ── Meta: per-ad metadata (one row per ad_id, lifetime) ──────────────────
+-- Updated on each ingest. Holds derived classifications (category etc).
+CREATE TABLE IF NOT EXISTS meta_ads_meta (
+    ad_id         TEXT PRIMARY KEY,
+    portal        TEXT,
+    account_id    TEXT,
+    campaign_id   TEXT,
+    adset_id      TEXT,
+    ad_name       TEXT,
+    creative_id   TEXT,
+    creative_object_url TEXT,                -- Shopify product URL pulled from creative
+    created_time  TEXT,                      -- ISO from Meta
+    first_seen    TEXT,                      -- first day with spend > 0
+    last_seen     TEXT,                      -- last day with spend > 0
+    days_active   INTEGER DEFAULT 0,         -- count of days with spend > 0
+    total_spend   REAL DEFAULT 0,            -- lifetime spend
+    total_revenue REAL DEFAULT 0,
+    total_purchases INTEGER DEFAULT 0,
+    -- DERIVED CLASSIFICATIONS (recomputed by classify_ads.py on rule change)
+    category      TEXT,                      -- Skin/Hair/Crystal HD/Crystal Acc/Jewellery/Perfumes/AI Bot/Nutra/Other
+    creative_type TEXT,                      -- Paras/Static/Motion/Partnership/AI/Other
+    sentiment     TEXT,                      -- e.g. problem_solution, offer, testimonial, before_after
+    product       TEXT,                      -- e.g. AM PM Pigmentation
+    ntn_code      TEXT,                      -- e.g. NTN237 (if found in name)
+    classification_version INTEGER DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_amm_category    ON meta_ads_meta(category);
+CREATE INDEX IF NOT EXISTS idx_amm_creative    ON meta_ads_meta(creative_type);
+CREATE INDEX IF NOT EXISTS idx_amm_product     ON meta_ads_meta(product);
+CREATE INDEX IF NOT EXISTS idx_amm_portal      ON meta_ads_meta(portal);
+
+-- ── Meta: campaign metadata ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS meta_campaigns (
+    campaign_id   TEXT PRIMARY KEY,
+    portal        TEXT,
+    account_id    TEXT,
+    name          TEXT,
+    status        TEXT,
+    effective_status TEXT,
+    objective     TEXT,
+    start_time    TEXT,
+    stop_time     TEXT,
+    daily_budget  REAL,                     -- in INR (Meta returns paise → /100)
+    lifetime_budget REAL,
+    last_synced   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_mc_portal       ON meta_campaigns(portal);
+CREATE INDEX IF NOT EXISTS idx_mc_status       ON meta_campaigns(effective_status);
+
+-- ── Shopify: orders (one row per order) ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS shopify_orders (
+    order_id      TEXT PRIMARY KEY,
+    portal        TEXT NOT NULL,
+    order_number  TEXT,                     -- the human "Sxxxx" name
+    created_at    TEXT,                     -- ISO
+    cancelled_at  TEXT,
+    financial_status TEXT,
+    total_price   REAL,
+    subtotal_price REAL,
+    currency      TEXT,
+    customer_id   TEXT,
+    customer_email TEXT,
+    landing_site  TEXT,
+    referring_site TEXT,
+    source_name   TEXT,
+    -- parsed UTMs (from landing_site or note_attributes)
+    utm_source    TEXT,
+    utm_medium    TEXT,
+    utm_campaign  TEXT,                     -- often Meta campaign_id
+    utm_content   TEXT,                     -- often Meta ad_id
+    utm_term      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_so_portal_date  ON shopify_orders(portal, created_at);
+CREATE INDEX IF NOT EXISTS idx_so_utm_camp     ON shopify_orders(utm_campaign);
+CREATE INDEX IF NOT EXISTS idx_so_utm_content  ON shopify_orders(utm_content);
+
+-- ── Shopify: line items (one row per product per order) ──────────────────
+CREATE TABLE IF NOT EXISTS shopify_order_items (
+    order_id      TEXT NOT NULL,
+    portal        TEXT NOT NULL,
+    line_id       TEXT NOT NULL,            -- Shopify line_item.id
+    product_id    TEXT,
+    variant_id    TEXT,
+    sku           TEXT,
+    product_title TEXT,
+    variant_title TEXT,
+    quantity      INTEGER,
+    price         REAL,
+    line_revenue  REAL,
+    PRIMARY KEY (order_id, line_id),
+    FOREIGN KEY (order_id) REFERENCES shopify_orders(order_id)
+);
+CREATE INDEX IF NOT EXISTS idx_soi_product     ON shopify_order_items(product_title);
+CREATE INDEX IF NOT EXISTS idx_soi_sku         ON shopify_order_items(sku);
+CREATE INDEX IF NOT EXISTS idx_soi_portal      ON shopify_order_items(portal);
+
+-- ── Precomputed daily rollups (powers fast dashboard queries) ────────────
+-- Rebuilt nightly after meta + shopify ingest. Keyed by all the dims we
+-- want to filter on. NULL means "all" — so a row with category=NULL is
+-- the cross-category total.
+CREATE TABLE IF NOT EXISTS kpi_daily_rollup (
+    date          TEXT NOT NULL,
+    portal        TEXT,                     -- NULL = all portals
+    category      TEXT,                     -- NULL = all categories
+    creative_type TEXT,                     -- NULL = all creative types
+    sentiment     TEXT,                     -- NULL = all sentiments
+    product       TEXT,                     -- NULL = all products
+    n_ads_active        INTEGER DEFAULT 0,  -- ads with spend > 0 this day
+    n_campaigns_active  INTEGER DEFAULT 0,
+    spend         REAL DEFAULT 0,
+    impressions   INTEGER DEFAULT 0,
+    reach         INTEGER DEFAULT 0,
+    clicks        INTEGER DEFAULT 0,
+    purchases     INTEGER DEFAULT 0,
+    revenue       REAL DEFAULT 0,
+    roas          REAL,                     -- spend-weighted blended
+    cpm           REAL,
+    ctr           REAL,                     -- aggregated
+    cpc           REAL,
+    add_to_cart   INTEGER DEFAULT 0,
+    landing_page_views INTEGER DEFAULT 0,
+    -- Success rate (recomputed for the trailing window ending on this date)
+    n_ads_published_3d  INTEGER DEFAULT 0,  -- ads first_seen in last 3 days
+    n_ads_survived_7d_3d INTEGER DEFAULT 0, -- of those, how many days_active >= 7
+    n_ads_published_7d  INTEGER DEFAULT 0,
+    n_ads_survived_7d_7d INTEGER DEFAULT 0,
+    n_ads_published_30d INTEGER DEFAULT 0,
+    n_ads_survived_7d_30d INTEGER DEFAULT 0,
+    success_rate_3d  REAL,                  -- survived/published as %
+    success_rate_7d  REAL,
+    success_rate_30d REAL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_kdr_uniq ON kpi_daily_rollup(
+    date, portal, category, creative_type, sentiment, product
+);
+CREATE INDEX IF NOT EXISTS idx_kdr_date ON kpi_daily_rollup(date);
+
+-- ── Provenance: when did each ingestor last run successfully ─────────────
+CREATE TABLE IF NOT EXISTS ingest_log (
+    job_name      TEXT,                     -- e.g. ingest_meta, ingest_shopify
+    target_date   TEXT,                     -- the date being ingested
+    started_at    TEXT,
+    finished_at   TEXT,
+    status        TEXT,                     -- success / failed / partial
+    rows_written  INTEGER,
+    error_message TEXT,
+    PRIMARY KEY (job_name, target_date, started_at)
+);
+CREATE INDEX IF NOT EXISTS idx_il_status ON ingest_log(status, target_date);
