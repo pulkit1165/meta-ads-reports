@@ -190,6 +190,33 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_kdr_uniq ON kpi_daily_rollup(
 );
 CREATE INDEX IF NOT EXISTS idx_kdr_date ON kpi_daily_rollup(date);
 
+-- ── Sentiment label lookup ───────────────────────────────────────────────
+-- User tags ad/campaign names with `_st1_`, `_st2_`, etc. The classifier
+-- extracts the code and stores it in meta_ads_meta.sentiment. This table
+-- maps codes → human-readable labels so the dashboard can show meaningful
+-- text. User updates this table directly when they assign meanings.
+CREATE TABLE IF NOT EXISTS sentiment_labels (
+    code        TEXT PRIMARY KEY,            -- 'st1', 'st2', etc.
+    label       TEXT,                        -- 'Problem-Solution' (set by user)
+    description TEXT,                        -- longer explanation, optional
+    is_active   INTEGER DEFAULT 1,           -- 0 = retired, hide from dashboard
+    created_at  TEXT,
+    updated_at  TEXT
+);
+
+-- ── Product / NTN code lookup ────────────────────────────────────────────
+-- NTN codes appear in ad names like `_NTN237_`. Classifier extracts the
+-- code; this table maps it to the product name + category for fast joins.
+-- Seeded from the memory file `reference_ntn_codes.md`.
+CREATE TABLE IF NOT EXISTS product_ntn_labels (
+    ntn_code    TEXT PRIMARY KEY,            -- 'NTN237'
+    product     TEXT,                        -- 'AM/PM Pigmentation Combo'
+    category    TEXT,                        -- 'Skin' / 'Hair' / 'Crystal' / etc.
+    is_active   INTEGER DEFAULT 1,
+    notes       TEXT,
+    updated_at  TEXT
+);
+
 -- ── Provenance: when did each ingestor last run successfully ─────────────
 CREATE TABLE IF NOT EXISTS ingest_log (
     job_name      TEXT,                     -- e.g. ingest_meta, ingest_shopify

@@ -65,6 +65,9 @@ jobs:
       - name: Initialize / verify schema
         run: python3 scripts/v2/db_init.py
 
+      - name: Seed lookup tables (NTN codes + sentiment placeholders)
+        run: python3 scripts/v2/seed_lookups.py
+
       - name: Determine backfill days
         id: cfg
         run: |
