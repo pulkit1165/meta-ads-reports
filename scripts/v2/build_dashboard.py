@@ -1,35 +1,27 @@
 #!/usr/bin/env python3
 """
-NTN Dashboard v2 — render categories_v2.html from SQLite.
+NTN Dashboard v2 — analytical dashboard generator (rewrite).
 
-Reads ONLY from state/ntn.db. No Meta/Shopify API calls. The dashboard
-will never break on rate limits because it doesn't talk to those APIs.
+Reads from state/ntn.db, dumps the full ad-day grid + lookups as JSON, and
+renders a single-page HTML where filters/sorting/aggregation all happen
+client-side. Once loaded, the dashboard re-renders every filter combination
+in <100ms with no API calls and no re-fetch.
 
-Sections rendered:
-  1. Top KPI strip (selected period)
-  2. Category cards (Skin, Hair, Crystal HD, Crystal Acc, Aibot, Nutra,
-     24K Jewellery, Perfumes, Other) with active ads / spend / revenue /
-     ROAS / CPM / CTR / ATC rate
-  3. Per-category breakdown by creative type (Paras/Motion/Static/etc.)
-     with success rate (% of ads that survived 7+ days)
-  4. Per-creative-type sentiment breakdown
-  5. Top 10 + Bottom 10 ads (by ROAS) with CID + campaign name
-  6. Product drill-down (sidebar) with success rates at multiple ROAS
-     thresholds (>=1.5x, >=2x, >=2.5x, >=3x, >=4x, >=5x)
-
-Data is embedded as JSON. JS-side date filter swaps which slice renders.
+Architecture:
+  - DB → JSON payload (one row per ad-day, plus lookups)
+  - HTML with embedded data + Chart.js
+  - JS filters/aggregates on every interaction
 
 Usage:
-  python3 scripts/v2/build_dashboard.py                    # default last 30 days
-  python3 scripts/v2/build_dashboard.py --days 7
-  python3 scripts/v2/build_dashboard.py --since 2026-04-25 --until 2026-05-05
+  python3 scripts/v2/build_dashboard.py
+  python3 scripts/v2/build_dashboard.py --days 60
   python3 scripts/v2/build_dashboard.py --out custom.html
 """
 
 import argparse
 import json
 import sys
-from datetime import datetime, date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -39,720 +31,932 @@ REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 OUT_DIR = REPO_ROOT / 'out'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
 
-CATEGORIES = ['Skin', 'Hair', 'Crystal Home Decor', 'Crystal Accessory',
-              '24K Jewellery', 'Perfumes', 'Aibot', 'Nutraceuticals', 'Other']
-CREATIVE_TYPES = ['Paras', 'Wanda', 'Partnership', 'AI', 'Motion', 'Static', 'Other']
-PORTALS = ['SM', 'SML', 'NBP']
 
-# ROAS thresholds for product drill-down "success at X" metric
-ROAS_BUCKETS = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0]
-
-
-# ── Data fetchers ─────────────────────────────────────────────────────────
-def fetch_overall_kpis(conn, since, until):
-    """Top strip: total spend, revenue, orders, blended ROAS, active ads,
-    active campaigns. Across all portals."""
-    row = conn.execute('''
+def fetch_ad_days(conn, since: str, until: str):
+    """One row per (ad_id, date) with everything the dashboard needs.
+    JOINs meta_ads_meta for classifications + lifetime stats.
+    Filtered to ads with spend>0 in the period to keep payload small."""
+    rows = conn.execute('''
         SELECT
-          COUNT(DISTINCT d.ad_id)                   AS n_ads,
-          COUNT(DISTINCT d.campaign_id)             AS n_camps,
-          COALESCE(SUM(d.spend), 0)                 AS spend,
-          COALESCE(SUM(d.revenue), 0)               AS revenue,
-          COALESCE(SUM(d.purchases), 0)             AS purchases,
-          COALESCE(SUM(d.impressions), 0)           AS impressions,
-          COALESCE(SUM(d.clicks), 0)                AS clicks
+          d.date,
+          d.ad_id,
+          d.portal,
+          d.account_name,
+          d.campaign_id,
+          d.campaign_name,
+          d.adset_id,
+          d.adset_name,
+          d.ad_name,
+          d.spend,
+          d.impressions,
+          d.reach,
+          d.clicks,
+          d.inline_link_clicks,
+          d.outbound_clicks,
+          d.ctr,
+          d.cpm,
+          d.cpc,
+          d.frequency,
+          d.purchases,
+          d.revenue,
+          d.add_to_cart,
+          d.landing_page_views,
+          d.video_thruplay,
+          m.category,
+          m.creative_type,
+          COALESCE(sl.label, m.sentiment) AS sentiment,
+          m.sentiment AS sentiment_code,
+          COALESCE(m.product, p.product, m.ntn_code, '(no product tag)') AS product,
+          m.ntn_code,
+          m.first_seen,
+          m.last_seen,
+          m.days_active,
+          m.total_spend AS lifetime_spend,
+          m.total_revenue AS lifetime_revenue,
+          m.total_purchases AS lifetime_purchases
         FROM meta_ads_daily d
+        LEFT JOIN meta_ads_meta  m ON d.ad_id = m.ad_id
+        LEFT JOIN sentiment_labels sl ON sl.code = m.sentiment
+        LEFT JOIN product_ntn_labels p ON p.ntn_code = m.ntn_code
         WHERE d.date BETWEEN ? AND ? AND d.spend > 0
-    ''', (since, until)).fetchone()
-    spend = row[2]; revenue = row[3]
+        ORDER BY d.date, d.ad_id
+    ''', (since, until)).fetchall()
+    cols = ['date', 'ad_id', 'portal', 'account_name', 'campaign_id',
+            'campaign_name', 'adset_id', 'adset_name', 'ad_name',
+            'spend', 'impressions', 'reach', 'clicks', 'inline_link_clicks',
+            'outbound_clicks', 'ctr', 'cpm', 'cpc', 'frequency',
+            'purchases', 'revenue', 'add_to_cart', 'landing_page_views',
+            'video_thruplay',
+            'category', 'creative_type', 'sentiment', 'sentiment_code',
+            'product', 'ntn_code', 'first_seen', 'last_seen', 'days_active',
+            'lifetime_spend', 'lifetime_revenue', 'lifetime_purchases']
+    out = []
+    for r in rows:
+        d = dict(zip(cols, r))
+        # Round/clean numerics for smaller payload
+        for k in ('spend', 'revenue', 'cpm', 'cpc', 'frequency',
+                  'lifetime_spend', 'lifetime_revenue'):
+            if d.get(k) is not None:
+                d[k] = round(float(d[k]), 2) if d[k] else 0
+        for k in ('ctr',):
+            if d.get(k) is not None:
+                d[k] = round(float(d[k]), 3) if d[k] else 0
+        # Strip null fields to shrink payload
+        d = {k: v for k, v in d.items() if v is not None}
+        out.append(d)
+    return out
+
+
+def fetch_dimensions(conn, since: str, until: str):
+    """Pre-compute distinct filter values + their counts so dropdowns are
+    quick to populate without scanning the full payload."""
+    def distinct(col):
+        # Note: literal column substitution is safe — values are hard-coded
+        return [r[0] for r in conn.execute(
+            f'''SELECT DISTINCT {col} FROM meta_ads_daily d
+                LEFT JOIN meta_ads_meta m ON d.ad_id = m.ad_id
+                WHERE d.date BETWEEN ? AND ? AND {col} IS NOT NULL
+                ORDER BY {col}''',
+            (since, until)
+        ).fetchall()]
     return {
-        'active_ads':     row[0],
-        'active_camps':   row[1],
-        'spend':          round(spend, 2),
-        'revenue':        round(revenue, 2),
-        'purchases':      row[4],
-        'impressions':    row[5],
-        'clicks':         row[6],
-        'roas':           round(revenue / spend, 2) if spend > 0 else 0,
-        'cpm':            round((spend / row[5]) * 1000, 2) if row[5] > 0 else 0,
-        'ctr':            round((row[6] / row[5]) * 100, 2) if row[5] > 0 else 0,
+        'portals':        distinct('d.portal'),
+        'categories':     distinct('m.category'),
+        'creative_types': distinct('m.creative_type'),
+        'sentiments':     distinct('m.sentiment'),
+        'products':       distinct(
+            "COALESCE(m.product, m.ntn_code, '(no product tag)')"
+        ),
+        'accounts':       distinct('d.account_name'),
     }
 
 
-def fetch_per_portal_kpis(conn, since, until):
-    """Same metrics, split by portal."""
-    out = {}
-    for p in PORTALS:
-        row = conn.execute('''
-            SELECT
-              COUNT(DISTINCT d.ad_id),
-              COUNT(DISTINCT d.campaign_id),
-              COALESCE(SUM(d.spend), 0),
-              COALESCE(SUM(d.revenue), 0),
-              COALESCE(SUM(d.purchases), 0),
-              COALESCE(SUM(d.impressions), 0),
-              COALESCE(SUM(d.clicks), 0)
-            FROM meta_ads_daily d
-            WHERE d.date BETWEEN ? AND ? AND d.portal = ? AND d.spend > 0
-        ''', (since, until, p)).fetchone()
-        spend = row[2]; revenue = row[3]
-        out[p] = {
-            'active_ads': row[0], 'active_camps': row[1],
-            'spend': round(spend, 2), 'revenue': round(revenue, 2),
-            'purchases': row[4], 'impressions': row[5], 'clicks': row[6],
-            'roas': round(revenue / spend, 2) if spend > 0 else 0,
-            'cpm': round((spend / row[5]) * 1000, 2) if row[5] > 0 else 0,
-            'ctr': round((row[6] / row[5]) * 100, 2) if row[5] > 0 else 0,
-        }
-    return out
-
-
-def fetch_category_summary(conn, since, until):
-    """Per-category aggregate metrics for the period."""
-    out = {}
-    for cat in CATEGORIES:
-        row = conn.execute('''
-            SELECT
-              COUNT(DISTINCT d.ad_id),
-              COUNT(DISTINCT d.campaign_id),
-              COALESCE(SUM(d.spend), 0),
-              COALESCE(SUM(d.revenue), 0),
-              COALESCE(SUM(d.purchases), 0),
-              COALESCE(SUM(d.impressions), 0),
-              COALESCE(SUM(d.clicks), 0),
-              COALESCE(SUM(d.add_to_cart), 0)
-            FROM meta_ads_daily d
-            JOIN meta_ads_meta  m ON d.ad_id = m.ad_id
-            WHERE d.date BETWEEN ? AND ? AND m.category = ? AND d.spend > 0
-        ''', (since, until, cat)).fetchone()
-        spend = row[2]; revenue = row[3]
-        out[cat] = {
-            'active_ads': row[0], 'active_camps': row[1],
-            'spend': round(spend, 2), 'revenue': round(revenue, 2),
-            'purchases': row[4], 'impressions': row[5],
-            'clicks': row[6], 'atc': row[7],
-            'roas': round(revenue / spend, 2) if spend > 0 else 0,
-            'cpm': round((spend / row[5]) * 1000, 2) if row[5] > 0 else 0,
-            'ctr': round((row[6] / row[5]) * 100, 2) if row[5] > 0 else 0,
-            'atc_rate': round((row[7] / row[6]) * 100, 2) if row[6] > 0 else 0,
-        }
-    return out
-
-
-def fetch_creative_type_breakdown(conn, since, until, *, per_category: bool = True):
-    """Per (category, creative_type) aggregates with success rate.
-    Success rate = % of ads with first_seen in window where days_active >= 7.
-    """
-    out = {}
-    if per_category:
-        keys = [(cat, ct) for cat in CATEGORIES for ct in CREATIVE_TYPES]
-    else:
-        keys = [(None, ct) for ct in CREATIVE_TYPES]
-
-    for cat, ct in keys:
-        where = ['d.date BETWEEN ? AND ?', 'm.creative_type = ?', 'd.spend > 0']
-        args  = [since, until, ct]
-        if cat is not None:
-            where.append('m.category = ?')
-            args.append(cat)
-        where_sql = ' AND '.join(where)
-
-        # Aggregates (spend, ROAS, etc.)
-        row = conn.execute(f'''
-            SELECT
-              COUNT(DISTINCT d.ad_id),
-              COALESCE(SUM(d.spend), 0),
-              COALESCE(SUM(d.revenue), 0),
-              COALESCE(SUM(d.purchases), 0)
-            FROM meta_ads_daily d
-            JOIN meta_ads_meta  m ON d.ad_id = m.ad_id
-            WHERE {where_sql}
-        ''', args).fetchone()
-        if row[0] == 0:
-            continue   # nothing to surface
-        spend = row[1]; revenue = row[2]
-
-        # Success rate: ads first_seen within [since, until], days_active >= 7
-        # (ads must be old enough to have had a chance to survive 7d)
-        sr_where = ['m.creative_type = ?', 'm.first_seen IS NOT NULL',
-                    'm.first_seen BETWEEN ? AND ?']
-        sr_args  = [ct, since, until]
-        if cat is not None:
-            sr_where.append('m.category = ?')
-            sr_args.append(cat)
-        sr_sql_where = ' AND '.join(sr_where)
-        sr = conn.execute(f'''
-            SELECT
-              COUNT(*) AS launched,
-              SUM(CASE WHEN days_active >= 7 THEN 1 ELSE 0 END) AS survived
-            FROM meta_ads_meta m
-            WHERE {sr_sql_where}
-        ''', sr_args).fetchone()
-        launched, survived = (sr[0] or 0), (sr[1] or 0)
-
-        bucket = {
-            'active_ads': row[0],
-            'spend': round(spend, 2),
-            'revenue': round(revenue, 2),
-            'purchases': row[3],
-            'roas': round(revenue / spend, 2) if spend > 0 else 0,
-            'launched': launched,
-            'survived_7d': survived,
-            'success_rate': round(100 * survived / launched, 1) if launched > 0 else None,
-        }
-        out_key = f'{cat}|{ct}' if cat is not None else ct
-        out[out_key] = bucket
-    return out
-
-
-def fetch_sentiment_breakdown(conn, since, until):
-    """(creative_type, sentiment) aggregates. Sentiment may be NULL → '(unset)'."""
+def fetch_freshness(conn):
     out = {}
     for r in conn.execute('''
-        SELECT
-          m.creative_type,
-          COALESCE(m.sentiment, '(unset)') AS sentiment,
-          COALESCE(sl.label, m.sentiment) AS sentiment_label,
-          COUNT(DISTINCT d.ad_id) AS n_ads,
-          COALESCE(SUM(d.spend), 0)    AS spend,
-          COALESCE(SUM(d.revenue), 0)  AS revenue,
-          COALESCE(SUM(d.purchases), 0) AS purchases
-        FROM meta_ads_daily d
-        JOIN meta_ads_meta  m ON d.ad_id = m.ad_id
-        LEFT JOIN sentiment_labels sl ON sl.code = m.sentiment
-        WHERE d.date BETWEEN ? AND ? AND d.spend > 0
-        GROUP BY m.creative_type, m.sentiment
-        ORDER BY spend DESC
-    ''', (since, until)).fetchall():
-        ct, sent, label, n_ads, spend, revenue, purchases = r
-        key = f'{ct}|{sent}'
-        out[key] = {
-            'creative_type': ct,
-            'sentiment_code': sent,
-            'sentiment_label': label or sent,
-            'active_ads': n_ads,
-            'spend': round(spend, 2),
-            'revenue': round(revenue, 2),
-            'purchases': purchases,
-            'roas': round(revenue / spend, 2) if spend > 0 else 0,
-        }
-    return out
-
-
-def fetch_top_ads(conn, since, until, *, limit=10, order='best'):
-    """Top/bottom N ads by lifetime ROAS in the window. Includes campaign
-    name for context. min_spend filter avoids surfacing ₹50-spent flukes."""
-    direction = 'DESC' if order == 'best' else 'ASC'
-    rows = conn.execute(f'''
-        SELECT
-          d.ad_id,
-          d.ad_name,
-          d.campaign_id,
-          d.campaign_name,
-          d.portal,
-          m.category,
-          m.creative_type,
-          SUM(d.spend)        AS spend,
-          SUM(d.revenue)      AS revenue,
-          SUM(d.purchases)    AS purchases,
-          MAX(m.days_active)  AS days_active
-        FROM meta_ads_daily d
-        LEFT JOIN meta_ads_meta m ON d.ad_id = m.ad_id
-        WHERE d.date BETWEEN ? AND ? AND d.spend > 0
-        GROUP BY d.ad_id
-        HAVING SUM(d.spend) >= 2000
-        ORDER BY (SUM(d.revenue) / NULLIF(SUM(d.spend), 0)) {direction}
-        LIMIT ?
-    ''', (since, until, limit)).fetchall()
-    out = []
-    for r in rows:
-        spend = r[7] or 0; revenue = r[8] or 0
-        out.append({
-            'ad_id': r[0],
-            'ad_name': r[1],
-            'campaign_id': r[2],
-            'campaign_name': r[3],
-            'portal': r[4],
-            'category': r[5],
-            'creative_type': r[6],
-            'spend': round(spend, 2),
-            'revenue': round(revenue, 2),
-            'purchases': r[9],
-            'roas': round(revenue / spend, 2) if spend > 0 else 0,
-            'days_active': r[10],
-        })
-    return out
-
-
-def fetch_product_drill(conn, since, until):
-    """Per-product aggregates with success-rate at multiple ROAS thresholds.
-    Joins via NTN code → product_ntn_labels. Ads without NTN/product show
-    under '(no product tag)'."""
-    out = {}
-    rows = conn.execute('''
-        SELECT
-          COALESCE(m.product, p.product, m.ntn_code, '(no product tag)') AS prod_name,
-          m.category,
-          COUNT(DISTINCT d.ad_id) AS n_ads,
-          COUNT(DISTINCT d.campaign_id) AS n_camps,
-          COALESCE(SUM(d.spend), 0)    AS spend,
-          COALESCE(SUM(d.revenue), 0)  AS revenue,
-          COALESCE(SUM(d.purchases), 0) AS purchases,
-          COALESCE(SUM(d.impressions), 0) AS impressions
-        FROM meta_ads_daily d
-        JOIN meta_ads_meta  m ON d.ad_id = m.ad_id
-        LEFT JOIN product_ntn_labels p ON p.ntn_code = m.ntn_code
-        WHERE d.date BETWEEN ? AND ? AND d.spend > 0
-        GROUP BY prod_name, m.category
-        ORDER BY spend DESC
-    ''', (since, until)).fetchall()
-
-    for product, category, n_ads, n_camps, spend, revenue, purchases, impressions in rows:
-        # Per-product success rate at each ROAS threshold:
-        # of ads launched in window, what % crossed each ROAS threshold over their lifetime?
-        success = {}
-        for thr in ROAS_BUCKETS:
-            row = conn.execute('''
-                SELECT COUNT(*),
-                       SUM(CASE WHEN total_spend > 0
-                                AND total_revenue / total_spend >= ?
-                                THEN 1 ELSE 0 END)
-                FROM meta_ads_meta
-                WHERE category = ? AND product = ?
-                  AND first_seen BETWEEN ? AND ?
-            ''', (thr, category, product, since, until)).fetchone()
-            launched, hit = (row[0] or 0), (row[1] or 0)
-            success[f'{thr}x'] = {
-                'launched': launched,
-                'hit': hit,
-                'rate': round(100 * hit / launched, 1) if launched > 0 else None,
-            }
-
-        key = f'{product}|{category or "Other"}'
-        out[key] = {
-            'product': product,
-            'category': category or 'Other',
-            'active_ads': n_ads,
-            'active_camps': n_camps,
-            'spend': round(spend, 2),
-            'revenue': round(revenue, 2),
-            'purchases': purchases,
-            'impressions': impressions,
-            'roas': round(revenue / spend, 2) if spend > 0 else 0,
-            'success_at_roas': success,
-        }
-    return out
-
-
-def fetch_freshness(conn):
-    """When did each ingest job last run?"""
-    out = {}
-    for job_name, target_date, status, started_at, finished_at, rows_written in conn.execute('''
         SELECT job_name, target_date, status, started_at, finished_at, rows_written
         FROM ingest_log
         WHERE (job_name, started_at) IN (
           SELECT job_name, MAX(started_at) FROM ingest_log GROUP BY job_name
         )
     ''').fetchall():
-        out[job_name] = {
-            'target_date': target_date,
-            'status': status,
-            'started_at': started_at,
-            'finished_at': finished_at,
-            'rows_written': rows_written,
+        out[r[0]] = {
+            'target_date': r[1], 'status': r[2],
+            'started_at': r[3], 'finished_at': r[4],
+            'rows_written': r[5],
         }
     return out
 
 
-# ── HTML render ───────────────────────────────────────────────────────────
-def render_html(data: dict, since: str, until: str, period_label: str) -> str:
-    payload = json.dumps(data, default=str, ensure_ascii=False)
-    return f"""<!DOCTYPE html>
+# Main HTML — kept in a separate function to avoid massive escape soup
+def render_html(payload_json: str, since: str, until: str) -> str:
+    return HTML_TEMPLATE.replace('__PAYLOAD__', payload_json).replace(
+        '__SINCE__', since).replace('__UNTIL__', until)
+
+
+HTML_TEMPLATE = r"""<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1.0">
-<title>📊 NTN Categories v2 — {period_label}</title>
+<title>NTN Analytics — Categories v2</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 <style>
-* {{ margin:0; padding:0; box-sizing:border-box; }}
-body {{ font-family: -apple-system,'Segoe UI',Roboto,sans-serif; background:#f0f4fb; color:#1a1a2e; }}
-.header {{ background:linear-gradient(135deg,#0d2145,#1a3d7c); padding:18px 24px; color:#fff; }}
-.header h1 {{ font-size:18px; margin-bottom:3px; }}
-.header p {{ font-size:11px; color:rgba(255,255,255,.7); }}
-.last-upd {{ font-size:10px; color:rgba(255,255,255,.5); margin-top:4px; }}
-.tabbar {{ background:#fff; padding:10px 24px; border-bottom:1px solid #dde3f0; display:flex; gap:14px; flex-wrap:wrap; }}
-.tab {{ padding:6px 12px; border-radius:8px; cursor:pointer; font-size:12px; font-weight:700; color:#374151; border:1px solid #e5e7eb; background:#fff; }}
-.tab.active {{ background:#1a3d7c; color:#fff; border-color:#1a3d7c; }}
-.main {{ padding:18px 24px; max-width:1500px; margin:0 auto; }}
-.kpi-strip {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-bottom:20px; }}
-.kpi {{ background:#fff; border-radius:12px; padding:14px 16px; border:1px solid #dde3f0; }}
-.kpi-lbl {{ font-size:10px; color:#6b7280; text-transform:uppercase; letter-spacing:.6px; font-weight:700; }}
-.kpi-val {{ font-size:20px; font-weight:800; color:#0d2145; margin-top:3px; }}
-.kpi-sub {{ font-size:10px; color:#6b7280; margin-top:2px; }}
-.section {{ background:#fff; border-radius:12px; padding:16px 18px; border:1px solid #dde3f0; margin-bottom:18px; }}
-.section h2 {{ font-size:14px; font-weight:800; color:#0d2145; padding-bottom:8px; border-bottom:2px solid #eef2ff; margin-bottom:12px; }}
-.section h3 {{ font-size:12px; font-weight:700; color:#374151; margin-top:14px; margin-bottom:8px; }}
-table {{ width:100%; border-collapse:collapse; font-size:12px; }}
-th {{ background:#f8faff; color:#374151; padding:8px 10px; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px; border-bottom:1px solid #dde3f0; }}
-th:not(:first-child) {{ text-align:right; }}
-td {{ padding:8px 10px; border-bottom:1px solid #f3f4f6; }}
-td:not(:first-child) {{ text-align:right; font-variant-numeric:tabular-nums; }}
-.cat-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(280px,1fr)); gap:14px; margin-bottom:18px; }}
-.cat-card {{ background:#fff; border-radius:12px; padding:14px 16px; border:1px solid #dde3f0; cursor:pointer; transition:all .15s; }}
-.cat-card:hover {{ transform:translateY(-2px); box-shadow:0 4px 12px rgba(0,0,0,.08); }}
-.cat-card.selected {{ border-color:#1a3d7c; box-shadow:0 0 0 2px #1a3d7c33; }}
-.cat-name {{ font-size:14px; font-weight:800; color:#0d2145; margin-bottom:6px; }}
-.cat-mini {{ display:grid; grid-template-columns:repeat(2,1fr); gap:6px; font-size:11px; }}
-.cat-mini-row {{ display:flex; justify-content:space-between; }}
-.cat-mini-lbl {{ color:#6b7280; }}
-.cat-mini-val {{ font-weight:700; color:#0d2145; }}
-.rg {{ color:#059669; font-weight:700; }}
-.ro {{ color:#d97706; font-weight:700; }}
-.rr {{ color:#dc2626; font-weight:700; }}
-.tag {{ display:inline-block; padding:2px 6px; border-radius:4px; font-size:10px; font-weight:700; }}
-.tag-sm  {{ background:#dbeafe; color:#1d4ed8; }}
-.tag-sml {{ background:#d1fae5; color:#065f46; }}
-.tag-nbp {{ background:#fef3c7; color:#92400e; }}
-.empty {{ color:#9ca3af; font-style:italic; padding:8px; text-align:center; }}
-.subtle {{ color:#6b7280; font-size:10px; }}
-.ad-name {{ max-width:380px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:-apple-system,'Segoe UI',Roboto,sans-serif; background:#f0f4fb; color:#1a1a2e; font-size:13px; }
+a { color:#1a3d7c; text-decoration:none; }
+.header { background:linear-gradient(135deg,#0d2145,#1a3d7c); padding:14px 22px; color:#fff; display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:10px; }
+.header h1 { font-size:18px; }
+.header-meta { font-size:11px; color:rgba(255,255,255,.7); }
+.last-upd { font-size:10px; color:rgba(255,255,255,.5); }
+
+.controls { background:#fff; padding:14px 22px; border-bottom:1px solid #dde3f0; display:flex; gap:14px; flex-wrap:wrap; align-items:center; position:sticky; top:0; z-index:50; box-shadow:0 1px 4px rgba(0,0,0,.04); }
+.ctrl-group { display:flex; flex-direction:column; gap:3px; }
+.ctrl-lbl { font-size:9px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; color:#6b7280; }
+.ctrl-input, .ctrl-select { padding:6px 9px; border:1px solid #dde3f0; border-radius:6px; font-size:12px; min-width:120px; background:#fff; }
+.preset-btns { display:flex; gap:5px; }
+.preset-btn { padding:6px 10px; border:1px solid #dde3f0; background:#fff; border-radius:6px; font-size:11px; cursor:pointer; font-weight:600; }
+.preset-btn.active { background:#1a3d7c; color:#fff; border-color:#1a3d7c; }
+.btn-clear { background:#fff5f5; color:#a3260a; border:1px solid #fed7d7; padding:6px 10px; border-radius:6px; font-size:11px; cursor:pointer; font-weight:700; }
+.multi-sel { display:flex; gap:4px; flex-wrap:wrap; max-width:280px; }
+.chip { padding:3px 8px; border-radius:14px; background:#eef2ff; color:#1a3d7c; font-size:10px; font-weight:700; cursor:pointer; border:1px solid #dde3f0; }
+.chip.active { background:#1a3d7c; color:#fff; border-color:#1a3d7c; }
+
+.main { max-width:1700px; margin:0 auto; padding:18px 22px; }
+.kpi-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:18px; }
+.kpi-card { background:#fff; padding:12px 14px; border-radius:10px; border:1px solid #dde3f0; }
+.kpi-lbl { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:#6b7280; font-weight:700; }
+.kpi-val { font-size:22px; font-weight:800; color:#0d2145; margin-top:2px; }
+.kpi-sub { font-size:10px; color:#6b7280; margin-top:2px; display:flex; gap:6px; align-items:center; }
+.delta-up { color:#059669; }
+.delta-down { color:#dc2626; }
+
+.section { background:#fff; border-radius:10px; padding:14px 16px; border:1px solid #dde3f0; margin-bottom:14px; }
+.section h2 { font-size:13px; font-weight:800; color:#0d2145; margin-bottom:10px; padding-bottom:6px; border-bottom:1px solid #eef2ff; display:flex; align-items:center; justify-content:space-between; }
+.section h2 .meta { font-weight:400; font-size:10px; color:#6b7280; }
+.charts-row { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+@media (max-width:1100px) { .charts-row { grid-template-columns:1fr; } }
+.chart-wrap { position:relative; height:240px; }
+
+table { width:100%; border-collapse:collapse; font-size:11px; }
+th { background:#f8faff; color:#374151; padding:7px 9px; text-align:left; font-size:10px; text-transform:uppercase; letter-spacing:.4px; border-bottom:1px solid #dde3f0; cursor:pointer; user-select:none; white-space:nowrap; }
+th:not(:first-child) { text-align:right; }
+th.sorted-asc::after { content:' ↑'; color:#1a3d7c; }
+th.sorted-desc::after { content:' ↓'; color:#1a3d7c; }
+td { padding:7px 9px; border-bottom:1px solid #f3f4f6; }
+td:not(:first-child) { text-align:right; font-variant-numeric:tabular-nums; }
+tr:hover td { background:#fafbff; }
+.rg { color:#059669; font-weight:700; }
+.ro { color:#d97706; font-weight:700; }
+.rr { color:#dc2626; font-weight:700; }
+.tag { display:inline-block; padding:2px 7px; border-radius:5px; font-size:10px; font-weight:700; }
+.tag-sm  { background:#dbeafe; color:#1d4ed8; }
+.tag-sml { background:#d1fae5; color:#065f46; }
+.tag-nbp { background:#fef3c7; color:#92400e; }
+.subtle { color:#9ca3af; font-size:10px; }
+.empty { padding:30px 14px; text-align:center; color:#9ca3af; font-style:italic; }
+.cell-name { max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.btn-csv { background:#1a3d7c; color:#fff; border:none; padding:6px 11px; border-radius:6px; font-size:10px; cursor:pointer; font-weight:700; }
+.btn-csv:hover { background:#0d2145; }
+
+/* Heatmap-ish coloring for success rate cells */
+.sr-0 { background:#fef2f2; color:#7f1d1d; }
+.sr-low { background:#fef3c7; color:#78350f; }
+.sr-med { background:#dcfce7; color:#14532d; }
+.sr-hi { background:#bbf7d0; color:#065f46; font-weight:700; }
 </style>
 </head>
 <body>
+
 <div class="header">
-  <h1>📊 NTN Categories v2</h1>
-  <p>SQLite-backed · Reads from state/ntn.db · Period: {since} → {until} ({period_label})</p>
-  <p class="last-upd">Built {data['updated_at']} · Reads from {data['db_path']}</p>
+  <div>
+    <h1>📊 NTN Categories — Analytics</h1>
+    <div class="header-meta">DB-backed · Period: __SINCE__ → __UNTIL__ · all filters operate on the embedded dataset</div>
+    <div class="last-upd" id="last-upd"></div>
+  </div>
+  <nav style="font-size:11px">
+    <a href="/" style="color:rgba(255,255,255,.85);border-bottom:1px dashed rgba(255,255,255,.5)">📊 NTN</a>&nbsp;&nbsp;
+    <a href="/today_live.html" style="color:rgba(255,255,255,.85);border-bottom:1px dashed rgba(255,255,255,.5)">🔴 Today</a>&nbsp;&nbsp;
+    <a href="/categories" style="color:rgba(255,255,255,.85);border-bottom:1px dashed rgba(255,255,255,.5)">📂 Old Categories</a>&nbsp;&nbsp;
+    <span style="color:#fff;border-bottom:2px solid #fff">📂 v2</span>
+  </nav>
 </div>
 
-<div class="tabbar">
-  <span class="subtle" style="margin-right:8px">📂 Category drill:</span>
-  <button class="tab active" data-cat="all">All</button>
-  {''.join(f'<button class="tab" data-cat="{c}">{c}</button>' for c in CATEGORIES)}
+<div class="controls">
+  <div class="ctrl-group">
+    <span class="ctrl-lbl">Date Range</span>
+    <div class="preset-btns" id="preset-btns">
+      <button class="preset-btn" data-days="1">Today</button>
+      <button class="preset-btn" data-days="3">3D</button>
+      <button class="preset-btn active" data-days="7">7D</button>
+      <button class="preset-btn" data-days="14">14D</button>
+      <button class="preset-btn" data-days="30">30D</button>
+      <button class="preset-btn" data-days="all">All</button>
+    </div>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-lbl">Custom From</span>
+    <input type="date" class="ctrl-input" id="from-date">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-lbl">Custom To</span>
+    <input type="date" class="ctrl-input" id="to-date">
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-lbl">Portal</span>
+    <div class="multi-sel" id="filter-portals"></div>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-lbl">Category</span>
+    <div class="multi-sel" id="filter-categories"></div>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-lbl">Creative Type</span>
+    <div class="multi-sel" id="filter-creatives"></div>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-lbl">Product</span>
+    <select class="ctrl-select" id="filter-product">
+      <option value="">All Products</option>
+    </select>
+  </div>
+  <div class="ctrl-group">
+    <span class="ctrl-lbl">&nbsp;</span>
+    <button class="btn-clear" id="btn-clear">Clear All Filters</button>
+  </div>
 </div>
 
 <div class="main">
-
-  <!-- Top KPI strip -->
   <div class="kpi-strip" id="kpi-strip"></div>
 
-  <!-- Per-portal split -->
   <div class="section">
-    <h2>📡 Per-Portal Split</h2>
-    <table>
+    <h2>📈 Trends Over Time <span class="meta" id="trend-meta"></span></h2>
+    <div class="charts-row">
+      <div class="chart-wrap"><canvas id="chart-spend-rev"></canvas></div>
+      <div class="chart-wrap"><canvas id="chart-roas"></canvas></div>
+    </div>
+    <div class="charts-row" style="margin-top:14px">
+      <div class="chart-wrap"><canvas id="chart-orders"></canvas></div>
+      <div class="chart-wrap"><canvas id="chart-cat-spend"></canvas></div>
+    </div>
+  </div>
+
+  <div class="section">
+    <h2>📂 Per-Category Breakdown <span class="meta">click rows to drill</span></h2>
+    <table id="tbl-categories">
       <thead><tr>
-        <th>Portal</th><th>Active Ads</th><th>Active Camps</th>
-        <th>Spend (₹)</th><th>Revenue (₹)</th><th>Orders</th>
-        <th>ROAS</th><th>CPM (₹)</th><th>CTR (%)</th>
+        <th data-col="category" data-type="str">Category</th>
+        <th data-col="active_ads" data-type="num">Active Ads</th>
+        <th data-col="active_camps" data-type="num">Camps</th>
+        <th data-col="spend" data-type="num">Spend (₹)</th>
+        <th data-col="revenue" data-type="num">Revenue (₹)</th>
+        <th data-col="purchases" data-type="num">Orders</th>
+        <th data-col="roas" data-type="num">ROAS</th>
+        <th data-col="cpm" data-type="num">CPM (₹)</th>
+        <th data-col="ctr" data-type="num">CTR (%)</th>
+        <th data-col="atc_rate" data-type="num">ATC%</th>
+        <th data-col="success_rate" data-type="num">Success% (7d)</th>
       </tr></thead>
-      <tbody id="portal-rows"></tbody>
+      <tbody></tbody>
     </table>
   </div>
 
-  <!-- Category cards -->
   <div class="section">
-    <h2>📂 Categories — click to drill</h2>
-    <div class="cat-grid" id="cat-cards"></div>
+    <h2>🎨 Creative Type × Category Heatmap <span class="meta">spend-weighted ROAS — green ≥2.5, amber 1.5-2.5, red &lt;1.5</span></h2>
+    <div style="overflow-x:auto"><table id="tbl-heatmap"></table></div>
   </div>
 
-  <!-- Drill-down section: creative type breakdown for selected category -->
   <div class="section">
-    <h2>🎨 Creative Type Breakdown <span class="subtle" id="drill-title">(All Categories)</span></h2>
-    <table>
+    <h2>🛍️ Product Performance <button class="btn-csv" onclick="exportCSV('products')">↓ CSV</button></h2>
+    <table id="tbl-products">
       <thead><tr>
-        <th>Creative Type</th><th>Active Ads</th><th>Spend (₹)</th>
-        <th>Revenue (₹)</th><th>ROAS</th>
-        <th>Launched in Period</th><th>Survived 7d</th><th>Success Rate</th>
+        <th data-col="product" data-type="str">Product</th>
+        <th data-col="category" data-type="str">Cat</th>
+        <th data-col="active_ads" data-type="num">Ads</th>
+        <th data-col="spend" data-type="num">Spend</th>
+        <th data-col="revenue" data-type="num">Revenue</th>
+        <th data-col="orders" data-type="num">Orders</th>
+        <th data-col="roas" data-type="num">ROAS</th>
+        <th data-col="hit_15" data-type="num">≥1.5x</th>
+        <th data-col="hit_20" data-type="num">≥2.0x</th>
+        <th data-col="hit_25" data-type="num">≥2.5x</th>
+        <th data-col="hit_30" data-type="num">≥3.0x</th>
+        <th data-col="hit_40" data-type="num">≥4.0x</th>
+        <th data-col="hit_50" data-type="num">≥5.0x</th>
       </tr></thead>
-      <tbody id="creative-rows"></tbody>
+      <tbody></tbody>
     </table>
   </div>
 
-  <!-- Sentiment breakdown -->
   <div class="section">
-    <h2>💬 Sentiment Breakdown <span class="subtle">(per creative type)</span></h2>
-    <table>
+    <h2>🏆 Top + Bottom Ads <button class="btn-csv" onclick="exportCSV('ads')">↓ CSV</button></h2>
+    <table id="tbl-ads">
       <thead><tr>
-        <th>Creative Type</th><th>Sentiment</th><th>Code</th>
-        <th>Active Ads</th><th>Spend (₹)</th><th>Revenue (₹)</th><th>ROAS</th>
+        <th data-col="portal" data-type="str">Portal</th>
+        <th data-col="category" data-type="str">Cat</th>
+        <th data-col="creative_type" data-type="str">Type</th>
+        <th data-col="ad_name" data-type="str">Ad / Campaign</th>
+        <th data-col="days_active" data-type="num">Days</th>
+        <th data-col="spend" data-type="num">Spend</th>
+        <th data-col="revenue" data-type="num">Revenue</th>
+        <th data-col="orders" data-type="num">Orders</th>
+        <th data-col="roas" data-type="num">ROAS</th>
       </tr></thead>
-      <tbody id="sentiment-rows"></tbody>
-    </table>
-    <p class="subtle" style="margin-top:8px">
-      Sentiment codes (st1, st2…) come from ad name nomenclature.
-      Update <code>sentiment_labels</code> table to set human-readable labels.
-    </p>
-  </div>
-
-  <!-- Top + Bottom ads -->
-  <div class="section">
-    <h2>🏆 Top 10 by ROAS</h2>
-    <table>
-      <thead><tr>
-        <th>Portal</th><th>Cat</th><th>Type</th><th>Ad / Campaign</th>
-        <th>Days Active</th><th>Spend</th><th>Revenue</th><th>ROAS</th>
-      </tr></thead>
-      <tbody id="top-rows"></tbody>
-    </table>
-  </div>
-  <div class="section">
-    <h2>🥶 Bottom 10 by ROAS <span class="subtle">(min ₹2K spend, kill candidates)</span></h2>
-    <table>
-      <thead><tr>
-        <th>Portal</th><th>Cat</th><th>Type</th><th>Ad / Campaign</th>
-        <th>Days Active</th><th>Spend</th><th>Revenue</th><th>ROAS</th>
-      </tr></thead>
-      <tbody id="bottom-rows"></tbody>
+      <tbody></tbody>
     </table>
   </div>
 
-  <!-- Product drill-down (sidebar concept rendered as section here) -->
   <div class="section">
-    <h2>🛍️ Product Drill-Down — Success Rate at ROAS Thresholds</h2>
-    <table>
+    <h2>💬 Sentiment × Creative Type <span class="meta">Edit sentiment_labels table to set readable names</span></h2>
+    <table id="tbl-sentiment">
       <thead><tr>
-        <th>Product</th><th>Category</th>
-        <th>Active Ads</th><th>Spend</th><th>Revenue</th><th>ROAS</th>
-        <th>≥1.5x</th><th>≥2.0x</th><th>≥2.5x</th><th>≥3.0x</th><th>≥4.0x</th><th>≥5.0x</th>
+        <th data-col="sentiment" data-type="str">Sentiment</th>
+        <th data-col="creative_type" data-type="str">Creative Type</th>
+        <th data-col="active_ads" data-type="num">Ads</th>
+        <th data-col="spend" data-type="num">Spend</th>
+        <th data-col="revenue" data-type="num">Revenue</th>
+        <th data-col="roas" data-type="num">ROAS</th>
       </tr></thead>
-      <tbody id="product-rows"></tbody>
+      <tbody></tbody>
     </table>
-    <p class="subtle" style="margin-top:8px">
-      "≥X.Xx" = % of ads launched in this period whose lifetime ROAS hit that threshold.
-    </p>
   </div>
-
 </div>
 
 <script>
-const DATA = {payload};
-const fmt = {{
-  inr: (n) => n == null ? '—' : '₹' + Math.round(n).toLocaleString('en-IN'),
-  num: (n) => n == null ? '—' : Math.round(n).toLocaleString('en-IN'),
-  pct: (n) => n == null ? '—' : n.toFixed(1) + '%',
-  roas: (n) => {{
+const PAYLOAD = __PAYLOAD__;
+const RAW = PAYLOAD.rows;
+const DIM = PAYLOAD.dimensions;
+const FRESH = PAYLOAD.freshness;
+document.getElementById('last-upd').textContent = `Built ${PAYLOAD.updated_at} · ${RAW.length.toLocaleString()} ad-day rows · ${Object.keys(FRESH).length} ingest jobs tracked`;
+
+// ── Filter state ─────────────────────────────────────────────────────────
+const F = {
+  fromDate: PAYLOAD.since,
+  toDate:   PAYLOAD.until,
+  portals:  new Set(),       // empty = all
+  categories: new Set(),
+  creative_types: new Set(),
+  product:  '',              // single-select
+};
+
+// ── Helpers ─────────────────────────────────────────────────────────────
+const fmt = {
+  inr: n => n == null ? '—' : '₹' + Math.round(n).toLocaleString('en-IN'),
+  num: n => n == null ? '—' : Math.round(n).toLocaleString('en-IN'),
+  num1: n => n == null ? '—' : Number(n).toFixed(1),
+  pct: n => n == null ? '—' : Number(n).toFixed(1) + '%',
+  roas: n => {
     if (n == null) return '—';
-    const cls = n >= 2.5 ? 'rg' : (n >= 1.5 ? 'ro' : 'rr');
-    return `<span class="${{cls}}">${{n.toFixed(2)}}x</span>`;
-  }},
-}};
-function tag(p) {{ return `<span class="tag tag-${{p.toLowerCase()}}">${{p}}</span>`; }}
+    const cls = n >= 2.5 ? 'rg' : n >= 1.5 ? 'ro' : 'rr';
+    return `<span class="${cls}">${Number(n).toFixed(2)}x</span>`;
+  },
+  delta: (cur, prev) => {
+    if (prev == null || prev === 0) return '';
+    const pct = ((cur - prev) / prev) * 100;
+    const cls = pct >= 0 ? 'delta-up' : 'delta-down';
+    const arrow = pct >= 0 ? '▲' : '▼';
+    return `<span class="${cls}">${arrow} ${Math.abs(pct).toFixed(1)}%</span>`;
+  },
+};
+function tag(p) { return `<span class="tag tag-${(p||'').toLowerCase()}">${p||'?'}</span>`; }
 
-// Render top KPI strip
-function renderKpi() {{
-  const k = DATA.overall;
-  const el = document.getElementById('kpi-strip');
-  el.innerHTML = [
-    {{l:'Active Ads', v: fmt.num(k.active_ads), s: k.active_camps + ' campaigns'}},
-    {{l:'Spend',      v: fmt.inr(k.spend), s: 'across all portals'}},
-    {{l:'Revenue',    v: fmt.inr(k.revenue), s: k.purchases + ' purchases'}},
-    {{l:'Blended ROAS', v: fmt.roas(k.roas), s: 'spend-weighted'}},
-    {{l:'CPM',        v: fmt.inr(k.cpm), s: 'cost per 1k impr'}},
-    {{l:'CTR',        v: fmt.pct(k.ctr), s: 'click-through'}},
-  ].map(c =>
-    `<div class="kpi"><div class="kpi-lbl">${{c.l}}</div>` +
-    `<div class="kpi-val">${{c.v}}</div><div class="kpi-sub">${{c.s}}</div></div>`
+// ── Initial filter UI population ────────────────────────────────────────
+function buildChips(containerId, values, set) {
+  const c = document.getElementById(containerId);
+  c.innerHTML = '';
+  values.forEach(v => {
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    chip.textContent = v;
+    chip.dataset.val = v;
+    chip.addEventListener('click', () => {
+      if (set.has(v)) { set.delete(v); chip.classList.remove('active'); }
+      else { set.add(v); chip.classList.add('active'); }
+      apply();
+    });
+    c.appendChild(chip);
+  });
+}
+buildChips('filter-portals',    DIM.portals,        F.portals);
+buildChips('filter-categories', DIM.categories,     F.categories);
+buildChips('filter-creatives',  DIM.creative_types, F.creative_types);
+
+// Product dropdown
+const prodSel = document.getElementById('filter-product');
+DIM.products.forEach(p => {
+  const o = document.createElement('option');
+  o.value = p; o.textContent = p;
+  prodSel.appendChild(o);
+});
+prodSel.addEventListener('change', e => { F.product = e.target.value; apply(); });
+
+// Date inputs
+document.getElementById('from-date').value = F.fromDate;
+document.getElementById('to-date').value   = F.toDate;
+document.getElementById('from-date').addEventListener('change', e => { F.fromDate = e.target.value; clearActivePreset(); apply(); });
+document.getElementById('to-date').addEventListener('change',   e => { F.toDate   = e.target.value; clearActivePreset(); apply(); });
+
+// Date presets
+document.querySelectorAll('.preset-btn').forEach(b => {
+  b.addEventListener('click', () => {
+    document.querySelectorAll('.preset-btn').forEach(x => x.classList.remove('active'));
+    b.classList.add('active');
+    const days = b.dataset.days;
+    if (days === 'all') {
+      F.fromDate = PAYLOAD.since;
+      F.toDate   = PAYLOAD.until;
+    } else {
+      const end = new Date(PAYLOAD.until + 'T00:00:00');
+      const n = parseInt(days, 10);
+      const start = new Date(end); start.setDate(end.getDate() - (n - 1));
+      F.fromDate = start.toISOString().slice(0, 10);
+      F.toDate   = PAYLOAD.until;
+    }
+    document.getElementById('from-date').value = F.fromDate;
+    document.getElementById('to-date').value   = F.toDate;
+    apply();
+  });
+});
+function clearActivePreset() {
+  document.querySelectorAll('.preset-btn').forEach(x => x.classList.remove('active'));
+}
+
+document.getElementById('btn-clear').addEventListener('click', () => {
+  F.portals.clear(); F.categories.clear(); F.creative_types.clear(); F.product = '';
+  document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+  prodSel.value = '';
+  apply();
+});
+
+// ── Filter logic ────────────────────────────────────────────────────────
+function applyFilters(rows) {
+  return rows.filter(r => {
+    if (r.date < F.fromDate || r.date > F.toDate) return false;
+    if (F.portals.size && !F.portals.has(r.portal)) return false;
+    if (F.categories.size && !F.categories.has(r.category)) return false;
+    if (F.creative_types.size && !F.creative_types.has(r.creative_type)) return false;
+    if (F.product && r.product !== F.product) return false;
+    return true;
+  });
+}
+
+function getCompareSet() {
+  // For trend deltas: compare to previous equal-length window
+  const start = new Date(F.fromDate + 'T00:00:00');
+  const end   = new Date(F.toDate   + 'T00:00:00');
+  const ms    = end - start;
+  const prevEnd   = new Date(start); prevEnd.setDate(start.getDate() - 1);
+  const prevStart = new Date(prevEnd); prevStart.setTime(prevEnd.getTime() - ms);
+  const prevFrom = prevStart.toISOString().slice(0, 10);
+  const prevTo   = prevEnd.toISOString().slice(0, 10);
+  return RAW.filter(r => {
+    if (r.date < prevFrom || r.date > prevTo) return false;
+    if (F.portals.size && !F.portals.has(r.portal)) return false;
+    if (F.categories.size && !F.categories.has(r.category)) return false;
+    if (F.creative_types.size && !F.creative_types.has(r.creative_type)) return false;
+    if (F.product && r.product !== F.product) return false;
+    return true;
+  });
+}
+
+// ── Aggregations ────────────────────────────────────────────────────────
+function aggregate(rows, groupKey) {
+  const map = new Map();
+  for (const r of rows) {
+    const k = groupKey ? r[groupKey] : '__total__';
+    if (!map.has(k)) map.set(k, {
+      key:k, active_ads:new Set(), active_camps:new Set(),
+      spend:0, revenue:0, purchases:0, impressions:0, clicks:0,
+      atc:0, lpv:0,
+    });
+    const a = map.get(k);
+    a.active_ads.add(r.ad_id);
+    a.active_camps.add(r.campaign_id);
+    a.spend       += r.spend       || 0;
+    a.revenue     += r.revenue     || 0;
+    a.purchases   += r.purchases   || 0;
+    a.impressions += r.impressions || 0;
+    a.clicks      += r.clicks      || 0;
+    a.atc         += r.add_to_cart || 0;
+    a.lpv         += r.landing_page_views || 0;
+  }
+  return [...map.values()].map(a => ({
+    key:a.key,
+    active_ads: a.active_ads.size,
+    active_camps: a.active_camps.size,
+    spend: a.spend, revenue: a.revenue, purchases: a.purchases,
+    impressions: a.impressions, clicks: a.clicks,
+    atc: a.atc, lpv: a.lpv,
+    roas: a.spend > 0 ? a.revenue / a.spend : 0,
+    cpm: a.impressions > 0 ? (a.spend / a.impressions) * 1000 : 0,
+    ctr: a.impressions > 0 ? (a.clicks / a.impressions) * 100 : 0,
+    atc_rate: a.clicks > 0 ? (a.atc / a.clicks) * 100 : 0,
+  }));
+}
+
+// ── Success rate: for ads first_seen in window, fraction that ran 7+ days
+function successRate(rows, threshold = 7) {
+  const seen = new Set();
+  const buckets = { launched: 0, survived: 0 };
+  for (const r of rows) {
+    if (seen.has(r.ad_id)) continue;
+    seen.add(r.ad_id);
+    if (!r.first_seen || r.first_seen < F.fromDate || r.first_seen > F.toDate) continue;
+    buckets.launched++;
+    if ((r.days_active || 0) >= threshold) buckets.survived++;
+  }
+  return buckets.launched > 0 ? (100 * buckets.survived / buckets.launched) : null;
+}
+
+// ── KPI strip render ─────────────────────────────────────────────────────
+function renderKPI(rows, prevRows) {
+  const a = aggregate(rows)[0] || { spend:0, revenue:0, purchases:0, active_ads:0, active_camps:0, roas:0, cpm:0, ctr:0 };
+  const p = aggregate(prevRows)[0] || { spend:0, revenue:0, purchases:0, roas:0 };
+  const cards = [
+    { l:'Active Ads',  v: fmt.num(a.active_ads), s: a.active_camps + ' campaigns' },
+    { l:'Spend',       v: fmt.inr(a.spend), s: fmt.delta(a.spend, p.spend) + ' vs prev' },
+    { l:'Revenue',     v: fmt.inr(a.revenue), s: fmt.delta(a.revenue, p.revenue) + ' vs prev' },
+    { l:'Orders',      v: fmt.num(a.purchases), s: fmt.delta(a.purchases, p.purchases) + ' vs prev' },
+    { l:'ROAS',        v: fmt.roas(a.roas), s: 'spend-weighted' },
+    { l:'CPM',         v: fmt.inr(a.cpm), s: 'cost / 1k impr' },
+    { l:'CTR',         v: fmt.pct(a.ctr), s: 'click-through' },
+    { l:'Success Rate (7d)', v: (() => { const s = successRate(rows); return s == null ? '—' : fmt.pct(s); })(), s: 'ads launched in period · survived 7d' },
+  ];
+  document.getElementById('kpi-strip').innerHTML = cards.map(c =>
+    `<div class="kpi-card"><div class="kpi-lbl">${c.l}</div>` +
+    `<div class="kpi-val">${c.v}</div><div class="kpi-sub">${c.s}</div></div>`
   ).join('');
-}}
+}
 
-function renderPortals() {{
-  const tbody = document.getElementById('portal-rows');
-  const portals = ['SM','SML','NBP'];
-  tbody.innerHTML = portals.map(p => {{
-    const r = DATA.per_portal[p];
-    return `<tr><td>${{tag(p)}}</td>` +
-      `<td>${{fmt.num(r.active_ads)}}</td><td>${{fmt.num(r.active_camps)}}</td>` +
-      `<td>${{fmt.inr(r.spend)}}</td><td>${{fmt.inr(r.revenue)}}</td>` +
-      `<td>${{fmt.num(r.purchases)}}</td>` +
-      `<td>${{fmt.roas(r.roas)}}</td>` +
-      `<td>${{fmt.inr(r.cpm)}}</td><td>${{fmt.pct(r.ctr)}}</td></tr>`;
-  }}).join('');
-}}
+// ── Time series ─────────────────────────────────────────────────────────
+let charts = {};
+function destroyCharts() {
+  Object.values(charts).forEach(c => c.destroy());
+  charts = {};
+}
 
-function renderCategories() {{
-  const grid = document.getElementById('cat-cards');
-  const order = Object.entries(DATA.categories).sort((a,b) => b[1].spend - a[1].spend);
-  grid.innerHTML = order.map(([cat, r]) => {{
-    const sel = window.SELECTED_CAT === cat ? ' selected' : '';
-    return `<div class="cat-card${{sel}}" data-cat="${{cat}}">
-      <div class="cat-name">${{cat}}</div>
-      <div class="cat-mini">
-        <div class="cat-mini-row"><span class="cat-mini-lbl">Active Ads</span><span class="cat-mini-val">${{fmt.num(r.active_ads)}}</span></div>
-        <div class="cat-mini-row"><span class="cat-mini-lbl">Camps</span><span class="cat-mini-val">${{fmt.num(r.active_camps)}}</span></div>
-        <div class="cat-mini-row"><span class="cat-mini-lbl">Spend</span><span class="cat-mini-val">${{fmt.inr(r.spend)}}</span></div>
-        <div class="cat-mini-row"><span class="cat-mini-lbl">Revenue</span><span class="cat-mini-val">${{fmt.inr(r.revenue)}}</span></div>
-        <div class="cat-mini-row"><span class="cat-mini-lbl">ROAS</span><span class="cat-mini-val">${{fmt.roas(r.roas)}}</span></div>
-        <div class="cat-mini-row"><span class="cat-mini-lbl">CPM</span><span class="cat-mini-val">${{fmt.inr(r.cpm)}}</span></div>
-        <div class="cat-mini-row"><span class="cat-mini-lbl">CTR</span><span class="cat-mini-val">${{fmt.pct(r.ctr)}}</span></div>
-        <div class="cat-mini-row"><span class="cat-mini-lbl">ATC Rate</span><span class="cat-mini-val">${{fmt.pct(r.atc_rate)}}</span></div>
-      </div>
-    </div>`;
-  }}).join('');
-}}
+function buildTimeSeries(rows) {
+  const by = new Map();
+  for (const r of rows) {
+    if (!by.has(r.date)) by.set(r.date, { spend:0, revenue:0, orders:0 });
+    const b = by.get(r.date);
+    b.spend     += r.spend     || 0;
+    b.revenue   += r.revenue   || 0;
+    b.orders    += r.purchases || 0;
+  }
+  const sorted = [...by.entries()].sort((a, b) => a[0].localeCompare(b[0]));
+  return {
+    labels: sorted.map(([d]) => d.slice(5)),  // MM-DD
+    spend: sorted.map(([_, v]) => Math.round(v.spend)),
+    revenue: sorted.map(([_, v]) => Math.round(v.revenue)),
+    orders: sorted.map(([_, v]) => v.orders),
+    roas: sorted.map(([_, v]) => v.spend > 0 ? +(v.revenue / v.spend).toFixed(2) : 0),
+  };
+}
 
-function renderCreativeBreakdown(selectedCat) {{
-  document.getElementById('drill-title').textContent = selectedCat === 'all'
-    ? '(All Categories — Total)'
-    : `(${{selectedCat}})`;
+function renderCharts(rows) {
+  destroyCharts();
+  const ts = buildTimeSeries(rows);
+  document.getElementById('trend-meta').textContent =
+    `${ts.labels.length} days · spend-weighted`;
 
-  // Build matching keys
-  const tbody = document.getElementById('creative-rows');
-  let entries;
-  if (selectedCat === 'all') {{
-    // Aggregate across categories per creative_type
-    const agg = {{}};
-    for (const [k,v] of Object.entries(DATA.creative_breakdown)) {{
-      const ct = k.split('|')[1];
-      if (!agg[ct]) agg[ct] = {{ active_ads:0, spend:0, revenue:0, purchases:0, launched:0, survived_7d:0 }};
-      agg[ct].active_ads   += v.active_ads;
-      agg[ct].spend        += v.spend;
-      agg[ct].revenue      += v.revenue;
-      agg[ct].purchases    += v.purchases;
-      agg[ct].launched     += v.launched;
-      agg[ct].survived_7d  += v.survived_7d;
-    }}
-    entries = Object.entries(agg).map(([ct, a]) => [ct, {{
-      ...a,
-      roas: a.spend > 0 ? a.revenue/a.spend : 0,
-      success_rate: a.launched > 0 ? 100 * a.survived_7d / a.launched : null,
-    }}]);
-  }} else {{
-    entries = Object.entries(DATA.creative_breakdown)
-      .filter(([k]) => k.split('|')[0] === selectedCat)
-      .map(([k,v]) => [k.split('|')[1], v]);
-  }}
+  charts.spendRev = new Chart(document.getElementById('chart-spend-rev'), {
+    type:'line',
+    data:{ labels: ts.labels, datasets: [
+      { label:'Spend',   data: ts.spend,   borderColor:'#1a3d7c', backgroundColor:'#1a3d7c33', fill:true, tension:.25 },
+      { label:'Revenue', data: ts.revenue, borderColor:'#059669', backgroundColor:'#05966933', fill:true, tension:.25 },
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ title:{ display:true, text:'Spend vs Revenue (₹)'} },
+      scales:{ y:{ ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v.toLocaleString()) } } } },
+  });
+  charts.roas = new Chart(document.getElementById('chart-roas'), {
+    type:'line',
+    data:{ labels: ts.labels, datasets: [
+      { label:'Daily ROAS', data: ts.roas, borderColor:'#d97706', backgroundColor:'#d9770633', fill:true, tension:.25 },
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ title:{ display:true, text:'Blended ROAS by Day'} } },
+  });
+  charts.orders = new Chart(document.getElementById('chart-orders'), {
+    type:'bar',
+    data:{ labels: ts.labels, datasets: [
+      { label:'Orders', data: ts.orders, backgroundColor:'#1a3d7c' },
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ title:{ display:true, text:'Orders by Day'} } },
+  });
 
-  entries.sort((a,b) => b[1].spend - a[1].spend);
-  if (entries.length === 0) {{
-    tbody.innerHTML = '<tr><td colspan="8" class="empty">No data for this category in selected period.</td></tr>';
-    return;
-  }}
-  tbody.innerHTML = entries.map(([ct, r]) => `
-    <tr>
-      <td><strong>${{ct}}</strong></td>
-      <td>${{fmt.num(r.active_ads)}}</td>
-      <td>${{fmt.inr(r.spend)}}</td>
-      <td>${{fmt.inr(r.revenue)}}</td>
-      <td>${{fmt.roas(r.roas)}}</td>
-      <td>${{fmt.num(r.launched)}}</td>
-      <td>${{fmt.num(r.survived_7d)}}</td>
-      <td>${{r.success_rate == null ? '<span class="subtle">—</span>' : fmt.pct(r.success_rate)}}</td>
-    </tr>
-  `).join('');
-}}
+  // Category bar chart
+  const cats = aggregate(rows, 'category').filter(x => x.key).sort((a, b) => b.spend - a.spend);
+  charts.catSpend = new Chart(document.getElementById('chart-cat-spend'), {
+    type:'bar',
+    data:{ labels: cats.map(c => c.key),
+      datasets:[
+        { label:'Spend (₹)', data: cats.map(c => Math.round(c.spend)), backgroundColor:'#1a3d7c', yAxisID:'y' },
+        { label:'ROAS',      data: cats.map(c => +c.roas.toFixed(2)),  backgroundColor:'#059669', type:'line', yAxisID:'y1', tension:.25 },
+      ]},
+    options:{ responsive:true, maintainAspectRatio:false,
+      plugins:{ title:{ display:true, text:'Spend & ROAS by Category'} },
+      scales:{
+        y:{ beginAtZero:true, position:'left', ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v) } },
+        y1:{ beginAtZero:true, position:'right', grid:{ drawOnChartArea:false } },
+      } },
+  });
+}
 
-function renderSentiment() {{
-  const tbody = document.getElementById('sentiment-rows');
-  const entries = Object.entries(DATA.sentiment).sort((a,b) => b[1].spend - a[1].spend);
-  if (entries.length === 0) {{
-    tbody.innerHTML = '<tr><td colspan="7" class="empty">No sentiment data yet — start tagging ads with _st1_, _st2_, etc.</td></tr>';
-    return;
-  }}
-  tbody.innerHTML = entries.map(([k, r]) => `
-    <tr>
-      <td><strong>${{r.creative_type}}</strong></td>
-      <td>${{r.sentiment_label || r.sentiment_code}}</td>
-      <td><code class="subtle">${{r.sentiment_code}}</code></td>
-      <td>${{fmt.num(r.active_ads)}}</td>
-      <td>${{fmt.inr(r.spend)}}</td>
-      <td>${{fmt.inr(r.revenue)}}</td>
-      <td>${{fmt.roas(r.roas)}}</td>
-    </tr>
-  `).join('');
-}}
+// ── Tables ──────────────────────────────────────────────────────────────
+const sortState = {};   // tableId → {col, dir}
+function setupSort(tableId, defaultCol, defaultDir = 'desc') {
+  sortState[tableId] = { col: defaultCol, dir: defaultDir };
+  const ths = document.querySelectorAll(`#${tableId} thead th`);
+  ths.forEach(th => {
+    th.addEventListener('click', () => {
+      const col = th.dataset.col;
+      const cur = sortState[tableId];
+      if (cur.col === col) cur.dir = cur.dir === 'asc' ? 'desc' : 'asc';
+      else { cur.col = col; cur.dir = 'desc'; }
+      apply();
+    });
+  });
+}
+function applySortHeaders(tableId) {
+  const { col, dir } = sortState[tableId];
+  document.querySelectorAll(`#${tableId} thead th`).forEach(th => {
+    th.classList.remove('sorted-asc', 'sorted-desc');
+    if (th.dataset.col === col) th.classList.add('sorted-' + dir);
+  });
+}
+function sortRows(rows, tableId) {
+  const { col, dir } = sortState[tableId];
+  const factor = dir === 'asc' ? 1 : -1;
+  return rows.slice().sort((a, b) => {
+    const va = a[col], vb = b[col];
+    if (va == null) return 1; if (vb == null) return -1;
+    if (typeof va === 'number') return (va - vb) * factor;
+    return String(va).localeCompare(String(vb)) * factor;
+  });
+}
 
-function renderTopBottom() {{
-  function row(r) {{
-    const camp = r.campaign_name || '';
-    return `<tr>
-      <td>${{tag(r.portal || '?')}}</td>
-      <td>${{r.category || '?'}}</td>
-      <td>${{r.creative_type || '?'}}</td>
-      <td><div class="ad-name" title="${{(r.ad_name||'').replace(/"/g,'&quot;')}}"><strong>${{r.ad_name || '?'}}</strong><br/><span class="subtle">${{camp}}</span></div></td>
-      <td>${{fmt.num(r.days_active)}}d</td>
-      <td>${{fmt.inr(r.spend)}}</td>
-      <td>${{fmt.inr(r.revenue)}}</td>
-      <td>${{fmt.roas(r.roas)}}</td>
-    </tr>`;
-  }}
-  document.getElementById('top-rows').innerHTML = DATA.top_ads.map(row).join('');
-  document.getElementById('bottom-rows').innerHTML = DATA.bottom_ads.map(row).join('');
-}}
+function renderCategoriesTable(rows) {
+  const cats = aggregate(rows, 'category').filter(x => x.key);
+  // Add success rate per category
+  for (const c of cats) {
+    const subset = rows.filter(r => r.category === c.key);
+    c.success_rate = successRate(subset);
+    c.category = c.key;
+  }
+  const sorted = sortRows(cats, 'tbl-categories');
+  applySortHeaders('tbl-categories');
+  document.querySelector('#tbl-categories tbody').innerHTML = sorted.map(c =>
+    `<tr>
+      <td><strong>${c.category}</strong></td>
+      <td>${fmt.num(c.active_ads)}</td>
+      <td>${fmt.num(c.active_camps)}</td>
+      <td>${fmt.inr(c.spend)}</td>
+      <td>${fmt.inr(c.revenue)}</td>
+      <td>${fmt.num(c.purchases)}</td>
+      <td>${fmt.roas(c.roas)}</td>
+      <td>${fmt.inr(c.cpm)}</td>
+      <td>${fmt.num1(c.ctr)}</td>
+      <td>${fmt.num1(c.atc_rate)}</td>
+      <td>${c.success_rate == null ? '<span class="subtle">—</span>' : fmt.pct(c.success_rate)}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="11" class="empty">No data for current filter.</td></tr>';
+}
 
-function renderProducts() {{
-  const tbody = document.getElementById('product-rows');
-  const entries = Object.entries(DATA.products).sort((a,b) => b[1].spend - a[1].spend);
-  tbody.innerHTML = entries.map(([k, r]) => {{
-    const sr = r.success_at_roas;
-    function rateCell(thr) {{
-      const b = sr[thr];
-      if (!b || b.launched === 0) return '<span class="subtle">—</span>';
-      return `${{fmt.pct(b.rate)}} <span class="subtle">(${{b.hit}}/${{b.launched}})</span>`;
-    }}
-    return `<tr>
-      <td><strong>${{r.product}}</strong></td>
-      <td>${{r.category}}</td>
-      <td>${{fmt.num(r.active_ads)}}</td>
-      <td>${{fmt.inr(r.spend)}}</td>
-      <td>${{fmt.inr(r.revenue)}}</td>
-      <td>${{fmt.roas(r.roas)}}</td>
-      <td>${{rateCell('1.5x')}}</td>
-      <td>${{rateCell('2.0x')}}</td>
-      <td>${{rateCell('2.5x')}}</td>
-      <td>${{rateCell('3.0x')}}</td>
-      <td>${{rateCell('4.0x')}}</td>
-      <td>${{rateCell('5.0x')}}</td>
-    </tr>`;
-  }}).join('');
-}}
+function renderHeatmap(rows) {
+  const cats = [...new Set(rows.map(r => r.category).filter(Boolean))].sort();
+  const cts  = [...new Set(rows.map(r => r.creative_type).filter(Boolean))].sort();
+  let html = '<thead><tr><th>Category ↓ / Creative Type →</th>';
+  cts.forEach(ct => html += `<th>${ct}</th>`);
+  html += '<th>TOTAL</th></tr></thead><tbody>';
+  cats.forEach(cat => {
+    html += `<tr><td><strong>${cat}</strong></td>`;
+    let totSpend = 0, totRev = 0;
+    cts.forEach(ct => {
+      const subset = rows.filter(r => r.category === cat && r.creative_type === ct);
+      const a = aggregate(subset)[0];
+      if (!a) { html += '<td class="subtle">—</td>'; return; }
+      totSpend += a.spend; totRev += a.revenue;
+      const cls = a.roas >= 2.5 ? 'rg' : a.roas >= 1.5 ? 'ro' : 'rr';
+      html += `<td><span class="${cls}">${a.roas.toFixed(2)}x</span><br><span class="subtle">${fmt.inr(a.spend)}</span></td>`;
+    });
+    const rowRoas = totSpend > 0 ? (totRev / totSpend) : 0;
+    const cls = rowRoas >= 2.5 ? 'rg' : rowRoas >= 1.5 ? 'ro' : 'rr';
+    html += `<td><span class="${cls}"><strong>${rowRoas.toFixed(2)}x</strong></span><br><span class="subtle">${fmt.inr(totSpend)}</span></td>`;
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  document.getElementById('tbl-heatmap').innerHTML = html;
+}
 
-// Tab interaction
-window.SELECTED_CAT = 'all';
-function bindTabs() {{
-  document.querySelectorAll('.tab').forEach(t => {{
-    t.addEventListener('click', () => {{
-      window.SELECTED_CAT = t.dataset.cat;
-      document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
-      t.classList.add('active');
-      renderCreativeBreakdown(window.SELECTED_CAT);
-      renderCategories();  // re-render to update selection state
-    }});
-  }});
-  document.getElementById('cat-cards').addEventListener('click', (e) => {{
-    const card = e.target.closest('.cat-card');
-    if (!card) return;
-    const cat = card.dataset.cat;
-    window.SELECTED_CAT = cat;
-    document.querySelectorAll('.tab').forEach(x => {{
-      x.classList.toggle('active', x.dataset.cat === cat);
-    }});
-    renderCreativeBreakdown(cat);
-    renderCategories();
-  }});
-}}
+function renderProductsTable(rows) {
+  // Aggregate by product (within current filter)
+  const prods = aggregate(rows, 'product').filter(x => x.key);
+  // For each product, compute success-at-ROAS thresholds for ads launched in window
+  const adIdsByProd = new Map();
+  const adFirstSeen = new Map();
+  const adCategory  = new Map();
+  for (const r of rows) {
+    if (!adIdsByProd.has(r.product)) adIdsByProd.set(r.product, new Map());
+    const m = adIdsByProd.get(r.product);
+    if (!m.has(r.ad_id)) m.set(r.ad_id, { spend:0, revenue:0, purchases:0 });
+    const a = m.get(r.ad_id);
+    a.spend     += r.spend     || 0;
+    a.revenue   += r.revenue   || 0;
+    a.purchases += r.purchases || 0;
+    adFirstSeen.set(r.ad_id, r.first_seen);
+    adCategory.set(r.ad_id, r.category);
+  }
+  const ROASBKT = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
+  for (const p of prods) {
+    const ads = adIdsByProd.get(p.key) || new Map();
+    const launched = [];
+    for (const [adId, m] of ads) {
+      const fs = adFirstSeen.get(adId);
+      if (fs && fs >= F.fromDate && fs <= F.toDate) {
+        const adRoas = m.spend > 0 ? m.revenue / m.spend : 0;
+        launched.push(adRoas);
+      }
+    }
+    p.product = p.key;
+    // Pick first category seen for this product as representative
+    const adIds = [...(adIdsByProd.get(p.key) || new Map()).keys()];
+    p.category = adIds.length ? (adCategory.get(adIds[0]) || '') : '';
+    p.orders = p.purchases;
+    ROASBKT.forEach(thr => {
+      const key = 'hit_' + String(thr).replace('.', '').padEnd(2, '0').slice(0, 2);
+      const hit = launched.filter(r => r >= thr).length;
+      p[key] = launched.length > 0 ? Math.round(100 * hit / launched.length * 10) / 10 : null;
+      p[key + '_n'] = launched.length;
+      p[key + '_h'] = hit;
+    });
+  }
+  const sorted = sortRows(prods, 'tbl-products');
+  applySortHeaders('tbl-products');
+  function rateCell(r, thr) {
+    const key = 'hit_' + String(thr).replace('.', '').padEnd(2, '0').slice(0, 2);
+    const v = r[key];
+    if (v == null) return '<span class="subtle">—</span>';
+    const cls = v >= 50 ? 'sr-hi' : v >= 25 ? 'sr-med' : v >= 10 ? 'sr-low' : 'sr-0';
+    return `<span class="${cls}" style="padding:2px 6px;border-radius:4px">${v.toFixed(0)}%</span><br><span class="subtle">${r[key + '_h']}/${r[key + '_n']}</span>`;
+  }
+  document.querySelector('#tbl-products tbody').innerHTML = sorted.map(p =>
+    `<tr>
+      <td><strong class="cell-name" title="${p.product}">${p.product}</strong></td>
+      <td>${p.category || '<span class="subtle">—</span>'}</td>
+      <td>${fmt.num(p.active_ads)}</td>
+      <td>${fmt.inr(p.spend)}</td>
+      <td>${fmt.inr(p.revenue)}</td>
+      <td>${fmt.num(p.orders)}</td>
+      <td>${fmt.roas(p.roas)}</td>
+      <td>${rateCell(p, 1.5)}</td>
+      <td>${rateCell(p, 2.0)}</td>
+      <td>${rateCell(p, 2.5)}</td>
+      <td>${rateCell(p, 3.0)}</td>
+      <td>${rateCell(p, 4.0)}</td>
+      <td>${rateCell(p, 5.0)}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="13" class="empty">No data.</td></tr>';
+}
 
-// Bootstrap
-renderKpi();
-renderPortals();
-renderCategories();
-renderCreativeBreakdown('all');
-renderSentiment();
-renderTopBottom();
-renderProducts();
-bindTabs();
+function renderAdsTable(rows) {
+  // Aggregate per ad (within current filter)
+  const map = new Map();
+  for (const r of rows) {
+    if (!map.has(r.ad_id)) map.set(r.ad_id, {
+      ad_id:r.ad_id, ad_name:r.ad_name, campaign_id:r.campaign_id,
+      campaign_name:r.campaign_name, portal:r.portal, category:r.category,
+      creative_type:r.creative_type, days_active:r.days_active,
+      spend:0, revenue:0, orders:0,
+    });
+    const a = map.get(r.ad_id);
+    a.spend   += r.spend   || 0;
+    a.revenue += r.revenue || 0;
+    a.orders  += r.purchases || 0;
+  }
+  const ads = [...map.values()].filter(a => a.spend >= 2000);
+  for (const a of ads) a.roas = a.spend > 0 ? a.revenue / a.spend : 0;
+  const sorted = sortRows(ads, 'tbl-ads').slice(0, 30);  // top 30 by current sort
+  applySortHeaders('tbl-ads');
+  document.querySelector('#tbl-ads tbody').innerHTML = sorted.map(a =>
+    `<tr>
+      <td>${tag(a.portal)}</td>
+      <td>${a.category || '<span class="subtle">—</span>'}</td>
+      <td>${a.creative_type || '<span class="subtle">—</span>'}</td>
+      <td><div class="cell-name" title="${(a.ad_name||'').replace(/"/g,'&quot;')}"><strong>${a.ad_name||'?'}</strong><br><span class="subtle">${a.campaign_name||''}</span></div></td>
+      <td>${a.days_active != null ? a.days_active + 'd' : '—'}</td>
+      <td>${fmt.inr(a.spend)}</td>
+      <td>${fmt.inr(a.revenue)}</td>
+      <td>${fmt.num(a.orders)}</td>
+      <td>${fmt.roas(a.roas)}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="9" class="empty">No ads with >= ₹2K spend in selection.</td></tr>';
+}
+
+function renderSentimentTable(rows) {
+  // Group by (sentiment, creative_type)
+  const map = new Map();
+  for (const r of rows) {
+    const key = (r.sentiment || '(unset)') + '||' + (r.creative_type || '?');
+    if (!map.has(key)) map.set(key, {
+      sentiment: r.sentiment || '(unset)',
+      sentiment_code: r.sentiment_code,
+      creative_type: r.creative_type || '?',
+      ads: new Set(), spend:0, revenue:0,
+    });
+    const a = map.get(key);
+    a.ads.add(r.ad_id);
+    a.spend   += r.spend   || 0;
+    a.revenue += r.revenue || 0;
+  }
+  const arr = [...map.values()].map(a => ({
+    sentiment: a.sentiment,
+    creative_type: a.creative_type,
+    active_ads: a.ads.size,
+    spend: a.spend, revenue: a.revenue,
+    roas: a.spend > 0 ? a.revenue / a.spend : 0,
+  }));
+  const sorted = sortRows(arr, 'tbl-sentiment');
+  applySortHeaders('tbl-sentiment');
+  document.querySelector('#tbl-sentiment tbody').innerHTML = sorted.map(s =>
+    `<tr>
+      <td><strong>${s.sentiment}</strong></td>
+      <td>${s.creative_type}</td>
+      <td>${fmt.num(s.active_ads)}</td>
+      <td>${fmt.inr(s.spend)}</td>
+      <td>${fmt.inr(s.revenue)}</td>
+      <td>${fmt.roas(s.roas)}</td>
+    </tr>`
+  ).join('') || '<tr><td colspan="6" class="empty">No data.</td></tr>';
+}
+
+// ── CSV export ──────────────────────────────────────────────────────────
+function exportCSV(which) {
+  const rows = applyFilters(RAW);
+  let csv = '';
+  if (which === 'products') {
+    const prods = aggregate(rows, 'product').filter(x => x.key);
+    csv = 'Product,Active Ads,Spend,Revenue,Orders,ROAS\n' +
+      prods.map(p => `"${p.key}",${p.active_ads},${Math.round(p.spend)},${Math.round(p.revenue)},${p.purchases},${p.roas.toFixed(2)}`).join('\n');
+  } else if (which === 'ads') {
+    csv = 'Portal,Category,Creative,Ad,Campaign,Spend,Revenue,Orders,ROAS,DaysActive\n';
+    const map = new Map();
+    for (const r of rows) {
+      if (!map.has(r.ad_id)) map.set(r.ad_id, { ...r, _spend:0, _revenue:0, _orders:0 });
+      const a = map.get(r.ad_id);
+      a._spend += r.spend; a._revenue += r.revenue; a._orders += r.purchases || 0;
+    }
+    const ads = [...map.values()].filter(a => a._spend >= 1000)
+      .sort((a, b) => (b._revenue / Math.max(b._spend, 1)) - (a._revenue / Math.max(a._spend, 1)));
+    csv += ads.map(a => {
+      const roas = a._spend > 0 ? (a._revenue / a._spend).toFixed(2) : '0';
+      return `"${a.portal}","${a.category||''}","${a.creative_type||''}","${(a.ad_name||'').replace(/"/g, '""')}","${(a.campaign_name||'').replace(/"/g, '""')}",${Math.round(a._spend)},${Math.round(a._revenue)},${a._orders},${roas},${a.days_active||''}`;
+    }).join('\n');
+  }
+  const blob = new Blob([csv], { type:'text/csv' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = which + '_' + F.fromDate + '_' + F.toDate + '.csv';
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// ── Main render ─────────────────────────────────────────────────────────
+function apply() {
+  const rows = applyFilters(RAW);
+  const prevRows = getCompareSet();
+  renderKPI(rows, prevRows);
+  renderCharts(rows);
+  renderCategoriesTable(rows);
+  renderHeatmap(rows);
+  renderProductsTable(rows);
+  renderAdsTable(rows);
+  renderSentimentTable(rows);
+}
+
+// Initialize sort defaults
+setupSort('tbl-categories', 'spend');
+setupSort('tbl-products',   'spend');
+setupSort('tbl-ads',        'roas');
+setupSort('tbl-sentiment',  'spend');
+
+// Trigger 7D preset on load
+document.querySelector('.preset-btn[data-days="7"]').click();
 </script>
 </body>
-</html>"""
+</html>
+"""
 
 
 def main():
     p = argparse.ArgumentParser()
     p.add_argument('--days', type=int, default=30,
-                   help='Default 30. Period = today minus N days.')
+                   help='Pull last N days of data (default 30). Larger = more data, larger HTML.')
     p.add_argument('--since', help='YYYY-MM-DD (overrides --days)')
     p.add_argument('--until', help='YYYY-MM-DD (overrides --days)')
-    p.add_argument('--out', default=str(OUT_DIR / 'categories_v2.html'),
-                   help='Output HTML path')
+    p.add_argument('--out', default=str(OUT_DIR / 'v2' / 'categories.html'))
     p.add_argument('--db', help='SQLite path (default state/ntn.db)')
     args = p.parse_args()
 
@@ -764,31 +968,31 @@ def main():
         start = end - timedelta(days=args.days - 1)
     since = start.isoformat()
     until = end.isoformat()
-    period_label = f"last {(end - start).days + 1} days"
 
     conn = db_connect(Path(args.db)) if args.db else db_connect()
 
-    print(f"📊 Building dashboard")
-    print(f"   Period: {since} → {until} ({period_label})")
+    print(f"📊 Building analytical dashboard")
+    print(f"   Period: {since} → {until}")
 
-    data = {
-        'period': period_label,
+    rows = fetch_ad_days(conn, since, until)
+    dimensions = fetch_dimensions(conn, since, until)
+    freshness = fetch_freshness(conn)
+
+    payload = {
         'since': since,
         'until': until,
-        'overall':            fetch_overall_kpis(conn, since, until),
-        'per_portal':         fetch_per_portal_kpis(conn, since, until),
-        'categories':         fetch_category_summary(conn, since, until),
-        'creative_breakdown': fetch_creative_type_breakdown(conn, since, until),
-        'sentiment':          fetch_sentiment_breakdown(conn, since, until),
-        'top_ads':            fetch_top_ads(conn, since, until, limit=10, order='best'),
-        'bottom_ads':         fetch_top_ads(conn, since, until, limit=10, order='worst'),
-        'products':           fetch_product_drill(conn, since, until),
-        'freshness':          fetch_freshness(conn),
-        'updated_at':         now_iso(),
-        'db_path':            str(args.db or 'state/ntn.db'),
+        'rows': rows,
+        'dimensions': dimensions,
+        'freshness': freshness,
+        'updated_at': now_iso(),
     }
+    payload_json = json.dumps(payload, default=str, ensure_ascii=False, separators=(',', ':'))
 
-    html = render_html(data, since, until, period_label)
+    print(f"   {len(rows):,} ad-day rows")
+    print(f"   Dimensions: {{p: {len(dimensions['portals'])}, c: {len(dimensions['categories'])}, ct: {len(dimensions['creative_types'])}, prod: {len(dimensions['products'])}}}")
+    print(f"   Payload: {len(payload_json):,} chars")
+
+    html = render_html(payload_json, since, until)
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html, encoding='utf-8')
