@@ -38,7 +38,7 @@ SCOPES     = ['https://www.googleapis.com/auth/spreadsheets.readonly']
 
 NTN_HEADERS      = ('NTN code', 'NTN Code', 'NTN', 'Code', 'SKU', 'SKU Code', 'sku')
 PRODUCT_HEADERS  = ('Product', 'Product Name', 'Product name', 'Name', 'product')
-CATEGORY_HEADERS = ('Category', 'Cat', 'category', 'Type', 'Categorization')
+CATEGORY_HEADERS = ('SKU CATEGORY', 'SKU_CATEGORY', 'Category', 'Cat', 'category', 'Type', 'Categorization')
 
 
 def find_column_index(header_row, candidates):
