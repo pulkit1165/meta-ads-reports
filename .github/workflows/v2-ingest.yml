@@ -1,0 +1,115 @@
+name: v2 Ingest (Meta + Shopify → SQLite)
+
+on:
+  # Daily at 04:30 IST = 23:00 UTC previous day
+  schedule:
+    - cron: "0 23 * * *"
+  workflow_dispatch:
+    inputs:
+      backfill_days:
+        description: "Backfill N days for both Meta + Shopify (default 1)"
+        required: false
+        default: "1"
+      portal:
+        description: "Limit to one portal (SM/SML/NBP). Empty = all 3."
+        required: false
+        default: ""
+
+concurrency:
+  group: v2-ingest
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TZ: Asia/Kolkata
+      # Shopify
+      SHOPIFY_STORE_URL:        ${{ secrets.SHOPIFY_STORE_URL }}
+      SHOPIFY_ACCESS_TOKEN:     ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+      SHOPIFY_STORE_URL_SML:    ${{ secrets.SHOPIFY_STORE_URL_SML }}
+      SHOPIFY_ACCESS_TOKEN_SML: ${{ secrets.SHOPIFY_ACCESS_TOKEN_SML }}
+      SHOPIFY_STORE_URL_NBP:    ${{ secrets.SHOPIFY_STORE_URL_NBP }}
+      SHOPIFY_ACCESS_TOKEN_NBP: ${{ secrets.SHOPIFY_ACCESS_TOKEN_NBP }}
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load ad-account IDs from config
+        run: |
+          grep -E '^[A-Z][A-Z0-9_]*=' config/accounts.env >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: pip install -r requirements.txt
+
+      - name: Restore SQLite from state branch
+        uses: ./.github/actions/state-sync
+        with:
+          direction: restore
+
+      - name: Initialize / verify schema
+        run: python3 scripts/v2/db_init.py
+
+      - name: Determine backfill days
+        id: cfg
+        run: |
+          DAYS="${{ inputs.backfill_days || '1' }}"
+          PORTAL_ARG=""
+          [ -n "${{ inputs.portal }}" ] && PORTAL_ARG="--portal ${{ inputs.portal }}"
+          echo "days=$DAYS" >> "$GITHUB_OUTPUT"
+          echo "portal_arg=$PORTAL_ARG" >> "$GITHUB_OUTPUT"
+
+      - name: Ingest Meta (campaigns + ad-level insights)
+        run: |
+          python3 scripts/v2/ingest_meta.py \
+            --days ${{ steps.cfg.outputs.days }} \
+            ${{ steps.cfg.outputs.portal_arg }}
+
+      - name: Ingest Shopify (orders + line items)
+        if: ${{ success() }}
+        run: |
+          # Shopify ingest defaults to last 2 days; for explicit backfill use --days
+          python3 scripts/v2/ingest_shopify.py \
+            --days ${{ steps.cfg.outputs.days }} \
+            ${{ steps.cfg.outputs.portal_arg }}
+
+      - name: Print DB summary
+        if: always()
+        run: |
+          python3 - <<'PY'
+          import sqlite3
+          conn = sqlite3.connect('state/ntn.db')
+          for tbl in ('meta_ads_daily', 'meta_ads_meta', 'meta_campaigns',
+                      'shopify_orders', 'shopify_order_items', 'ingest_log'):
+              n = conn.execute(f'SELECT COUNT(*) FROM {tbl}').fetchone()[0]
+              print(f'  {tbl:30s} {n:>10,}')
+          # Latest ingest_log entries
+          print()
+          print('Latest ingest_log:')
+          for r in conn.execute(
+              'SELECT job_name, target_date, status, rows_written, error_message '
+              'FROM ingest_log ORDER BY started_at DESC LIMIT 5'
+          ).fetchall():
+              print(' ', r)
+          PY
+
+      - name: Push SQLite back to state branch
+        if: always()
+        uses: ./.github/actions/state-sync
+        with:
+          direction: save
