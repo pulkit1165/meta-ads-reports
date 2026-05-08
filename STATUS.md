@@ -2,7 +2,28 @@
 
 > Living document. The Claude on whichever machine the user is currently working on keeps this current. Read this after `git pull` to see what's actively in flight, what just got shipped, and what the user is thinking about next.
 
-**Last updated:** 2026-05-05 by Claude on machine 1 (`/Users/pulkitsharma/meta-ads-reports`)
+**Last updated:** 2026-05-08 by Claude on machine 1 (`/Users/pulkitsharma/meta-ads-reports`)
+
+## Demo readiness (2026-05-08)
+
+User asked to make NTN category dashboard demo-ready. Two fixes shipped:
+
+1. **Cloudflare 24h cache staleness** — Pages defaulted to `s-maxage=604800`
+   so the dashboard kept showing 24-hour-old data even though we deploy
+   hourly. Both today-live.yml and daily.yml now write `out/_headers` with
+   `max-age=60, must-revalidate` for `/`, `/*.html`, `/v2/*`, `/categories`.
+   Deploys propagate within a minute. (commit dee31a0)
+2. **Made `/` serve the v2 dashboard** — was falling back to today_live
+   because NTN rebuild kept hitting Sheets quota. New preference order:
+   `out/v2/categories.html` → `out/ntn_filtered.html` → `out/today_live.html`.
+   (commit b854ba4)
+
+**Demo URL:** https://meta-ads-reports.pages.dev/ — serves v2 NTN Analytics
+sidebar dashboard (10 pages: Overview, Trends, Categories, Creatives,
+Sentiments, Heatmap, Products, Product Success, Top Ads, Bottom Ads).
+14.2 MB page, last refreshed 17:32 IST today, auto-rebuilds hourly.
+
+
 
 ---
 
