@@ -114,10 +114,18 @@ jobs:
       # ── Cloudflare Pages deploy (only if CLOUDFLARE_PAGES_PROJECT var set) ─
       # Mirrors today-live.yml's deploy step. Daily runs once at 04:30 IST,
       # so this gives a morning refresh in addition to the hourly one.
-      - name: Prepare landing page (NTN as index.html) + cache headers
+      - name: Prepare landing page (v2 → NTN fallback) + cache headers
         if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && success() }}
         run: |
-          [ -f out/ntn_filtered.html ] && cp out/ntn_filtered.html out/index.html
+          # Same preference order as today-live.yml — v2 categories is the primary
+          # demo target.
+          if [ -f out/v2/categories.html ]; then
+            cp out/v2/categories.html out/index.html
+            echo "→ index.html from v2/categories.html"
+          elif [ -f out/ntn_filtered.html ]; then
+            cp out/ntn_filtered.html out/index.html
+            echo "→ index.html from ntn_filtered.html (v2 missing)"
+          fi
           # Pages defaults to 7-day s-maxage at the CF edge; override so deploys
           # actually become visible within a minute. See today-live.yml note.
           cat > out/_headers <<'EOF'

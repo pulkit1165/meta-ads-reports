@@ -123,14 +123,22 @@ jobs:
       # always() is required — without it, GHA's default behavior skips this step
       # when ANY prior step failed (e.g. NTN-rebuild's Sheets read quota), even
       # though our `if` condition is otherwise true.
-      - name: Prepare landing page (NTN as index.html, fallback to today_live) + cache headers
+      - name: Prepare landing page (v2 → NTN → today_live fallback) + cache headers
         if: ${{ always() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
         run: |
-          if [ -f out/ntn_filtered.html ]; then
+          # Preference order for the homepage (/):
+          #   1. out/v2/categories.html   — new sidebar dashboard, primary demo target
+          #   2. out/ntn_filtered.html    — historical NTN dashboard
+          #   3. out/today_live.html      — last resort, today's snapshot only
+          if [ -f out/v2/categories.html ]; then
+            cp out/v2/categories.html out/index.html
+            echo "→ index.html sourced from v2/categories.html"
+          elif [ -f out/ntn_filtered.html ]; then
             cp out/ntn_filtered.html out/index.html
+            echo "→ index.html sourced from ntn_filtered.html (v2 missing)"
           elif [ -f out/today_live.html ]; then
-            # NTN rebuild failed (e.g., Sheets quota) — fall back so site root still loads.
             cp out/today_live.html out/index.html
+            echo "→ index.html sourced from today_live.html (NTN + v2 both missing)"
           fi
 
           # Cloudflare Pages reads `_headers` at deploy root for per-route headers.
