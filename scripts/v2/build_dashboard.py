@@ -131,6 +131,38 @@ def fetch_dimensions(conn, since: str, until: str):
     }
 
 
+def fetch_shopify_daily(conn, since: str, until: str):
+    """Per-(portal, date) Shopify aggregates: real orders + real revenue.
+    These are the GROUND TRUTH numbers — Meta's purchases/revenue from
+    meta_ads_daily are pixel/CAPI-attributed and inflated by 2-3x in this
+    account. Surfacing both lets the user see Pixel ROAS vs Real ROAS.
+
+    Excludes cancelled orders. Uses created_at::date in the configured TZ
+    (assumed IST since dates in meta_ads_daily are also IST-anchored).
+    """
+    rows = conn.execute('''
+        SELECT
+            portal,
+            substr(created_at, 1, 10) AS date,
+            COUNT(*) AS orders,
+            SUM(COALESCE(total_price, 0)) AS revenue
+        FROM shopify_orders
+        WHERE substr(created_at, 1, 10) BETWEEN ? AND ?
+          AND cancelled_at IS NULL
+        GROUP BY portal, substr(created_at, 1, 10)
+        ORDER BY portal, date
+    ''', (since, until)).fetchall()
+    out = []
+    for portal, date, orders, revenue in rows:
+        out.append({
+            'portal':  portal,
+            'date':    date,
+            'orders':  int(orders or 0),
+            'revenue': round(float(revenue or 0), 2),
+        })
+    return out
+
+
 def fetch_freshness(conn):
     out = {}
     for r in conn.execute('''
@@ -208,7 +240,13 @@ a { color:#1a3d7c; text-decoration:none; }
 
 /* KPI cards */
 .kpi-strip { display:grid; grid-template-columns:repeat(auto-fit,minmax(170px,1fr)); gap:10px; margin-bottom:18px; }
-.kpi-card { background:#fff; padding:12px 14px; border-radius:10px; border:1px solid #dde3f0; }
+.kpi-card { background:#fff; padding:12px 14px; border-radius:10px; border:1px solid #dde3f0; position:relative; overflow:hidden; }
+.kpi-card.kpi-good::before { content:''; position:absolute; top:0; left:0; width:3px; height:100%; background:#0d6e3a; }
+.kpi-card.kpi-warn::before { content:''; position:absolute; top:0; left:0; width:3px; height:100%; background:#a35a00; }
+.kpi-card.kpi-bad::before  { content:''; position:absolute; top:0; left:0; width:3px; height:100%; background:#a3260a; }
+.kpi-card.kpi-good .kpi-val { color:#0d6e3a; }
+.kpi-card.kpi-warn .kpi-val { color:#a35a00; }
+.kpi-card.kpi-bad  .kpi-val { color:#a3260a; }
 .kpi-lbl { font-size:9px; text-transform:uppercase; letter-spacing:.5px; color:#6b7280; font-weight:700; }
 .kpi-val { font-size:22px; font-weight:800; color:#0d2145; margin-top:2px; }
 .kpi-sub { font-size:10px; color:#6b7280; margin-top:2px; }
@@ -341,6 +379,22 @@ tr:hover td { background:#fafbff; }
       <h2>📊 Overview <span class="subtle" id="ov-meta"></span></h2>
       <p class="page-intro">Top-line KPIs and high-level breakdown for the selected period. Use sidebar to drill deeper.</p>
 
+      <!-- ⚠️ DATA-SOURCE BANNER ──────────────────────────────────────────────
+           Most numbers below come from Meta's pixel/CAPI attribution which is
+           known to be inflated 2-3x in this account (double-counting, wrong
+           attribution, counting cancelled orders). 'Shopify Reality' shows the
+           ground-truth orders + revenue from the Shopify Admin API per portal,
+           regardless of attribution. -->
+      <div class="data-source-banner" style="background:#fff5e6;border:1px solid #ffb74d;border-radius:8px;padding:12px 16px;margin-bottom:16px;font-size:12px;line-height:1.5">
+        <b>📌 Read this first:</b> Numbers labeled <b>(Pixel)</b> come from Meta's pixel/CAPI attribution &mdash;
+        currently inflated by ~2-3x in this account. Numbers labeled <b>(Shopify)</b> come from the Shopify Admin API
+        and are the ground truth. Compare the two strips below to see the gap.
+      </div>
+
+      <h3 style="font-size:13px;color:#0d6e3a;margin-bottom:8px">✅ Shopify Reality &mdash; Real Orders &amp; Revenue</h3>
+      <div class="kpi-strip" id="kpi-strip-shopify"></div>
+
+      <h3 style="font-size:13px;color:#a35a00;margin:18px 0 8px">⚠️ Meta Pixel-Attributed &mdash; What Ads Manager Reports</h3>
       <div class="kpi-strip" id="kpi-strip"></div>
 
       <div class="card">
@@ -861,20 +915,60 @@ function barChart(canvasId, labels, datasets, opts = {}) {
 }
 
 // ── Page renderers ──────────────────────────────────────────────────────
+// Compute Shopify (real) totals from PAYLOAD.shopify_daily, scoped to the
+// current date filter and any selected portals. We can't filter Shopify by
+// category/creative/product (no per-line attribution) — so the Shopify strip
+// always shows portal-level totals; the user can still narrow by date+portal.
+function aggregateShopify() {
+  const shopify = (PAYLOAD.shopify_daily || []);
+  let orders = 0, revenue = 0;
+  for (const r of shopify) {
+    if (r.date < F.fromDate || r.date > F.toDate) continue;
+    if (F.portals.size && !F.portals.has(r.portal)) continue;
+    orders  += r.orders;
+    revenue += r.revenue;
+  }
+  return { orders, revenue };
+}
+
 function renderOverview(rows, prevRows) {
-  // KPI strip
+  // Meta-attributed (Pixel) KPI strip
   const a = aggregate(rows)[0] || { spend:0, revenue:0, purchases:0, active_ads:0, active_camps:0, roas:0, cpm:0, ctr:0 };
   const p = aggregate(prevRows)[0] || { spend:0, revenue:0, purchases:0, roas:0 };
   document.getElementById('ov-meta').textContent = `· ${F.fromDate} → ${F.toDate}`;
+
+  // ── Shopify (real) KPI strip ──────────────────────────────────────────
+  // Real ROAS = Shopify revenue / Meta spend. Notes which categories aren't
+  // covered (filter caveat).
+  const shop = aggregateShopify();
+  const realROAS  = a.spend > 0 ? (shop.revenue / a.spend) : 0;
+  const inflation = shop.revenue > 0 ? (a.revenue / shop.revenue) : 0;
+  const filterNote = (F.categories.size || F.creative_types.size || F.product)
+    ? '⚠ Shopify can\\'t filter by category/creative — portal-level total'
+    : 'all portals · all orders';
+
+  const shopifyCards = [
+    { l:'Real Orders (Shopify)',  v: fmt.num(shop.orders),  s: filterNote },
+    { l:'Real Revenue (Shopify)', v: fmt.inr(shop.revenue), s: filterNote },
+    { l:'Meta Spend',             v: fmt.inr(a.spend),      s: 'from Meta API' },
+    { l:'REAL ROAS',              v: fmt.roas(realROAS),    s: 'Shopify rev ÷ Meta spend',  cls: realROAS >= 2 ? 'good' : (realROAS >= 1.5 ? 'warn' : 'bad') },
+    { l:'Pixel Inflation',        v: inflation > 0 ? inflation.toFixed(2) + 'x' : '—', s: 'how many × Meta over-reports vs Shopify' },
+  ];
+  document.getElementById('kpi-strip-shopify').innerHTML = shopifyCards.map(c =>
+    `<div class="kpi-card${c.cls ? ' kpi-' + c.cls : ''}"><div class="kpi-lbl">${c.l}</div>` +
+    `<div class="kpi-val">${c.v}</div><div class="kpi-sub">${c.s}</div></div>`
+  ).join('');
+
+  // Meta-attributed (Pixel) — relabel each metric to make the source explicit
   const cards = [
-    { l:'Active Ads',  v: fmt.num(a.active_ads), s: a.active_camps + ' campaigns' },
-    { l:'Spend',       v: fmt.inr(a.spend), s: fmt.delta(a.spend, p.spend) + ' vs prev' },
-    { l:'Revenue',     v: fmt.inr(a.revenue), s: fmt.delta(a.revenue, p.revenue) + ' vs prev' },
-    { l:'Orders',      v: fmt.num(a.purchases), s: fmt.delta(a.purchases, p.purchases) + ' vs prev' },
-    { l:'ROAS',        v: fmt.roas(a.roas), s: 'spend-weighted' },
-    { l:'CPM',         v: fmt.inr(a.cpm), s: 'cost / 1k impr' },
-    { l:'CTR',         v: fmt.pct(a.ctr), s: 'click-through' },
-    { l:'Success Rate (7d)', v: (() => { const s = successRate(rows); return s == null ? '—' : fmt.pct(s); })(), s: 'launched in period · survived 7d' },
+    { l:'Active Ads',         v: fmt.num(a.active_ads), s: a.active_camps + ' campaigns' },
+    { l:'Meta Spend',         v: fmt.inr(a.spend), s: fmt.delta(a.spend, p.spend) + ' vs prev' },
+    { l:'Pixel Revenue',      v: fmt.inr(a.revenue), s: fmt.delta(a.revenue, p.revenue) + ' vs prev' },
+    { l:'Pixel Orders',       v: fmt.num(a.purchases), s: fmt.delta(a.purchases, p.purchases) + ' vs prev' },
+    { l:'Pixel ROAS',         v: fmt.roas(a.roas), s: '⚠ inflated by pixel' },
+    { l:'CPM',                v: fmt.inr(a.cpm), s: 'cost / 1k impr' },
+    { l:'CTR',                v: fmt.pct(a.ctr), s: 'click-through' },
+    { l:'Success Rate (7d)',  v: (() => { const s = successRate(rows); return s == null ? '—' : fmt.pct(s); })(), s: 'launched in period · survived 7d' },
   ];
   document.getElementById('kpi-strip').innerHTML = cards.map(c =>
     `<div class="kpi-card"><div class="kpi-lbl">${c.l}</div>` +
@@ -1328,11 +1422,13 @@ def main():
     rows = fetch_ad_days(conn, since, until)
     dimensions = fetch_dimensions(conn, since, until)
     freshness = fetch_freshness(conn)
+    shopify_daily = fetch_shopify_daily(conn, since, until)
 
     payload = {
         'since': since,
         'until': until,
         'rows': rows,
+        'shopify_daily': shopify_daily,    # Real orders + revenue per portal/date
         'dimensions': dimensions,
         'freshness': freshness,
         'updated_at': now_iso(),

@@ -123,22 +123,32 @@ jobs:
       # always() is required — without it, GHA's default behavior skips this step
       # when ANY prior step failed (e.g. NTN-rebuild's Sheets read quota), even
       # though our `if` condition is otherwise true.
-      - name: Prepare landing page (v2 → NTN → today_live fallback) + cache headers
+      - name: Prepare landing page (v2 → NTN, NEVER today_live for index) + cache headers
+        id: prepare_landing
         if: ${{ always() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
         run: |
           # Preference order for the homepage (/):
           #   1. out/v2/categories.html   — new sidebar dashboard, primary demo target
           #   2. out/ntn_filtered.html    — historical NTN dashboard
-          #   3. out/today_live.html      — last resort, today's snapshot only
+          #
+          # CRITICAL: don't fall back to today_live as index.html. When the v2 or
+          # NTN build step is cancelled (e.g. cron concurrency) or fails, deploying
+          # today_live.html as the homepage clobbers the previously-good v2 deploy
+          # with a 28KB single-page snapshot. If neither real dashboard is built,
+          # we set should_deploy=false so the deploy step skips and CF keeps
+          # serving the previous deployment.
           if [ -f out/v2/categories.html ]; then
             cp out/v2/categories.html out/index.html
             echo "→ index.html sourced from v2/categories.html"
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
           elif [ -f out/ntn_filtered.html ]; then
             cp out/ntn_filtered.html out/index.html
             echo "→ index.html sourced from ntn_filtered.html (v2 missing)"
-          elif [ -f out/today_live.html ]; then
-            cp out/today_live.html out/index.html
-            echo "→ index.html sourced from today_live.html (NTN + v2 both missing)"
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️  Neither v2/categories.html nor ntn_filtered.html built this run"
+            echo "    — skipping deploy so the previous good deployment stays live."
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
           fi
 
           # Cloudflare Pages reads `_headers` at deploy root for per-route headers.
@@ -158,10 +168,13 @@ jobs:
           EOF
           ls -la out/
 
-      # Deploy as long as today_live succeeded — don't let a downstream NTN-rebuild
-      # failure block the dashboard refresh that the operator actually watches.
+      # Only deploy when prepare_landing wrote a real index.html. If the v2 +
+      # NTN build steps were both cancelled or failed (e.g. Sheets quota,
+      # concurrency cancel), prepare_landing emits should_deploy=false and we
+      # skip — Cloudflare keeps serving the previous good deployment instead
+      # of being clobbered with today_live as the homepage.
       - name: Deploy to Cloudflare Pages
-        if: ${{ always() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
+        if: ${{ always() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.prepare_landing.outputs.should_deploy == 'true' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}

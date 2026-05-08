@@ -115,16 +115,22 @@ jobs:
       # Mirrors today-live.yml's deploy step. Daily runs once at 04:30 IST,
       # so this gives a morning refresh in addition to the hourly one.
       - name: Prepare landing page (v2 → NTN fallback) + cache headers
+        id: prepare_landing
         if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && success() }}
         run: |
-          # Same preference order as today-live.yml — v2 categories is the primary
-          # demo target.
+          # Same preference order as today-live.yml — v2 is primary, never fall
+          # back to today_live for index.html (would clobber the v2 deploy).
           if [ -f out/v2/categories.html ]; then
             cp out/v2/categories.html out/index.html
             echo "→ index.html from v2/categories.html"
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
           elif [ -f out/ntn_filtered.html ]; then
             cp out/ntn_filtered.html out/index.html
             echo "→ index.html from ntn_filtered.html (v2 missing)"
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️  Skipping deploy — neither v2 nor NTN dashboard built."
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
           fi
           # Pages defaults to 7-day s-maxage at the CF edge; override so deploys
           # actually become visible within a minute. See today-live.yml note.
@@ -140,7 +146,7 @@ jobs:
           EOF
 
       - name: Deploy to Cloudflare Pages
-        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && success() }}
+        if: ${{ vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.prepare_landing.outputs.should_deploy == 'true' }}
         uses: cloudflare/wrangler-action@v3
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
