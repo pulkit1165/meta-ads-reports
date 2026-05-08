@@ -123,7 +123,7 @@ jobs:
       # always() is required — without it, GHA's default behavior skips this step
       # when ANY prior step failed (e.g. NTN-rebuild's Sheets read quota), even
       # though our `if` condition is otherwise true.
-      - name: Prepare landing page (NTN as index.html, fallback to today_live)
+      - name: Prepare landing page (NTN as index.html, fallback to today_live) + cache headers
         if: ${{ always() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.today_live.outcome == 'success' }}
         run: |
           if [ -f out/ntn_filtered.html ]; then
@@ -132,6 +132,22 @@ jobs:
             # NTN rebuild failed (e.g., Sheets quota) — fall back so site root still loads.
             cp out/today_live.html out/index.html
           fi
+
+          # Cloudflare Pages reads `_headers` at deploy root for per-route headers.
+          # Default Pages cache-control is `public, s-maxage=604800` (7 days at the
+          # CF edge). That meant the dashboard kept serving 24h-stale data even
+          # though we deploy hourly. Override to 60s so the next refresh always
+          # propagates within a minute.
+          cat > out/_headers <<'EOF'
+          /*.html
+            Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+          /v2/*
+            Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+          /
+            Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+          /categories
+            Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+          EOF
           ls -la out/
 
       # Deploy as long as today_live succeeded — don't let a downstream NTN-rebuild
