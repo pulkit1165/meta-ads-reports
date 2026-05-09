@@ -944,7 +944,7 @@ function renderOverview(rows, prevRows) {
   const realROAS  = a.spend > 0 ? (shop.revenue / a.spend) : 0;
   const inflation = shop.revenue > 0 ? (a.revenue / shop.revenue) : 0;
   const filterNote = (F.categories.size || F.creative_types.size || F.product)
-    ? '⚠ Shopify can\\'t filter by category/creative — portal-level total'
+    ? "⚠ Shopify can't filter by category/creative — portal-level total"
     : 'all portals · all orders';
 
   const shopifyCards = [
