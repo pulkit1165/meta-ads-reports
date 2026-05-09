@@ -2,11 +2,11 @@
 
 > Living document. The Claude on whichever machine the user is currently working on keeps this current. Read this after `git pull` to see what's actively in flight, what just got shipped, and what the user is thinking about next.
 
-**Last updated:** 2026-05-08 by Claude on machine 1 (`/Users/pulkitsharma/meta-ads-reports`)
+**Last updated:** 2026-05-09 by Claude on machine 1 (`/Users/pulkitsharma/meta-ads-reports`)
 
-## Demo readiness (2026-05-08)
+## Demo readiness (2026-05-08 → 2026-05-09)
 
-User asked to make NTN category dashboard demo-ready. Two fixes shipped:
+User asked to make NTN category dashboard demo-ready. Three fixes shipped:
 
 1. **Cloudflare 24h cache staleness** — Pages defaulted to `s-maxage=604800`
    so the dashboard kept showing 24-hour-old data even though we deploy
@@ -17,6 +17,14 @@ User asked to make NTN category dashboard demo-ready. Two fixes shipped:
    because NTN rebuild kept hitting Sheets quota. New preference order:
    `out/v2/categories.html` → `out/ntn_filtered.html` → `out/today_live.html`.
    (commit b854ba4)
+3. **Shopify Reality KPI strip + JS escape bug** — added `fetch_shopify_daily()`
+   in `scripts/v2/build_dashboard.py` so the Overview shows ground-truth
+   Shopify orders/revenue alongside Meta pixel-attributed numbers (commit
+   cff1728). That commit accidentally introduced a JS syntax error: a
+   `\'` in a single-quoted JS string rendered as `\\'` and threw at parse
+   time, killing ALL interactivity (clicks/filters/charts/nav dead). Live
+   URL was loading but completely non-functional. Fixed by switching to
+   double-quoted JS string. (commit c49732a)
 
 **Demo URL:** https://meta-ads-reports.pages.dev/ — serves v2 NTN Analytics
 sidebar dashboard (10 pages: Overview, Trends, Categories, Creatives,
