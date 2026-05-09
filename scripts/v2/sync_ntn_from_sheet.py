@@ -76,43 +76,40 @@ def normalize_ntn_code(raw: str) -> str | None:
 
 
 def normalize_category(raw: str) -> str | None:
-    """Map free-text category to our canonical bucket."""
+    """Map free-text category to our canonical bucket.
+
+    Returns Title-Case canonical buckets matching derive_category_v2 output:
+    Skin, Hair, Crystal, 24K Jewellery, Perfumes, Aibot, Nutraceuticals, Other.
+
+    The fallback used to return raw.strip() — which preserved sheet casing
+    like 'SKIN CARE' or 'HAIR CARE' and split the dashboard's category chart
+    into duplicate buckets ('Skin' + 'SKIN CARE'). Now the fallback also
+    title-cases so unknown variants at least render as one bucket per name.
+    """
     if not raw: return None
     s = str(raw).strip().lower()
     if not s: return None
-    # Map common variants
     mapping = {
-        'skin': 'Skin',
-        'skincare': 'Skin',
-        'face': 'Skin',
-        'hair': 'Hair',
-        'haircare': 'Hair',
-        'crystal': 'Crystal',
-        'crystals': 'Crystal',
-        'crystal home decor': 'Crystal',
-        'home decor': 'Crystal',
-        'crystal accessory': 'Crystal',
-        'accessory': 'Crystal',
+        'skin': 'Skin', 'skincare': 'Skin', 'skin care': 'Skin', 'face': 'Skin',
+        'hair': 'Hair', 'haircare': 'Hair', 'hair care': 'Hair',
+        'crystal': 'Crystal', 'crystals': 'Crystal',
+        'crystal home decor': 'Crystal', 'home decor': 'Crystal',
+        'crystal accessory': 'Crystal', 'accessory': 'Crystal',
         'jewellery': 'Crystal',
-        '24k jewellery': '24K Jewellery',
-        '24k': '24K Jewellery',
-        'gold': '24K Jewellery',
-        'gold jewellery': '24K Jewellery',
-        'perfume': 'Perfumes',
-        'perfumes': 'Perfumes',
-        'fragrance': 'Perfumes',
-        'aibot': 'Aibot',
-        'ai bot': 'Aibot',
-        'ai': 'Aibot',
-        'astro': 'Aibot',
-        'astrology': 'Aibot',
-        'nutra': 'Nutraceuticals',
-        'nutraceutical': 'Nutraceuticals',
-        'nutraceuticals': 'Nutraceuticals',
-        'supplements': 'Nutraceuticals',
+        '24k jewellery': '24K Jewellery', '24k': '24K Jewellery',
+        'gold': '24K Jewellery', 'gold jewellery': '24K Jewellery',
+        'perfume': 'Perfumes', 'perfumes': 'Perfumes', 'fragrance': 'Perfumes',
+        'aibot': 'Aibot', 'ai bot': 'Aibot', 'ai': 'Aibot',
+        'astro': 'Aibot', 'astrology': 'Aibot',
+        'nutra': 'Nutraceuticals', 'nutraceutical': 'Nutraceuticals',
+        'nutraceuticals': 'Nutraceuticals', 'supplements': 'Nutraceuticals',
         'capsules': 'Nutraceuticals',
+        'other': 'Other', 'others': 'Other',
+        'service': 'Other', 'services': 'Other',
+        'clothing': 'Other', 'apparel': 'Other',
+        'dental care': 'Other', 'dental': 'Other',
     }
-    return mapping.get(s, raw.strip())
+    return mapping.get(s, raw.strip().title())
 
 
 def fetch_sheet():
@@ -197,6 +194,40 @@ def main():
     try:
         rows = fetch_sheet()
         n_new, n_updated = upsert(conn, rows)
+
+        # Backfill: normalize any pre-existing dirty casing in stored rows
+        # (legacy rows from before normalize_category was strengthened —
+        # 'SKIN CARE', 'HAIR CARE', 'OTHER' etc. that split the dashboard
+        # category chart into duplicate buckets).
+        existing = conn.execute(
+            'SELECT ntn_code, category FROM product_ntn_labels WHERE category IS NOT NULL'
+        ).fetchall()
+        n_renormalized = 0
+        for code, cat in existing:
+            clean = normalize_category(cat)
+            if clean and clean != cat:
+                conn.execute(
+                    'UPDATE product_ntn_labels SET category = ? WHERE ntn_code = ?',
+                    (clean, code)
+                )
+                n_renormalized += 1
+        # Also fix already-classified meta_ads_meta rows that picked up the
+        # dirty category before this fix landed.
+        meta_existing = conn.execute(
+            'SELECT DISTINCT category FROM meta_ads_meta WHERE category IS NOT NULL'
+        ).fetchall()
+        n_meta_renormalized = 0
+        for (cat,) in meta_existing:
+            clean = normalize_category(cat)
+            if clean and clean != cat:
+                cur = conn.execute(
+                    'UPDATE meta_ads_meta SET category = ? WHERE category = ?',
+                    (clean, cat)
+                )
+                n_meta_renormalized += cur.rowcount or 0
+        if n_renormalized or n_meta_renormalized:
+            print(f"   Renormalized: {n_renormalized} NTN labels, {n_meta_renormalized} ad rows")
+        conn.commit()
         # Print summary
         total = conn.execute('SELECT COUNT(*) FROM product_ntn_labels').fetchone()[0]
         with_product = conn.execute(
