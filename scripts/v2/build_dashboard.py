@@ -440,8 +440,16 @@ tr:hover td { background:#fafbff; }
       <p class="page-intro">All metrics by product category. Click any column header to sort.</p>
 
       <div class="card">
-        <h3>📊 Spend & ROAS by Category</h3>
+        <h3>📊 Spend & ROAS by Category <span class="meta">aggregated over selected window</span></h3>
         <div class="chart-wrap" style="height:280px"><canvas id="chart-cat-bar"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>📈 Daily Spend by Category <span class="meta">one line per category, selected window</span></h3>
+        <div class="chart-wrap" style="height:320px"><canvas id="chart-cat-trend-spend"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>🎯 Daily ROAS by Category <span class="meta">Meta-attributed (pixel)</span></h3>
+        <div class="chart-wrap" style="height:320px"><canvas id="chart-cat-trend-roas"></canvas></div>
       </div>
       <div class="card">
         <h3>Full Table</h3>
@@ -1082,6 +1090,62 @@ function renderTrends(rows) {
   ).join('') || '<tr><td colspan="8" class="empty">No data.</td></tr>';
 }
 
+// Stable palette for category lines — same color per category across charts.
+const CAT_COLORS = [
+  '#1a3d7c', '#059669', '#d97706', '#dc2626', '#7c3aed',
+  '#0891b2', '#db2777', '#65a30d', '#ea580c', '#475569',
+  '#a16207', '#1e40af',
+];
+const catColor = (() => {
+  const map = new Map();
+  return name => {
+    if (!map.has(name)) map.set(name, CAT_COLORS[map.size % CAT_COLORS.length]);
+    return map.get(name);
+  };
+})();
+
+// Build per-(category, date) buckets from the current filtered rows. Used
+// for the two multi-line trend charts on the Categories page.
+function categoryTimeSeries(rows) {
+  const byCat = new Map();        // category -> Map(date -> {spend, revenue})
+  const allDates = new Set();
+  for (const r of rows) {
+    if (!r.category) continue;
+    if (!byCat.has(r.category)) byCat.set(r.category, new Map());
+    const m = byCat.get(r.category);
+    if (!m.has(r.date)) m.set(r.date, { spend: 0, revenue: 0 });
+    const b = m.get(r.date);
+    b.spend   += r.spend   || 0;
+    b.revenue += r.revenue || 0;
+    allDates.add(r.date);
+  }
+  const dates = [...allDates].sort();
+  // Build datasets — dense (zero-fill missing dates so lines stay continuous)
+  const buildDataset = (metric) => [...byCat.entries()]
+    // Sort by total spend desc so legend matches table order
+    .map(([cat, m]) => {
+      const total = [...m.values()].reduce((s, v) => s + v.spend, 0);
+      return { cat, m, total };
+    })
+    .sort((a, b) => b.total - a.total)
+    .map(({ cat, m }) => ({
+      label: cat,
+      data: dates.map(d => {
+        const v = m.get(d);
+        if (!v) return 0;
+        if (metric === 'spend')   return Math.round(v.spend);
+        if (metric === 'roas')    return v.spend > 0 ? +(v.revenue / v.spend).toFixed(2) : 0;
+        return 0;
+      }),
+      borderColor:     catColor(cat),
+      backgroundColor: catColor(cat) + '22',
+      tension: .25,
+      fill: false,
+      pointRadius: 2,
+    }));
+  return { dates, spend: buildDataset('spend'), roas: buildDataset('roas') };
+}
+
 function renderCategoriesPage(rows) {
   const cats = aggregate(rows, 'category').filter(c => c.key);
   for (const c of cats) {
@@ -1089,17 +1153,33 @@ function renderCategoriesPage(rows) {
     c.success_rate = successRate(subset);
     c.category = c.key;
   }
-  if (document.getElementById('page-categories').classList.contains('active')) {
+  const onPage = document.getElementById('page-categories').classList.contains('active');
+  if (onPage) {
+    // Bar chart: spend + ROAS aggregated over the window (existing view)
     barChart('chart-cat-bar',
       cats.map(c => c.category),
       [
-        { label:'Spend (₹)', data: cats.map(c => Math.round(c.spend)), backgroundColor:'#1a3d7c', yAxisID:'y' },
+        { label:'Spend (₹)', data: cats.map(c => Math.round(c.spend)), backgroundColor:cats.map(c => catColor(c.category)), yAxisID:'y' },
         { label:'ROAS',      data: cats.map(c => +c.roas.toFixed(2)),  backgroundColor:'#059669', type:'line', yAxisID:'y1', tension:.25 },
       ],
       { type:'bar', scales:{
         y:{ beginAtZero:true, position:'left', ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v) } },
         y1:{ beginAtZero:true, position:'right', grid:{ drawOnChartArea:false } },
       } });
+
+    // Daily trend — one line per category over the selected window
+    const cts = categoryTimeSeries(rows);
+    const tsForLineChart = cts.dates.map(d => ({ date: d }));
+    lineChart('chart-cat-trend-spend', tsForLineChart, cts.spend, {
+      plugins:{ legend:{ position:'bottom' } },
+      scales:{ y:{ beginAtZero:true, ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : (v >= 1000 ? (v/1000).toFixed(0)+'K' : v)) } } },
+      interaction:{ mode:'index', intersect:false },
+    });
+    lineChart('chart-cat-trend-roas', tsForLineChart, cts.roas, {
+      plugins:{ legend:{ position:'bottom' } },
+      scales:{ y:{ beginAtZero:true, ticks:{ callback:v => v.toFixed(1) + 'x' } } },
+      interaction:{ mode:'index', intersect:false },
+    });
   }
   const sorted = sortRows(cats, 'tbl-categories');
   applySortHeaders('tbl-categories');

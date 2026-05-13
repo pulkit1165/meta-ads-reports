@@ -240,17 +240,27 @@ def derive_type(campaign_name):
 def derive_category_v2(campaign_or_ad_name):
     """Returns one of:
       Skin / Hair / Crystal Home Decor / Crystal Accessory / 24K Jewellery /
-      Perfumes / Aibot / Nutraceuticals / Other
+      Perfumes / Aibot / Nutraceuticals / DS / Other
     """
     n = _norm(campaign_or_ad_name)
+
+    # DS team campaigns — separate territory (Madhav Ji's), not NTN. Keep
+    # them visible in the dashboard so spend isn't lost, but bucket them
+    # under 'DS' so they don't pollute NTN category roll-ups.
+    if n.startswith('ds_') or '_ds_bof_' in n or '_ds_tof_' in n:
+        return 'DS'
 
     # Aibot first — it's a distinct sub-brand, no overlap with other keywords
     if 'aibot' in n or 'ai_bot' in n or 'aiblot' in n:
         return 'Aibot'
 
-    # 24K Jewellery — must check before Skin (24k_gold_serum is skincare)
+    # 24K Jewellery — must check before Skin (24k_gold_serum is skincare,
+    # not jewellery). Bare 'jewellery' included because SM Fragrance 01 runs
+    # ₹14L/wk in jewellery campaigns that don't carry an explicit 24k_ prefix
+    # — operator confirmed they're all 24K stock.
     if any(kw in n for kw in ['gold_jewellery', '24k_jewellery', '24k_chain', '24k_pendant',
-                              'gold_chain', 'gold_necklace', 'wanda_jewellery', 'wanda_24k']):
+                              'gold_chain', 'gold_necklace', 'wanda_jewellery', 'wanda_24k',
+                              'jewellery', 'jewelry']):
         return '24K Jewellery'
 
     # Perfumes / Fragrance

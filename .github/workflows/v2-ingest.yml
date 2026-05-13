@@ -20,6 +20,11 @@ on:
         description: "Limit to one portal (SM/SML/NBP). Empty = all 3."
         required: false
         default: ""
+      reclassify_all:
+        description: "Force full re-classification of ALL ads (use after classifier rule changes). Slower."
+        required: false
+        type: boolean
+        default: false
 
 concurrency:
   group: v2-ingest
@@ -110,7 +115,12 @@ jobs:
 
       - name: Classify ads (category, creative type, sentiment, NTN, product)
         if: ${{ success() }}
-        run: python3 scripts/v2/classify_ads.py
+        run: |
+          if [ "${{ inputs.reclassify_all }}" = "true" ]; then
+            python3 scripts/v2/classify_ads.py --reclassify
+          else
+            python3 scripts/v2/classify_ads.py
+          fi
 
       - name: Build v2 dashboard (categories_v2.html)
         if: ${{ success() }}
