@@ -79,32 +79,57 @@ def normalize_category(raw: str) -> str | None:
     """Map free-text category to our canonical bucket.
 
     Returns Title-Case canonical buckets matching derive_category_v2 output:
-    Skin, Hair, Crystal, 24K Jewellery, Perfumes, Aibot, Nutraceuticals, Other.
+    Skin, Hair, Crystal Home Decor, Crystal Accessory, 24K Jewellery,
+    Perfumes, Aibot, Nutraceuticals, DS, Other.
 
-    The fallback used to return raw.strip() — which preserved sheet casing
-    like 'SKIN CARE' or 'HAIR CARE' and split the dashboard's category chart
-    into duplicate buckets ('Skin' + 'SKIN CARE'). Now the fallback also
-    title-cases so unknown variants at least render as one bucket per name.
+    IMPORTANT: this function runs on every ingest as a renormalization
+    pass that rewrites meta_ads_meta.category. If a canonical value isn't
+    in this mapping it gets ``.title()``-cased ('DS' → 'Ds'!) and stomps
+    on classify_ads output. So every canonical value must round-trip
+    here as identity.
     """
     if not raw: return None
     s = str(raw).strip().lower()
     if not s: return None
+
+    # All canonical values round-trip as identity (no case mutation).
+    # If you add a new category in derive_category_v2, add it here too.
+    canonical_identity = {
+        'skin', 'hair', 'crystal home decor', 'crystal accessory',
+        '24k jewellery', 'perfumes', 'aibot', 'nutraceuticals',
+        'ds', 'other',
+    }
+    canonical_label = {
+        'skin': 'Skin', 'hair': 'Hair',
+        'crystal home decor': 'Crystal Home Decor',
+        'crystal accessory':  'Crystal Accessory',
+        '24k jewellery':      '24K Jewellery',
+        'perfumes': 'Perfumes', 'aibot': 'Aibot',
+        'nutraceuticals': 'Nutraceuticals',
+        'ds': 'DS', 'other': 'Other',
+    }
+    if s in canonical_identity:
+        return canonical_label[s]
+
+    # Sheet-side aliases (free-text values from SKU sheet's category column).
+    # 'Crystal' alone defaults to Crystal Home Decor — classify_ads then
+    # disambiguates to Accessory when the ad/campaign name has accessory
+    # keywords (bracelet, pendant, mala, etc.).
     mapping = {
-        'skin': 'Skin', 'skincare': 'Skin', 'skin care': 'Skin', 'face': 'Skin',
-        'hair': 'Hair', 'haircare': 'Hair', 'hair care': 'Hair',
-        'crystal': 'Crystal', 'crystals': 'Crystal',
-        'crystal home decor': 'Crystal', 'home decor': 'Crystal',
-        'crystal accessory': 'Crystal', 'accessory': 'Crystal',
-        'jewellery': 'Crystal',
-        '24k jewellery': '24K Jewellery', '24k': '24K Jewellery',
-        'gold': '24K Jewellery', 'gold jewellery': '24K Jewellery',
-        'perfume': 'Perfumes', 'perfumes': 'Perfumes', 'fragrance': 'Perfumes',
-        'aibot': 'Aibot', 'ai bot': 'Aibot', 'ai': 'Aibot',
+        'skincare': 'Skin', 'skin care': 'Skin', 'face': 'Skin',
+        'haircare': 'Hair', 'hair care': 'Hair',
+        'crystal':  'Crystal Home Decor', 'crystals': 'Crystal Home Decor',
+        'home decor':  'Crystal Home Decor',
+        'accessory':   'Crystal Accessory',
+        'jewellery':   '24K Jewellery', 'jewelry': '24K Jewellery',
+        '24k': '24K Jewellery', 'gold': '24K Jewellery',
+        'gold jewellery': '24K Jewellery',
+        'perfume': 'Perfumes', 'fragrance': 'Perfumes',
+        'ai bot': 'Aibot', 'ai': 'Aibot',
         'astro': 'Aibot', 'astrology': 'Aibot',
         'nutra': 'Nutraceuticals', 'nutraceutical': 'Nutraceuticals',
-        'nutraceuticals': 'Nutraceuticals', 'supplements': 'Nutraceuticals',
-        'capsules': 'Nutraceuticals',
-        'other': 'Other', 'others': 'Other',
+        'supplements': 'Nutraceuticals', 'capsules': 'Nutraceuticals',
+        'others': 'Other',
         'service': 'Other', 'services': 'Other',
         'clothing': 'Other', 'apparel': 'Other',
         'dental care': 'Other', 'dental': 'Other',
