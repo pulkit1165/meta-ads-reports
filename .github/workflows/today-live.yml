@@ -179,4 +179,13 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          command: pages deploy out --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }} --branch=main --commit-dirty=true
+          # Pin wrangler to avoid the "npx canceled due to missing packages"
+          # interactive-prompt failure on fresh runners with wrangler 4.x.
+          # Matches deploy-cron-worker.yml.
+          wranglerVersion: '3.99.0'
+          # Override the implicit commit message — wrangler pipes the git
+          # commit message to Cloudflare Pages as deployment metadata, and
+          # the Pages API rejects messages with certain Unicode chars
+          # (saw "Invalid commit message, must be valid UTF-8" on emoji
+          # circles). Use a stable ASCII-only label instead.
+          command: pages deploy out --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }} --branch=main --commit-dirty=true --commit-message="auto-deploy from today-live workflow"
