@@ -6,7 +6,7 @@ on:
     # The :20 UTC firing = IST :50 of the previous hour — operator's preferred
     # check time (data fresh ~10 min before each hour ticks). 4 attempts/hour
     # so even at GHA's ~30% cron reliability, we land at least one near :50.
-    - cron: "5,20,35,50 4-14 * * *"
+    - cron: "5,20,35,50 * * * *"
   workflow_dispatch:
 
 concurrency:

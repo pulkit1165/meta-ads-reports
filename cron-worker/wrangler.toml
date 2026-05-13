@@ -3,17 +3,18 @@ main = "worker.js"
 compatibility_date = "2024-12-01"
 
 # Cron triggers — Cloudflare Workers schedule is reliable to within ~1 min
-# (vs GitHub Actions' ~70% on-time rate). Two crons per hour:
-#   "15 4-14 * * *"  UTC :15  = IST :45 → dispatches v2-ingest.yml
-#                    (Meta + Shopify ingest + classify + dashboard build,
-#                    ~8 min, pushes SQLite to state branch by ~:53 IST)
-#   "35 4-14 * * *"  UTC :35  = IST :05 (next hour) → dispatches
-#                    today-live.yml (pulls fresh state branch DB, refreshes
-#                    KPI Daily, rebuilds + deploys dashboard to Pages)
-# Window 04 - 14 UTC = IST 09:45 - 19:35 (operator's business hours).
+# (vs GitHub Actions' ~70% on-time rate). Two crons every hour, 24/7:
+#   "15 * * * *"  UTC :15 → dispatches v2-ingest.yml
+#                  (Meta + Shopify ingest + classify + dashboard build,
+#                  ~8 min, pushes SQLite to state branch)
+#   "35 * * * *"  UTC :35 (20 min later) → dispatches today-live.yml
+#                  (pulls fresh state branch DB, rebuilds + deploys
+#                  dashboard to Pages)
+# 24/7 because Shopify orders + Meta ad delivery don't stop overnight,
+# and operators need to see late-evening / early-morning numbers fresh.
 # GHA's own cron schedules in each workflow remain as a redundancy layer.
 [triggers]
-crons = ["15 4-14 * * *", "35 4-14 * * *"]
+crons = ["15 * * * *", "35 * * * *"]
 
 # Logs (optional — useful for debugging dispatch failures)
 [observability]

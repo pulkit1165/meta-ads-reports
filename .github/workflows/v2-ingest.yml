@@ -1,16 +1,15 @@
 name: v2 Ingest (Meta + Shopify → SQLite)
 
 on:
-  # Daily at 04:30 IST = 23:00 UTC previous day (locks in final yesterday numbers)
-  # Plus 4 firings per hour during IST business hours (10 AM - 8 PM IST).
-  # GHA's scheduled cron is ~70% reliable — single-shot misses hourly slots
-  # entirely. Multi-shot at :00,:15,:30,:45 UTC gives ~99% coverage that at
-  # least one will fire each hour. The workflow has concurrency: cancel-in-
-  # progress: false so duplicates queue and run serially instead of
-  # clobbering each other.
+  # 24/7 hourly schedule. Shopify orders + Meta ad delivery continue
+  # overnight, so the dashboard's "Real Orders / Real Revenue / ROAS"
+  # must keep refreshing through the night too. Multi-shot at
+  # :00,:15,:30,:45 UTC each hour gives ~99% coverage at GHA's ~70%
+  # cron reliability. The workflow has concurrency cancel-in-progress:
+  # false so duplicates queue and run serially. The 23:00 UTC firing
+  # also doubles as the daily yesterday-lock-in run.
   schedule:
-    - cron: "0 23 * * *"
-    - cron: "0,15,30,45 4-14 * * *"
+    - cron: "0,15,30,45 * * * *"
   workflow_dispatch:
     inputs:
       backfill_days:
