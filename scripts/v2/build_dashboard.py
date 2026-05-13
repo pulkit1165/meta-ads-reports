@@ -369,6 +369,10 @@ tr:hover td { background:#fafbff; }
         <span class="ctrl-lbl">&nbsp;</span>
         <button class="btn-clear" id="btn-clear">Clear Filters</button>
       </div>
+      <div class="ctrl-group" style="margin-left:auto">
+        <span class="ctrl-lbl">Data refreshed</span>
+        <div id="last-updated-pill" style="font-size:11px;font-weight:700;padding:5px 11px;border-radius:6px;white-space:nowrap;border:1px solid transparent"></div>
+      </div>
     </div>
   </div>
 
@@ -628,6 +632,43 @@ const DIM = PAYLOAD.dimensions;
 const FRESH = PAYLOAD.freshness;
 document.getElementById('sidebar-footer').innerHTML =
   `Built ${PAYLOAD.updated_at.slice(0, 16)}<br>${RAW.length.toLocaleString()} ad-day rows · ${DIM.products.length} products · ${DIM.categories.length} categories`;
+
+// Top-bar freshness pill — sticky and visible from any page. Color-coded
+// by age so a stalled cron is obvious without checking GHA.
+//   green  ≤ 75 min  (ingest runs hourly, ~8 min latency)
+//   amber  75–180 min
+//   red    > 180 min — almost certainly broken pipeline
+function renderLastUpdated() {
+  const t   = new Date(PAYLOAD.updated_at);
+  const now = new Date();
+  const diffMin = Math.max(0, Math.floor((now - t) / 60000));
+  let rel;
+  if (diffMin < 1)         rel = 'just now';
+  else if (diffMin < 60)   rel = `${diffMin}m ago`;
+  else if (diffMin < 1440) rel = `${Math.floor(diffMin/60)}h ${diffMin%60}m ago`;
+  else                     rel = `${Math.floor(diffMin/1440)}d ago`;
+  const istTime = t.toLocaleString('en-IN', {
+    timeZone: 'Asia/Kolkata',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+    day: '2-digit', month: 'short',
+  });
+  const pill = document.getElementById('last-updated-pill');
+  let dot, bg, bd, fg;
+  if (diffMin > 180) {
+    dot = '🔴'; bg = '#fef2f2'; bd = '#fca5a5'; fg = '#991b1b';
+  } else if (diffMin > 75) {
+    dot = '🟡'; bg = '#fef3c7'; bd = '#fcd34d'; fg = '#92400e';
+  } else {
+    dot = '🟢'; bg = '#e6f7ec'; bd = '#b8e6c8'; fg = '#0d6e3a';
+  }
+  pill.style.background = bg;
+  pill.style.borderColor = bd;
+  pill.style.color = fg;
+  pill.textContent = `${dot} ${rel} · ${istTime} IST`;
+  pill.title = `Dashboard payload built at ${PAYLOAD.updated_at}\nv2-ingest runs hourly via Cloudflare Worker + GHA fallback`;
+}
+renderLastUpdated();
+setInterval(renderLastUpdated, 30000);
 
 // ── Filter state ─────────────────────────────────────────────────────────
 const F = {
