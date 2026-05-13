@@ -2,12 +2,18 @@ name = "meta-ads-cron-pinger"
 main = "worker.js"
 compatibility_date = "2024-12-01"
 
-# Cron triggers — Cloudflare Workers schedule is reliable to within ~1 min.
-# Pattern: "20 4-14 * * *" fires at UTC :20 hourly between 04:20 and 14:20 UTC,
-# which is IST 09:50 through 19:50 — operator's preferred dashboard refresh time
-# (data fresh ~10 min before each hour ticks over).
+# Cron triggers — Cloudflare Workers schedule is reliable to within ~1 min
+# (vs GitHub Actions' ~70% on-time rate). Two crons per hour:
+#   "15 4-14 * * *"  UTC :15  = IST :45 → dispatches v2-ingest.yml
+#                    (Meta + Shopify ingest + classify + dashboard build,
+#                    ~8 min, pushes SQLite to state branch by ~:53 IST)
+#   "35 4-14 * * *"  UTC :35  = IST :05 (next hour) → dispatches
+#                    today-live.yml (pulls fresh state branch DB, refreshes
+#                    KPI Daily, rebuilds + deploys dashboard to Pages)
+# Window 04 - 14 UTC = IST 09:45 - 19:35 (operator's business hours).
+# GHA's own cron schedules in each workflow remain as a redundancy layer.
 [triggers]
-crons = ["20 4-14 * * *"]
+crons = ["15 4-14 * * *", "35 4-14 * * *"]
 
 # Logs (optional — useful for debugging dispatch failures)
 [observability]

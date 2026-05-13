@@ -1,21 +1,29 @@
-// Cloudflare Worker — pings GitHub to dispatch the today-live workflow
-// at exactly :50 IST every hour. Replaces GHA's unreliable scheduled cron.
+// Cloudflare Worker — pings GitHub to dispatch the ingest + deploy workflows
+// on a reliable schedule. Replaces GHA's flaky scheduled cron (~70% on-time).
+//
+// Two workflows on staggered crons:
+//   :15 UTC (IST :45) → v2-ingest.yml   — Meta+Shopify ingest, ~8 min
+//   :35 UTC (IST :05) → today-live.yml  — pulls fresh DB, rebuilds, deploys
 //
 // Setup:
 //   1. Create a fine-grained GitHub PAT with "Actions: Read & write" on
 //      pulkit1165/meta-ads-reports.
-//   2. Add it as the Worker secret GITHUB_PAT (set via wrangler secret put
+//   2. Add it as Worker secret GITHUB_PAT (set via wrangler secret put,
 //      or via the deploy workflow that streams it from a GH secret).
-//
-// Cron: configured in wrangler.toml — fires at UTC :20 hourly = IST :50.
 
-const REPO  = 'pulkit1165/meta-ads-reports';
-const FILE  = 'today-live.yml';
-const REF   = 'main';
+const REPO = 'pulkit1165/meta-ads-reports';
+const REF  = 'main';
 
-async function dispatchWorkflow(env) {
-  const url = `https://api.github.com/repos/${REPO}/actions/workflows/${FILE}/dispatches`;
-  const r = await fetch(url, {
+// Map of cron expression → workflow file to dispatch when that cron fires.
+// Must match wrangler.toml exactly (Cloudflare passes event.cron verbatim).
+const CRON_TO_WORKFLOW = {
+  '15 4-14 * * *': 'v2-ingest.yml',
+  '35 4-14 * * *': 'today-live.yml',
+};
+
+async function dispatchWorkflow(env, file) {
+  const url = `https://api.github.com/repos/${REPO}/actions/workflows/${file}/dispatches`;
+  return fetch(url, {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${env.GITHUB_PAT}`,
@@ -26,38 +34,54 @@ async function dispatchWorkflow(env) {
     },
     body: JSON.stringify({ ref: REF }),
   });
-  return r;
 }
 
 export default {
-  // Native cron trigger — fires per the schedule in wrangler.toml.
+  // Native cron trigger — Cloudflare calls this once per registered cron.
   async scheduled(event, env, ctx) {
-    const r = await dispatchWorkflow(env);
     const ts = new Date().toISOString();
+    const file = CRON_TO_WORKFLOW[event.cron];
+    if (!file) {
+      console.error(`[${ts}] unknown cron "${event.cron}" — no workflow mapped`);
+      return;
+    }
+    const r = await dispatchWorkflow(env, file);
     if (r.ok) {
-      console.log(`[${ts}] dispatched ${FILE} — ok`);
+      console.log(`[${ts}] cron "${event.cron}" → dispatched ${file} ok`);
     } else {
       const body = await r.text();
-      console.error(`[${ts}] dispatch failed: ${r.status} ${body.slice(0, 300)}`);
+      console.error(`[${ts}] dispatch ${file} failed: ${r.status} ${body.slice(0, 300)}`);
     }
   },
 
-  // Manual ping endpoint for testing — visit https://<worker>.workers.dev/ping
+  // Manual ping endpoints — visit https://<worker>.workers.dev/ping-{ingest|deploy}
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname === '/ping') {
-      const r = await dispatchWorkflow(env);
+    if (url.pathname === '/ping-ingest' || url.pathname === '/ping') {
+      const r = await dispatchWorkflow(env, 'v2-ingest.yml');
       const body = await r.text();
       return new Response(
-        `dispatch status: ${r.status}\n\n${body || '(empty body — usually means success on 204)'}`,
+        `dispatch v2-ingest.yml status: ${r.status}\n\n${body || '(empty body — usually success on 204)'}`,
+        { headers: { 'Content-Type': 'text/plain' } }
+      );
+    }
+    if (url.pathname === '/ping-deploy') {
+      const r = await dispatchWorkflow(env, 'today-live.yml');
+      const body = await r.text();
+      return new Response(
+        `dispatch today-live.yml status: ${r.status}\n\n${body || '(empty body — usually success on 204)'}`,
         { headers: { 'Content-Type': 'text/plain' } }
       );
     }
     if (url.pathname === '/') {
       return new Response(
         `meta-ads cron pinger\n\n` +
-        `· /ping  - manually trigger the today-live workflow now\n` +
-        `· cron   - automatic dispatch hourly at IST :50 (UTC :20)\n`,
+        `cron schedule (UTC = IST):\n` +
+        `  :15 (IST :45) → v2-ingest.yml   (Meta+Shopify ingest, ~8 min)\n` +
+        `  :35 (IST :05) → today-live.yml  (rebuild + deploy)\n\n` +
+        `manual triggers:\n` +
+        `  · /ping-ingest  - dispatch v2-ingest now\n` +
+        `  · /ping-deploy  - dispatch today-live now\n`,
         { headers: { 'Content-Type': 'text/plain' } }
       );
     }
