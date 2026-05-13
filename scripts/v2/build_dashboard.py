@@ -333,9 +333,9 @@ tr:hover td { background:#fafbff; }
       <div class="ctrl-group">
         <span class="ctrl-lbl">Date Range</span>
         <div class="preset-btns" id="preset-btns">
-          <button class="preset-btn" data-days="1">Today</button>
+          <button class="preset-btn active" data-days="1">Today</button>
           <button class="preset-btn" data-days="3">3D</button>
-          <button class="preset-btn active" data-days="7">7D</button>
+          <button class="preset-btn" data-days="7">7D</button>
           <button class="preset-btn" data-days="14">14D</button>
           <button class="preset-btn" data-days="30">30D</button>
           <button class="preset-btn" data-days="all">All</button>
@@ -384,6 +384,7 @@ tr:hover td { background:#fafbff; }
            ~1.8x and confusing primary read. Shopify Admin API is ground
            truth. The Spend / CPM / CTR / Active Ads cards stay because
            they're ad-mechanics, not attribution. -->
+      <div id="range-pill" style="display:inline-block;background:#1a3d7c;color:#fff;font-size:13px;font-weight:700;padding:6px 14px;border-radius:18px;margin-bottom:12px"></div>
       <div class="kpi-strip" id="kpi-strip-shopify"></div>
 
       <div class="card">
@@ -949,6 +950,21 @@ function renderOverview(rows, prevRows) {
   const p = aggregate(prevRows)[0] || { spend:0, revenue:0, purchases:0, roas:0 };
   document.getElementById('ov-meta').textContent = `· ${F.fromDate} → ${F.toDate}`;
 
+  // Range pill — make it unmistakable whether KPIs are a single day or a sum
+  const fromD = new Date(F.fromDate + 'T00:00:00');
+  const toD   = new Date(F.toDate   + 'T00:00:00');
+  const ndays = Math.round((toD - fromD) / 86400000) + 1;
+  const todayStr = PAYLOAD.until;
+  let rangeLabel;
+  if (F.fromDate === F.toDate) {
+    rangeLabel = F.fromDate === todayStr
+      ? `📅 TODAY (${F.fromDate}) — live, refreshes hourly`
+      : `📅 ${F.fromDate} (single day)`;
+  } else {
+    rangeLabel = `📅 ${F.fromDate} → ${F.toDate} (${ndays} days, totals are SUMS over the window)`;
+  }
+  document.getElementById('range-pill').textContent = rangeLabel;
+
   // ── Shopify-reality KPI strip (single source of truth for orders/revenue/ROAS)
   // Pixel-attributed Meta numbers (purchases/revenue/ROAS) removed — they
   // inflate by ~1.8x and were causing the dashboard to read as "wrong".
@@ -1389,7 +1405,7 @@ setupSort('tbl-topads',     'roas', 'desc');
 setupSort('tbl-bottomads',  'roas', 'asc');
 setupSort('tbl-sentiment',  'spend');
 
-document.querySelector('.preset-btn[data-days="7"]').click();
+document.querySelector('.preset-btn[data-days="1"]').click();
 activatePageFromHash();
 </script>
 </body>
