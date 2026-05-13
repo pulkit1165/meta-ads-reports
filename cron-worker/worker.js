@@ -57,12 +57,24 @@ export default {
   // Manual ping endpoints — visit https://<worker>.workers.dev/ping-{ingest|deploy}
   async fetch(request, env) {
     const url = new URL(request.url);
+    // CORS headers — the dashboard at meta-ads-reports.pages.dev calls
+    // /ping-* from a "Refresh now" button. * is fine here because the only
+    // sensitive operation is dispatching workflows, which requires no input
+    // from the client beyond the URL path.
+    const cors = {
+      'Access-Control-Allow-Origin':  '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Access-Control-Max-Age':       '86400',
+    };
+    if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+
     if (url.pathname === '/ping-ingest' || url.pathname === '/ping') {
       const r = await dispatchWorkflow(env, 'v2-ingest.yml');
       const body = await r.text();
       return new Response(
         `dispatch v2-ingest.yml status: ${r.status}\n\n${body || '(empty body — usually success on 204)'}`,
-        { headers: { 'Content-Type': 'text/plain' } }
+        { headers: { ...cors, 'Content-Type': 'text/plain' } }
       );
     }
     if (url.pathname === '/ping-deploy') {
@@ -70,7 +82,7 @@ export default {
       const body = await r.text();
       return new Response(
         `dispatch today-live.yml status: ${r.status}\n\n${body || '(empty body — usually success on 204)'}`,
-        { headers: { 'Content-Type': 'text/plain' } }
+        { headers: { ...cors, 'Content-Type': 'text/plain' } }
       );
     }
     if (url.pathname === '/') {
@@ -82,9 +94,9 @@ export default {
         `manual triggers:\n` +
         `  · /ping-ingest  - dispatch v2-ingest now\n` +
         `  · /ping-deploy  - dispatch today-live now\n`,
-        { headers: { 'Content-Type': 'text/plain' } }
+        { headers: { ...cors, 'Content-Type': 'text/plain' } }
       );
     }
-    return new Response('not found', { status: 404 });
+    return new Response('not found', { status: 404, headers: cors });
   },
 };

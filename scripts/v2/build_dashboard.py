@@ -373,6 +373,11 @@ tr:hover td { background:#fafbff; }
         <span class="ctrl-lbl">Data refreshed</span>
         <div id="last-updated-pill" style="font-size:11px;font-weight:700;padding:5px 11px;border-radius:6px;white-space:nowrap;border:1px solid transparent"></div>
       </div>
+      <div class="ctrl-group">
+        <span class="ctrl-lbl">&nbsp;</span>
+        <button id="btn-refresh-now" type="button" title="Force a fresh ingest + rebuild now (~10 min). Use this when the freshness pill is yellow/red."
+                style="background:#1a3d7c;color:#fff;border:none;padding:6px 13px;border-radius:6px;font-size:11px;cursor:pointer;font-weight:700;white-space:nowrap">🔄 Refresh now</button>
+      </div>
     </div>
   </div>
 
@@ -677,6 +682,44 @@ function renderLastUpdated() {
 }
 renderLastUpdated();
 setInterval(renderLastUpdated, 30000);
+
+// "Refresh now" button — fires the Cloudflare Worker pings that dispatch
+// v2-ingest immediately, then today-live ~8 min later (after ingest finishes).
+// User can also navigate away — both Worker pings are fire-and-forget, and
+// the regular hourly schedule covers the gap if anything is missed.
+const REFRESH_WORKER = 'https://meta-ads-cron-pinger.pulkit-studdmuffyn.workers.dev';
+document.getElementById('btn-refresh-now').addEventListener('click', async (e) => {
+  const btn = e.currentTarget;
+  const origText = btn.textContent;
+  btn.disabled = true; btn.style.opacity = '0.65';
+  btn.textContent = '⏳ Queuing ingest...';
+  try {
+    const r = await fetch(`${REFRESH_WORKER}/ping-ingest`, { mode: 'cors' });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+    btn.textContent = '✓ Refresh queued · ~10 min';
+    btn.style.background = '#059669';
+    // Auto-trigger deploy after ingest should be done (~8 min)
+    setTimeout(async () => {
+      try { await fetch(`${REFRESH_WORKER}/ping-deploy`, { mode: 'cors' }); } catch (_) {}
+      btn.textContent = '🚀 Rebuild firing... reload in 5 min';
+    }, 8 * 60 * 1000);
+    // Re-enable + suggest reload after full cycle
+    setTimeout(() => {
+      btn.textContent = '🔁 Reload page for new data';
+      btn.style.background = '#1a3d7c';
+      btn.disabled = false; btn.style.opacity = '1';
+      btn.onclick = () => location.reload();
+    }, 13 * 60 * 1000);
+  } catch (err) {
+    btn.textContent = `✗ ${err.message} (retry)`;
+    btn.style.background = '#dc2626';
+    setTimeout(() => {
+      btn.textContent = origText;
+      btn.style.background = '#1a3d7c';
+      btn.disabled = false; btn.style.opacity = '1';
+    }, 4000);
+  }
+});
 
 // ── Filter state ─────────────────────────────────────────────────────────
 const F = {
