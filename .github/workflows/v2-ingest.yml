@@ -1,15 +1,20 @@
 name: v2 Ingest (Meta + Shopify → SQLite)
 
 on:
-  # Daily at 04:30 IST = 23:00 UTC previous day
+  # Daily at 04:30 IST = 23:00 UTC previous day (locks in final yesterday numbers)
+  # Plus hourly during IST business hours (10 AM - 8 PM IST = 04:30 - 14:30 UTC)
+  # so the v2 dashboard shows live today data alongside Shopify (which already
+  # ingests today). Without this, "Today" view had 0 Meta spend vs live Shopify
+  # revenue → broken REAL ROAS / Pixel ROAS / Active Ads.
   schedule:
     - cron: "0 23 * * *"
+    - cron: "30 4-14 * * *"
   workflow_dispatch:
     inputs:
       backfill_days:
-        description: "Backfill N days for both Meta + Shopify (default 1)"
+        description: "Backfill N days for both Meta + Shopify (default 2)"
         required: false
-        default: "1"
+        default: "2"
       portal:
         description: "Limit to one portal (SM/SML/NBP). Empty = all 3."
         required: false
@@ -82,7 +87,7 @@ jobs:
       - name: Determine backfill days
         id: cfg
         run: |
-          DAYS="${{ inputs.backfill_days || '1' }}"
+          DAYS="${{ inputs.backfill_days || '2' }}"
           PORTAL_ARG=""
           [ -n "${{ inputs.portal }}" ] && PORTAL_ARG="--portal ${{ inputs.portal }}"
           echo "days=$DAYS" >> "$GITHUB_OUTPUT"

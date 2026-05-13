@@ -339,9 +339,11 @@ def ingest_for_date(conn, date_str: str, portals: list, *,
 
 def main():
     p = argparse.ArgumentParser()
-    p.add_argument('--date', help='YYYY-MM-DD (default: yesterday IST)')
-    p.add_argument('--days', type=int, default=1,
-                   help='Backfill last N days (default 1 = just --date)')
+    p.add_argument('--date', help='YYYY-MM-DD (default: today IST)')
+    p.add_argument('--days', type=int, default=2,
+                   help='Backfill last N days (default 2 = today + yesterday, '
+                        'matching Shopify ingest; covers late-arriving '
+                        'conversion attribution on yesterday)')
     p.add_argument('--portal', choices=['SM', 'SML', 'NBP'],
                    help='Limit to one portal (default: all 3)')
     p.add_argument('--campaigns-only', action='store_true',
@@ -357,7 +359,7 @@ def main():
     if args.date:
         end_date = datetime.strptime(args.date, '%Y-%m-%d').date()
     else:
-        end_date = today - timedelta(days=1)  # default yesterday
+        end_date = today
 
     dates = [end_date - timedelta(days=i) for i in range(args.days)]
     dates.sort()  # oldest first
