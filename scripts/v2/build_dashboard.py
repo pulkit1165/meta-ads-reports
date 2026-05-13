@@ -692,6 +692,13 @@ document.getElementById('to-date').value   = F.toDate;
 document.getElementById('from-date').addEventListener('change', e => { F.fromDate = e.target.value; clearActivePreset(); apply(); });
 document.getElementById('to-date').addEventListener('change',   e => { F.toDate   = e.target.value; clearActivePreset(); apply(); });
 
+// Format a Date as YYYY-MM-DD in LOCAL time. Using `.toISOString().slice(0,10)`
+// is a TZ landmine — it converts to UTC first, which in IST (+05:30) bumps
+// the date back by one for any date built from a "YYYY-MM-DDT00:00:00" string.
+// That bug made "Today" produce a 2-day range and 7D produce 8 days etc.
+const fmtLocalDate = d =>
+  `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+
 document.querySelectorAll('.preset-btn').forEach(b => {
   b.addEventListener('click', () => {
     document.querySelectorAll('.preset-btn').forEach(x => x.classList.remove('active'));
@@ -703,7 +710,7 @@ document.querySelectorAll('.preset-btn').forEach(b => {
       const end = new Date(PAYLOAD.until + 'T00:00:00');
       const n = parseInt(days, 10);
       const start = new Date(end); start.setDate(end.getDate() - (n - 1));
-      F.fromDate = start.toISOString().slice(0, 10);
+      F.fromDate = fmtLocalDate(start);
       F.toDate   = PAYLOAD.until;
     }
     document.getElementById('from-date').value = F.fromDate;
