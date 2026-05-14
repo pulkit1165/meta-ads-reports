@@ -445,7 +445,7 @@ tr:hover td { background:#fafbff; }
       <p class="page-intro">All metrics by product category. Click any column header to sort.</p>
 
       <div class="card">
-        <h3>🥧 Spend Allocation by Category <span class="meta">share of total spend · hover slice for ROAS</span></h3>
+        <h3>🥧 Budget Allocation by Category <span class="meta">share of total spend · hover slice for ROAS</span></h3>
         <div class="chart-wrap" style="height:360px"><canvas id="chart-cat-pie"></canvas></div>
       </div>
 
