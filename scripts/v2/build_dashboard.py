@@ -131,6 +131,35 @@ def fetch_dimensions(conn, since: str, until: str):
     }
 
 
+def fetch_active_campaign_budgets(conn, since: str, until: str):
+    """Return campaign_id -> {daily_budget, name, status, portal} for all
+    campaigns currently ACTIVE that had ads with spend in the period.
+
+    Used by the Categories page Budget Allocation chart so the pie reflects
+    configured spend ceilings, not just what was already spent.
+    """
+    rows = conn.execute('''
+        SELECT c.campaign_id, c.portal, c.name, c.effective_status,
+               COALESCE(c.daily_budget, 0) AS daily,
+               COALESCE(c.lifetime_budget, 0) AS lifetime
+        FROM meta_campaigns c
+        WHERE c.campaign_id IN (
+            SELECT DISTINCT campaign_id FROM meta_ads_daily
+            WHERE date BETWEEN ? AND ? AND campaign_id IS NOT NULL
+        )
+    ''', (since, until)).fetchall()
+    out = {}
+    for r in rows:
+        out[r[0]] = {
+            'portal': r[1],
+            'name': r[2] or '',
+            'status': r[3] or '',
+            'daily_budget': float(r[4] or 0),
+            'lifetime_budget': float(r[5] or 0),
+        }
+    return out
+
+
 def fetch_adsets(conn, since: str, until: str):
     """Adset metadata (name + audience inclusions/exclusions) for any adset
     that had spend in the period. Used by the Categories page drill-down
@@ -481,8 +510,9 @@ tr:hover td { background:#fafbff; }
       <p class="page-intro">All metrics by product category. Click any column header to sort.</p>
 
       <div class="card">
-        <h3>🥧 Budget Allocation by Category <span class="meta">share of total spend · hover slice for ROAS</span></h3>
+        <h3>🥧 Budget Allocation by Category <span class="meta">slice = sum of ACTIVE campaign daily budgets · tooltip shows spent + ROAS</span></h3>
         <div class="chart-wrap" style="height:360px"><canvas id="chart-cat-pie"></canvas></div>
+        <div id="cat-pie-empty" class="empty" style="display:none">No ACTIVE campaigns with configured daily budget in this period.</div>
       </div>
 
       <!-- Drill-down: appears only when a Product is picked or a single Category chip is selected.
@@ -505,7 +535,7 @@ tr:hover td { background:#fafbff; }
           <tbody id="drill-ct-tbody"></tbody>
         </table>
 
-        <h4 style="margin:22px 0 6px;font-size:12px;color:#1a3d7c;letter-spacing:.6px;text-transform:uppercase">Ad-set structure · audience inclusions & exclusions</h4>
+        <h4 style="margin:22px 0 6px;font-size:12px;color:#1a3d7c;letter-spacing:.6px;text-transform:uppercase">Ad-set structure · audience inclusions & exclusions · rolling ROAS</h4>
         <table id="tbl-drill-adset">
           <thead><tr>
             <th data-col="campaign" data-type="str">Campaign → Ad-set</th>
@@ -513,9 +543,12 @@ tr:hover td { background:#fafbff; }
             <th data-col="incl" data-type="str">Audience incl.</th>
             <th data-col="excl" data-type="str">Audience excl.</th>
             <th data-col="ads" data-type="num">Ads</th>
-            <th data-col="spend" data-type="num">Spend</th>
+            <th data-col="spend" data-type="num">Spend (window)</th>
             <th data-col="orders" data-type="num">Orders</th>
-            <th data-col="roas" data-type="num">ROAS</th>
+            <th data-col="roas" data-type="num">ROAS (window)</th>
+            <th data-col="roas_today" data-type="num">Live ROAS (today)</th>
+            <th data-col="roas_3d" data-type="num">3D ROAS</th>
+            <th data-col="roas_7d" data-type="num">7D ROAS</th>
           </tr></thead>
           <tbody id="drill-adset-tbody"></tbody>
         </table>
@@ -1404,9 +1437,43 @@ function renderDrillDown(rows) {
 
   // Adset breakdown (top 50 by spend) — joined with PAYLOAD.adsets so we
   // get audience inclusions / exclusions per adset.
+  // Rolling ROAS columns (Live / 3D / 7D) need data outside the operator's
+  // current date window, so we compute them from RAW filtered only by the
+  // non-date filters that match the current drill-down slice.
   const adsetMeta = PAYLOAD.adsets || {};
+  const today = PAYLOAD.until;
+  const dayMs = 86400000;
+  const d3 = new Date(today + 'T00:00:00'); d3.setDate(d3.getDate() - 2);   // 3D inclusive of today = today-2..today
+  const d7 = new Date(today + 'T00:00:00'); d7.setDate(d7.getDate() - 6);   // 7D inclusive
+  const d3Str = `${d3.getFullYear()}-${String(d3.getMonth()+1).padStart(2,'0')}-${String(d3.getDate()).padStart(2,'0')}`;
+  const d7Str = `${d7.getFullYear()}-${String(d7.getMonth()+1).padStart(2,'0')}-${String(d7.getDate()).padStart(2,'0')}`;
+
+  // Pre-aggregate rolling totals per adset_id from RAW (all dates),
+  // applying the same non-date filters that produced the current rows[].
+  const rolling = new Map();
+  const passNonDate = (r) => {
+    if (F.portals.size && !F.portals.has(r.portal)) return false;
+    if (F.categories.size && !F.categories.has(r.category)) return false;
+    if (F.creative_types.size && !F.creative_types.has(r.creative_type)) return false;
+    if (F.product && r.product !== F.product) return false;
+    return true;
+  };
+  for (const r of RAW) {
+    if (!r.adset_id) continue;
+    if (!passNonDate(r)) continue;
+    if (!rolling.has(r.adset_id)) rolling.set(r.adset_id, {
+      today_s:0, today_r:0, d3_s:0, d3_r:0, d7_s:0, d7_r:0
+    });
+    const x = rolling.get(r.adset_id);
+    if (r.date === today)  { x.today_s += r.spend||0; x.today_r += r.revenue||0; }
+    if (r.date >= d3Str)   { x.d3_s    += r.spend||0; x.d3_r    += r.revenue||0; }
+    if (r.date >= d7Str)   { x.d7_s    += r.spend||0; x.d7_r    += r.revenue||0; }
+  }
+  const safeRoas = (rev, sp) => sp > 0 ? rev/sp : 0;
+
   const adsetRows = [...byAdset.entries()].map(([id, v]) => {
     const meta = adsetMeta[id] || {};
+    const roll = rolling.get(id) || { today_s:0, today_r:0, d3_s:0, d3_r:0, d7_s:0, d7_r:0 };
     return {
       adset_id: id,
       campaign: v.campaign_name,
@@ -1418,7 +1485,10 @@ function renderDrillDown(rows) {
       spend: v.spend,
       revenue: v.revenue,
       orders: v.purchases,
-      roas: v.spend > 0 ? v.revenue / v.spend : 0,
+      roas:       v.spend > 0 ? v.revenue / v.spend : 0,
+      roas_today: safeRoas(roll.today_r, roll.today_s),
+      roas_3d:    safeRoas(roll.d3_r,    roll.d3_s),
+      roas_7d:    safeRoas(roll.d7_r,    roll.d7_s),
     };
   }).sort((a, b) => b.spend - a.spend).slice(0, 50);
 
@@ -1427,6 +1497,8 @@ function renderDrillDown(rows) {
     const escaped = s.replace(/"/g, '&quot;');
     return `<span class="cell-name" style="max-width:240px;display:inline-block;vertical-align:middle" title="${escaped}">${s}</span>`;
   };
+
+  const roasOrDash = (n) => (n == null || !isFinite(n) || n <= 0) ? '<span class="subtle">—</span>' : fmt.roas(n);
 
   document.getElementById('drill-adset-tbody').innerHTML = adsetRows.map(r =>
     `<tr>` +
@@ -1443,8 +1515,11 @@ function renderDrillDown(rows) {
       `<td>${fmt.inr(r.spend)}</td>` +
       `<td>${fmt.num(r.orders)}</td>` +
       `<td>${fmt.roas(r.roas)}</td>` +
+      `<td>${roasOrDash(r.roas_today)}</td>` +
+      `<td>${roasOrDash(r.roas_3d)}</td>` +
+      `<td>${roasOrDash(r.roas_7d)}</td>` +
     `</tr>`
-  ).join('') || '<tr><td colspan="8" class="empty">No data for current filter.</td></tr>';
+  ).join('') || '<tr><td colspan="11" class="empty">No data for current filter.</td></tr>';
 }
 
 function renderCategoriesPage(rows) {
@@ -1456,33 +1531,84 @@ function renderCategoriesPage(rows) {
   }
   const onPage = document.getElementById('page-categories').classList.contains('active');
   if (onPage) {
-    // Pie chart: spend allocation by category. Tooltip surfaces ROAS so the
-    // operator can see which slices are profitable vs which are bleeding.
-    const pieCats = cats.filter(c => c.spend > 0).sort((a, b) => b.spend - a.spend);
-    const totalSpend = pieCats.reduce((s, c) => s + c.spend, 0);
-    pieChart('chart-cat-pie',
-      pieCats.map(c => c.category),
-      [{
-        label: 'Spend',
-        data: pieCats.map(c => Math.round(c.spend)),
-        backgroundColor: pieCats.map(c => catColor(c.category)),
-        borderColor: '#fff',
-        borderWidth: 2,
-      }],
-      {
-        plugins: {
-          legend: { position: 'right', labels: { boxWidth: 14, font: { size: 12 } } },
-          tooltip: {
-            callbacks: {
-              label: (ctx) => {
-                const c = pieCats[ctx.dataIndex];
-                const pct = totalSpend > 0 ? (c.spend / totalSpend * 100).toFixed(1) : '0';
-                return `${c.category}: ₹${Math.round(c.spend).toLocaleString('en-IN')} (${pct}%) · ROAS ${c.roas.toFixed(2)}x`;
+    // Pie chart: BUDGET allocation by category (not spend). Slice size is
+    // the sum of ACTIVE campaign daily-budgets whose ads are dominantly
+    // in that category. Tooltip also surfaces actual spend + ROAS so the
+    // operator can spot "budget allocated but not spent" or "spending
+    // more than allocated".
+    const campMeta = PAYLOAD.campaigns || {};
+    // For each campaign that has spend in the window, decide its dominant
+    // category (the category bucket with the most ad-day spend inside the
+    // campaign). Use UNFILTERED rows so a campaign that mixes categories
+    // still gets a single dominant bucket.
+    const campCat = new Map();   // campaign_id -> dominant category
+    const campCatSpend = new Map(); // campaign_id -> { cat: spend, ... }
+    for (const r of RAW) {
+      if (!r.campaign_id || !r.category) continue;
+      if (!campCatSpend.has(r.campaign_id)) campCatSpend.set(r.campaign_id, {});
+      const m = campCatSpend.get(r.campaign_id);
+      m[r.category] = (m[r.category] || 0) + (r.spend || 0);
+    }
+    for (const [cid, m] of campCatSpend) {
+      let bestCat = null, bestSpend = -1;
+      for (const [k, v] of Object.entries(m)) if (v > bestSpend) { bestCat = k; bestSpend = v; }
+      campCat.set(cid, bestCat);
+    }
+    // Now sum daily_budget per category (ACTIVE only).
+    const budgetByCat = new Map();
+    for (const [cid, meta] of Object.entries(campMeta)) {
+      if (meta.status !== 'ACTIVE') continue;
+      const cat = campCat.get(cid);
+      if (!cat) continue;
+      const b = (meta.daily_budget || 0);
+      if (b <= 0) continue;
+      budgetByCat.set(cat, (budgetByCat.get(cat) || 0) + b);
+    }
+    // Build pie data sorted by budget desc. Cross-reference cats for spend/ROAS.
+    const spendByCat = new Map();
+    cats.forEach(c => spendByCat.set(c.key, c));
+    const pieRows = [...budgetByCat.entries()]
+      .map(([cat, budget]) => {
+        const c = spendByCat.get(cat) || { spend: 0, roas: 0 };
+        return { cat, budget, spend: c.spend, roas: c.roas };
+      })
+      .filter(r => r.budget > 0)
+      .sort((a, b) => b.budget - a.budget);
+    const totalBudget = pieRows.reduce((s, r) => s + r.budget, 0);
+    const pieEmpty = pieRows.length === 0;
+    document.getElementById('chart-cat-pie').style.display = pieEmpty ? 'none' : '';
+    document.getElementById('cat-pie-empty').style.display = pieEmpty ? 'block' : 'none';
+    if (!pieEmpty) {
+      pieChart('chart-cat-pie',
+        pieRows.map(r => r.cat),
+        [{
+          label: 'Daily budget',
+          data: pieRows.map(r => Math.round(r.budget)),
+          backgroundColor: pieRows.map(r => catColor(r.cat)),
+          borderColor: '#fff',
+          borderWidth: 2,
+        }],
+        {
+          plugins: {
+            legend: { position: 'right', labels: { boxWidth: 14, font: { size: 12 } } },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => {
+                  const r = pieRows[ctx.dataIndex];
+                  const pct = totalBudget > 0 ? (r.budget / totalBudget * 100).toFixed(1) : '0';
+                  const spendPct = r.budget > 0 ? (r.spend / r.budget * 100).toFixed(0) : '–';
+                  return [
+                    `${r.cat}`,
+                    `Daily budget: ₹${Math.round(r.budget).toLocaleString('en-IN')} (${pct}% of total)`,
+                    `Spent (window): ₹${Math.round(r.spend).toLocaleString('en-IN')} · ROAS ${r.roas.toFixed(2)}x`,
+                    `Utilization: ${spendPct}% of allocated daily × days`,
+                  ];
+                }
               }
             }
           }
-        }
-      });
+        });
+    }
 
     // Bar chart: spend + ROAS aggregated over the window (existing view)
     barChart('chart-cat-bar',
@@ -1915,6 +2041,7 @@ def main():
     freshness = fetch_freshness(conn)
     shopify_daily = fetch_shopify_daily(conn, since, until)
     adsets = fetch_adsets(conn, since, until)
+    campaigns = fetch_active_campaign_budgets(conn, since, until)
 
     payload = {
         'since': since,
@@ -1922,6 +2049,7 @@ def main():
         'rows': rows,
         'shopify_daily': shopify_daily,    # Real orders + revenue per portal/date
         'adsets': adsets,                   # adset_id -> {name, audiences_incl, audiences_excl, ...}
+        'campaigns': campaigns,             # campaign_id -> {name, daily_budget, status, portal}
         'dimensions': dimensions,
         'freshness': freshness,
         'updated_at': now_iso(),
