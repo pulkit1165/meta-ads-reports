@@ -843,7 +843,16 @@ function switchPage(page) {
   if (location.hash !== '#' + page) {
     history.replaceState(null, '', '#' + page);
   }
-  apply();
+  // Defer apply() to next animation frame. Chart.js measures canvas
+  // dimensions when instantiated; if we call it immediately after
+  // switching from display:none to display:block, the browser hasn't
+  // computed layout yet and the canvas reads as 0x0 → blank chart.
+  // requestAnimationFrame fires after the next layout/paint cycle.
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => apply());
+  } else {
+    apply();
+  }
 }
 
 document.querySelectorAll('.menu a[data-page]').forEach(a => {
