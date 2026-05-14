@@ -445,6 +445,46 @@ tr:hover td { background:#fafbff; }
       <p class="page-intro">All metrics by product category. Click any column header to sort.</p>
 
       <div class="card">
+        <h3>🥧 Spend Allocation by Category <span class="meta">share of total spend · hover slice for ROAS</span></h3>
+        <div class="chart-wrap" style="height:360px"><canvas id="chart-cat-pie"></canvas></div>
+      </div>
+
+      <!-- Drill-down: appears only when a Product is picked or a single Category chip is selected.
+           Shows per-creative-type breakdown (Paras/Motion/Partnership/Static/Other) and the
+           per-campaign breakdown for the selected slice. -->
+      <div class="card" id="card-drilldown" style="display:none">
+        <h3>🔍 Drill-down: <span id="drill-title" style="color:#1a3d7c"></span></h3>
+        <div id="drill-summary" style="margin:6px 0 14px;font-size:13px;color:#475569"></div>
+
+        <h4 style="margin:14px 0 6px;font-size:12px;color:#1a3d7c;letter-spacing:.6px;text-transform:uppercase">Creative-type split</h4>
+        <table id="tbl-drill-ct">
+          <thead><tr>
+            <th data-col="type" data-type="str">Creative Type</th>
+            <th data-col="ads" data-type="num">Active Ads</th>
+            <th data-col="spend" data-type="num">Spend</th>
+            <th data-col="orders" data-type="num">Orders</th>
+            <th data-col="revenue" data-type="num">Revenue</th>
+            <th data-col="roas" data-type="num">ROAS</th>
+          </tr></thead>
+          <tbody id="drill-ct-tbody"></tbody>
+        </table>
+
+        <h4 style="margin:22px 0 6px;font-size:12px;color:#1a3d7c;letter-spacing:.6px;text-transform:uppercase">Campaigns</h4>
+        <table id="tbl-drill-camp">
+          <thead><tr>
+            <th data-col="name" data-type="str">Campaign</th>
+            <th data-col="portal" data-type="str">Portal</th>
+            <th data-col="ads" data-type="num">Ads</th>
+            <th data-col="spend" data-type="num">Spend</th>
+            <th data-col="orders" data-type="num">Orders</th>
+            <th data-col="revenue" data-type="num">Revenue</th>
+            <th data-col="roas" data-type="num">ROAS</th>
+          </tr></thead>
+          <tbody id="drill-camp-tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="card">
         <h3>📊 Spend & ROAS by Category <span class="meta">aggregated over selected window</span></h3>
         <div class="chart-wrap" style="height:280px"><canvas id="chart-cat-bar"></canvas></div>
       </div>
@@ -1069,6 +1109,17 @@ function barChart(canvasId, labels, datasets, opts = {}) {
   });
 }
 
+function pieChart(canvasId, labels, datasets, opts = {}) {
+  destroyChart(canvasId);
+  const el = document.getElementById(canvasId);
+  if (!el) return;
+  charts[canvasId] = new Chart(el, {
+    type: 'pie',
+    data: { labels, datasets },
+    options: { responsive:true, maintainAspectRatio:false, ...opts },
+  });
+}
+
 // ── Page renderers ──────────────────────────────────────────────────────
 // Compute Shopify (real) totals from PAYLOAD.shopify_daily, scoped to the
 // current date filter and any selected portals. We can't filter Shopify by
@@ -1232,6 +1283,101 @@ function categoryTimeSeries(rows) {
   return { dates, spend: buildDataset('spend'), roas: buildDataset('roas') };
 }
 
+function renderDrillDown(rows) {
+  // Show only when the operator is drilling into something specific:
+  // a product, OR exactly one category chip, OR exactly one creative chip.
+  // Otherwise the tables would just repeat the page-level totals.
+  const card = document.getElementById('card-drilldown');
+  if (!card) return;
+  const product   = F.product;
+  const singleCat = F.categories.size === 1 ? [...F.categories][0] : null;
+  const singleCt  = F.creative_types.size === 1 ? [...F.creative_types][0] : null;
+  if (!product && !singleCat && !singleCt) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  const titleParts = [];
+  if (product)   titleParts.push(`Product = ${product}`);
+  if (singleCat) titleParts.push(`Category = ${singleCat}`);
+  if (singleCt)  titleParts.push(`Creative = ${singleCt}`);
+  document.getElementById('drill-title').textContent = titleParts.join(' · ');
+
+  // Aggregate the filtered rows by creative_type and by campaign_id.
+  const byCT = new Map();
+  const byCamp = new Map();
+  const allAds = new Set();
+  let totalSpend = 0, totalRev = 0, totalPur = 0;
+  for (const r of rows) {
+    allAds.add(r.ad_id);
+    totalSpend += r.spend || 0;
+    totalRev   += r.revenue || 0;
+    totalPur   += r.purchases || 0;
+
+    const ct = r.creative_type || 'Other';
+    if (!byCT.has(ct)) byCT.set(ct, { ads: new Set(), spend: 0, revenue: 0, purchases: 0 });
+    const x = byCT.get(ct);
+    x.ads.add(r.ad_id);
+    x.spend     += r.spend     || 0;
+    x.revenue   += r.revenue   || 0;
+    x.purchases += r.purchases || 0;
+
+    if (r.campaign_id) {
+      if (!byCamp.has(r.campaign_id)) byCamp.set(r.campaign_id, {
+        name: r.campaign_name || '(unnamed)', portal: r.portal || '',
+        ads: new Set(), spend: 0, revenue: 0, purchases: 0,
+      });
+      const y = byCamp.get(r.campaign_id);
+      y.ads.add(r.ad_id);
+      y.spend     += r.spend     || 0;
+      y.revenue   += r.revenue   || 0;
+      y.purchases += r.purchases || 0;
+    }
+  }
+
+  // Summary line above the two tables
+  const realRoas = totalSpend > 0 ? totalRev / totalSpend : 0;
+  document.getElementById('drill-summary').innerHTML =
+    `<b>${allAds.size}</b> active ads · ` +
+    `Spend <b>${fmt.inr(totalSpend)}</b> · ` +
+    `Pixel Orders <b>${fmt.num(totalPur)}</b> · ` +
+    `Pixel Revenue <b>${fmt.inr(totalRev)}</b> · ` +
+    `Pixel ROAS <b>${fmt.roas(realRoas)}</b>` +
+    `<div class="subtle" style="margin-top:4px">Note: orders / revenue / ROAS below are Meta-pixel-attributed (Shopify can't filter by product/creative).</div>`;
+
+  // Creative-type breakdown
+  const ctRows = [...byCT.entries()].map(([type, v]) => ({
+    type, ads: v.ads.size, spend: v.spend, revenue: v.revenue, orders: v.purchases,
+    roas: v.spend > 0 ? v.revenue / v.spend : 0,
+  })).sort((a, b) => b.spend - a.spend);
+  document.getElementById('drill-ct-tbody').innerHTML = ctRows.map(r =>
+    `<tr><td><strong>${r.type}</strong></td>` +
+    `<td>${fmt.num(r.ads)}</td>` +
+    `<td>${fmt.inr(r.spend)}</td>` +
+    `<td>${fmt.num(r.orders)}</td>` +
+    `<td>${fmt.inr(r.revenue)}</td>` +
+    `<td>${fmt.roas(r.roas)}</td></tr>`
+  ).join('') || '<tr><td colspan="6" class="empty">No data for current filter.</td></tr>';
+
+  // Campaign breakdown (top 50 by spend so the page doesn't drag if a
+  // category has 200 campaigns)
+  const campRows = [...byCamp.values()].map(v => ({
+    name: v.name, portal: v.portal,
+    ads: v.ads.size, spend: v.spend, revenue: v.revenue, orders: v.purchases,
+    roas: v.spend > 0 ? v.revenue / v.spend : 0,
+  })).sort((a, b) => b.spend - a.spend).slice(0, 50);
+  document.getElementById('drill-camp-tbody').innerHTML = campRows.map(r =>
+    `<tr><td><span class="cell-name" title="${(r.name || '').replace(/"/g, '&quot;')}">${r.name}</span></td>` +
+    `<td>${r.portal}</td>` +
+    `<td>${fmt.num(r.ads)}</td>` +
+    `<td>${fmt.inr(r.spend)}</td>` +
+    `<td>${fmt.num(r.orders)}</td>` +
+    `<td>${fmt.inr(r.revenue)}</td>` +
+    `<td>${fmt.roas(r.roas)}</td></tr>`
+  ).join('') || '<tr><td colspan="7" class="empty">No data for current filter.</td></tr>';
+}
+
 function renderCategoriesPage(rows) {
   const cats = aggregate(rows, 'category').filter(c => c.key);
   for (const c of cats) {
@@ -1241,6 +1387,34 @@ function renderCategoriesPage(rows) {
   }
   const onPage = document.getElementById('page-categories').classList.contains('active');
   if (onPage) {
+    // Pie chart: spend allocation by category. Tooltip surfaces ROAS so the
+    // operator can see which slices are profitable vs which are bleeding.
+    const pieCats = cats.filter(c => c.spend > 0).sort((a, b) => b.spend - a.spend);
+    const totalSpend = pieCats.reduce((s, c) => s + c.spend, 0);
+    pieChart('chart-cat-pie',
+      pieCats.map(c => c.category),
+      [{
+        label: 'Spend',
+        data: pieCats.map(c => Math.round(c.spend)),
+        backgroundColor: pieCats.map(c => catColor(c.category)),
+        borderColor: '#fff',
+        borderWidth: 2,
+      }],
+      {
+        plugins: {
+          legend: { position: 'right', labels: { boxWidth: 14, font: { size: 12 } } },
+          tooltip: {
+            callbacks: {
+              label: (ctx) => {
+                const c = pieCats[ctx.dataIndex];
+                const pct = totalSpend > 0 ? (c.spend / totalSpend * 100).toFixed(1) : '0';
+                return `${c.category}: ₹${Math.round(c.spend).toLocaleString('en-IN')} (${pct}%) · ROAS ${c.roas.toFixed(2)}x`;
+              }
+            }
+          }
+        }
+      });
+
     // Bar chart: spend + ROAS aggregated over the window (existing view)
     barChart('chart-cat-bar',
       cats.map(c => c.category),
@@ -1279,6 +1453,11 @@ function renderCategoriesPage(rows) {
         interaction:{ mode:'index', intersect:false },
       });
     }
+
+    // Drill-down: visible only when operator picks a Product or a single Category.
+    // Otherwise we'd be summing across all categories and the per-creative /
+    // per-campaign tables get unmanageable.
+    renderDrillDown(rows);
   }
   const sorted = sortRows(cats, 'tbl-categories');
   applySortHeaders('tbl-categories');
