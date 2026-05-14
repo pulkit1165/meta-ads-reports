@@ -448,13 +448,15 @@ tr:hover td { background:#fafbff; }
         <h3>📊 Spend & ROAS by Category <span class="meta">aggregated over selected window</span></h3>
         <div class="chart-wrap" style="height:280px"><canvas id="chart-cat-bar"></canvas></div>
       </div>
-      <div class="card">
+      <div class="card" id="card-cat-trend-spend">
         <h3>📈 Daily Spend by Category <span class="meta">one line per category, selected window</span></h3>
         <div class="chart-wrap" style="height:320px"><canvas id="chart-cat-trend-spend"></canvas></div>
+        <div id="cat-trend-spend-hint" class="empty" style="display:none">Pick <b>3D</b> or longer to see daily category trends — a single-day window has no line to draw.</div>
       </div>
-      <div class="card">
+      <div class="card" id="card-cat-trend-roas">
         <h3>🎯 Daily ROAS by Category <span class="meta">Meta-attributed (pixel)</span></h3>
         <div class="chart-wrap" style="height:320px"><canvas id="chart-cat-trend-roas"></canvas></div>
+        <div id="cat-trend-roas-hint" class="empty" style="display:none">Pick <b>3D</b> or longer to see daily category trends.</div>
       </div>
       <div class="card">
         <h3>Full Table</h3>
@@ -822,23 +824,38 @@ document.getElementById('btn-clear').addEventListener('click', () => {
 });
 
 // ── Sidebar routing ─────────────────────────────────────────────────────
+// Single switchPage() function — both clicks and hashchange call this so
+// DOM state is always consistent. Earlier version used `location.hash = page`
+// inside the click handler, which fired `hashchange`, which called .click()
+// on the same link, which re-entered the handler. In jsdom this caused
+// the .active class to bounce; in Chrome it MAY work but is fragile.
+// Switching to `history.replaceState` avoids the hashchange entirely.
+function switchPage(page) {
+  if (!page) page = 'overview';
+  const link = document.querySelector('.menu a[data-page="' + page + '"]');
+  const section = document.getElementById('page-' + page);
+  if (!link || !section) return;
+  document.querySelectorAll('.menu a').forEach(x => x.classList.remove('active'));
+  link.classList.add('active');
+  document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+  section.classList.add('active');
+  // Update URL hash without firing hashchange (no re-entry)
+  if (location.hash !== '#' + page) {
+    history.replaceState(null, '', '#' + page);
+  }
+  apply();
+}
+
 document.querySelectorAll('.menu a[data-page]').forEach(a => {
-  a.addEventListener('click', () => {
-    const page = a.dataset.page;
-    location.hash = page;
-    document.querySelectorAll('.menu a').forEach(x => x.classList.remove('active'));
-    a.classList.add('active');
-    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-    document.getElementById('page-' + page).classList.add('active');
-    // Re-render charts for the now-visible page (Chart.js needs a visible canvas)
-    apply();
+  a.addEventListener('click', (e) => {
+    e.preventDefault();
+    switchPage(a.dataset.page);
   });
 });
 
 function activatePageFromHash() {
   const hash = location.hash.replace('#', '') || 'overview';
-  const link = document.querySelector(`.menu a[data-page="${hash}"]`);
-  if (link) link.click();
+  switchPage(hash);
 }
 window.addEventListener('hashchange', activatePageFromHash);
 
@@ -1210,19 +1227,32 @@ function renderCategoriesPage(rows) {
         y1:{ beginAtZero:true, position:'right', grid:{ drawOnChartArea:false } },
       } });
 
-    // Daily trend — one line per category over the selected window
+    // Daily trend — one line per category over the selected window.
+    // Single-day windows have no lines to draw; show a hint and hide the
+    // empty canvas so the area doesn't look broken.
     const cts = categoryTimeSeries(rows);
-    const tsForLineChart = cts.dates.map(d => ({ date: d }));
-    lineChart('chart-cat-trend-spend', tsForLineChart, cts.spend, {
-      plugins:{ legend:{ position:'bottom' } },
-      scales:{ y:{ beginAtZero:true, ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : (v >= 1000 ? (v/1000).toFixed(0)+'K' : v)) } } },
-      interaction:{ mode:'index', intersect:false },
-    });
-    lineChart('chart-cat-trend-roas', tsForLineChart, cts.roas, {
-      plugins:{ legend:{ position:'bottom' } },
-      scales:{ y:{ beginAtZero:true, ticks:{ callback:v => v.toFixed(1) + 'x' } } },
-      interaction:{ mode:'index', intersect:false },
-    });
+    const singleDay = cts.dates.length <= 1;
+    const toggle = (canvasId, hintId, hide) => {
+      const c = document.getElementById(canvasId);
+      const h = document.getElementById(hintId);
+      if (c) c.style.display = hide ? 'none' : '';
+      if (h) h.style.display = hide ? 'block' : 'none';
+    };
+    toggle('chart-cat-trend-spend', 'cat-trend-spend-hint', singleDay);
+    toggle('chart-cat-trend-roas',  'cat-trend-roas-hint',  singleDay);
+    if (!singleDay) {
+      const tsForLineChart = cts.dates.map(d => ({ date: d }));
+      lineChart('chart-cat-trend-spend', tsForLineChart, cts.spend, {
+        plugins:{ legend:{ position:'bottom' } },
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : (v >= 1000 ? (v/1000).toFixed(0)+'K' : v)) } } },
+        interaction:{ mode:'index', intersect:false },
+      });
+      lineChart('chart-cat-trend-roas', tsForLineChart, cts.roas, {
+        plugins:{ legend:{ position:'bottom' } },
+        scales:{ y:{ beginAtZero:true, ticks:{ callback:v => v.toFixed(1) + 'x' } } },
+        interaction:{ mode:'index', intersect:false },
+      });
+    }
   }
   const sorted = sortRows(cats, 'tbl-categories');
   applySortHeaders('tbl-categories');
