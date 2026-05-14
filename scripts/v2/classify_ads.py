@@ -207,12 +207,63 @@ def derive_category_with_ntn(ad_name: str, campaign_name: str,
     return derive_category_v2(combined)
 
 
+# Tokens that are noise in campaign names — strip these before deriving a
+# product slug. Includes: account-prefix words, funnel/intent words,
+# creative-type words (handled separately), audience tokens, dates, status
+# markers. Tuned conservatively — only common SM/SML/NBP boilerplate.
+_SLUG_NOISE = {
+    'ntn', 'adv', 'web', 'app', 'sales', 'sale', 'conv', 'rtg', 'retarget',
+    'loose', 'visitor', 'impression', 'master', 'mix', 'camp', 'campaign',
+    'reel', 'video', 'static', 'image', 'post', 'carousel', 'creative',
+    'tof', 'mof', 'bof', 'clp', 'lp', 'offer', 'sales1', 'test', 'testing',
+    'copy', 'ds', 'paras', 'wanda', 'partnership', 'collab', 'creator',
+    'motion', 'brand', 'inde', 'india', 'insta', 'ig', 'fb', 'meta',
+    'desire', 'launches', 'latest', 'fresh', 'new', 'old', 'app',
+    # category words — handled by category column already
+    'skin', 'hair', 'crystal', 'crystals', 'perfumes', 'perfume',
+    'nutra', 'nutraceuticals', 'aibot', 'jewellery_set',
+    # Audience segments (we have audiences in the adset table now)
+    'seg1', 'seg2', 'seg3', 'seg4', 'seg5', 'seg6', 'seg7', 'seg8',
+    'seg9', 'seg10', 'seg11', 'seg12', 'seg13', 'seg14', 'seg15',
+    'lla', '180dp', '180imp', 'exc30', '60dp', '7d',
+    'r', 's',  # single-letter / very short
+}
+_DATE_TOKEN_RE = re.compile(r'^\d{4,8}$')   # eg "090526", "20250526"
+
+
+def extract_product_slug(campaign_name: str) -> str | None:
+    """Heuristic product key derived from the campaign name when neither
+    NTN-code extraction nor SKU keyword match worked. Strips funnel/audience/
+    creative-type/date noise; what remains is usually the product name in
+    the operator's short form (e.g. '24k_gold_serum', 'jewellery',
+    'ampmcombo', 'peacock_frame'). Returns None if nothing useful is left.
+    """
+    if not campaign_name: return None
+    t = campaign_name.lower()
+    # Normalise separators
+    t = re.sub(r'[\-/]', '_', t)
+    t = re.sub(r'[^a-z0-9_]+', '_', t)
+    tokens = [tok for tok in t.split('_') if tok]
+    keep = []
+    for tok in tokens:
+        if tok in _SLUG_NOISE: continue
+        if _DATE_TOKEN_RE.match(tok): continue
+        if len(tok) <= 1: continue
+        keep.append(tok)
+    if not keep: return None
+    # Cap to a manageable length so we don't produce hundreds of unique
+    # slugs that differ only by trailing tokens.
+    return '~' + '_'.join(keep[:4])   # '~' prefix marks auto-derived
+
+
 def classify_one(ad_name: str, campaign_name: str,
                  ntn_to_category: dict = None,
                  product_keyword_index: list = None) -> dict:
     """Returns dict of all derived fields for one ad.
     Path B (v4+): if no NTN code from regex, fall back to product name
-    matching against the SKU sheet keyword index."""
+    matching against the SKU sheet keyword index.
+    Path C: if both fail, derive a product slug from the campaign name so
+    the operator's filter dropdown still surfaces this ad's grouping."""
     ntn_to_category = ntn_to_category or {}
     product_keyword_index = product_keyword_index or []
     combined = f"{ad_name or ''} {campaign_name or ''}"
@@ -223,12 +274,19 @@ def classify_one(ad_name: str, campaign_name: str,
     if not ntn_code and product_keyword_index:
         ntn_code = match_product_from_name(combined, product_keyword_index)
         if ntn_code: matched_via_name = True
+    # 3. Path C: if still no match, derive a slug from the campaign name.
+    # This won't map to an NTN code but populates a "product" label so the
+    # ad shows up in the filter dropdown.
+    derived_slug = None
+    if not ntn_code:
+        derived_slug = extract_product_slug(campaign_name)
     return {
         'category':       derive_category_with_ntn(ad_name, campaign_name,
                                                    ntn_code, ntn_to_category),
         'creative_type':  extract_creative_type(ad_name, campaign_name),
         'sentiment':      extract_sentiment(combined),
         'ntn_code':       ntn_code,
+        'derived_product_slug': derived_slug,
         'matched_via_name': matched_via_name,   # diagnostic only
     }
 
@@ -281,6 +339,10 @@ def classify_all(conn, *, reclassify: bool = False, single_ad_id: str = None):
                            ntn_to_category=ntn_to_category,
                            product_keyword_index=product_keyword_index)
         product = ntn_to_product.get(cls['ntn_code']) if cls['ntn_code'] else None
+        # Path C fallback: use the campaign-name slug so this ad still gets
+        # a grouping label that surfaces in the dashboard's product filter.
+        if not product and cls.get('derived_product_slug'):
+            product = cls['derived_product_slug']
         if cls.get('matched_via_name'):
             counts['matched_via_name'] += 1
 
