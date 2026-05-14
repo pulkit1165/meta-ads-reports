@@ -376,6 +376,7 @@ tr:hover td { background:#fafbff; }
     <li><a data-page="heatmap"><span class="menu-icon">🔥</span>Heatmap</a></li>
 
     <li class="menu-section-lbl">Drill-Down</li>
+    <li><a data-page="prodbudget"><span class="menu-icon">💰</span>Product Budget</a></li>
     <li><a data-page="products"><span class="menu-icon">🛍️</span>Products</a></li>
     <li><a data-page="prodsuccess"><span class="menu-icon">🎯</span>Product Success</a></li>
     <li><a data-page="topads"><span class="menu-icon">🏆</span>Top Ads</a></li>
@@ -643,6 +644,50 @@ tr:hover td { background:#fafbff; }
 
       <div class="card" style="overflow-x:auto">
         <table id="tbl-heatmap"></table>
+      </div>
+    </section>
+
+    <!-- ── PAGE: Product Budget ──────────────────────────────────── -->
+    <section class="page" id="page-prodbudget">
+      <h2>💰 Product Budget <span class="subtle">where Meta daily budget is allocated</span></h2>
+      <p class="page-intro">Daily budget assigned at the Meta campaign level, rolled up by product. Only ACTIVE campaigns counted. Sorted descending — biggest budget first. Click any column header to re-sort.</p>
+
+      <div class="kpi-strip" id="kpi-strip-prodbudget"></div>
+
+      <div class="card">
+        <h3>📊 Per-Product Daily Budget <span class="meta">rolled up across all active campaigns</span></h3>
+        <table id="tbl-prodbudget">
+          <thead><tr>
+            <th data-col="product" data-type="str">Product</th>
+            <th data-col="camps" data-type="num">Active Camps</th>
+            <th data-col="daily_budget" data-type="num">Daily Budget</th>
+            <th data-col="spend_today" data-type="num">Spend Today</th>
+            <th data-col="utilization" data-type="num">Utilization %</th>
+            <th data-col="spend_7d" data-type="num">Spend (7D)</th>
+            <th data-col="roas_7d" data-type="num">7D ROAS</th>
+            <th data-col="roas_window" data-type="num">ROAS (selected window)</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+
+      <div class="card">
+        <h3>📋 Per-Campaign Daily Budget <span class="meta">all active campaigns, top 100 by budget</span></h3>
+        <table id="tbl-campbudget">
+          <thead><tr>
+            <th data-col="name" data-type="str">Campaign</th>
+            <th data-col="product" data-type="str">Product</th>
+            <th data-col="portal" data-type="str">Portal</th>
+            <th data-col="daily_budget" data-type="num">Daily Budget</th>
+            <th data-col="spend_today" data-type="num">Spend Today</th>
+            <th data-col="utilization" data-type="num">Util %</th>
+            <th data-col="spend_7d" data-type="num">Spend (7D)</th>
+            <th data-col="roas_today" data-type="num">Live ROAS</th>
+            <th data-col="roas_3d" data-type="num">3D ROAS</th>
+            <th data-col="roas_7d" data-type="num">7D ROAS</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
       </div>
     </section>
 
@@ -1751,6 +1796,154 @@ function renderHeatmapPage(rows) {
   document.getElementById('tbl-heatmap').innerHTML = html;
 }
 
+// Product Budget page: roll up daily_budget per product (via dominant
+// product label per campaign) and per campaign. Shows current day's
+// utilization + rolling ROAS so the operator can see where the budget
+// is allocated and whether each bucket is earning its keep.
+function renderProdBudgetPage(rows) {
+  const campMeta = PAYLOAD.campaigns || {};
+
+  // 1) Determine each campaign's dominant product label from RAW
+  //    (full payload — so utilization calcs aren't biased by the
+  //    operator's current date filter).
+  const campSpendByProd = new Map();   // campaign_id -> { prod -> spend }
+  for (const r of RAW) {
+    if (!r.campaign_id) continue;
+    const p = r.product || '(no product tag)';
+    if (!campSpendByProd.has(r.campaign_id)) campSpendByProd.set(r.campaign_id, {});
+    const m = campSpendByProd.get(r.campaign_id);
+    m[p] = (m[p] || 0) + (r.spend || 0);
+  }
+  const campToProduct = new Map();
+  for (const [cid, m] of campSpendByProd) {
+    let bestProd = '(no product tag)', bestSp = -1;
+    for (const [k, v] of Object.entries(m)) if (v > bestSp) { bestProd = k; bestSp = v; }
+    campToProduct.set(cid, bestProd);
+  }
+
+  // 2) Compute per-campaign rolling spend + revenue from RAW
+  const today = PAYLOAD.until;
+  const d3 = new Date(today + 'T00:00:00'); d3.setDate(d3.getDate() - 2);
+  const d7 = new Date(today + 'T00:00:00'); d7.setDate(d7.getDate() - 6);
+  const fmtDate = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const d3Str = fmtDate(d3), d7Str = fmtDate(d7);
+
+  const campStats = new Map();   // campaign_id -> { spend_today, rev_today, spend_3d, rev_3d, spend_7d, rev_7d, spend_window, rev_window }
+  const inWindow = (r) => r.date >= F.fromDate && r.date <= F.toDate;
+  for (const r of RAW) {
+    if (!r.campaign_id) continue;
+    if (!campStats.has(r.campaign_id)) campStats.set(r.campaign_id, {
+      spend_today:0, rev_today:0, spend_3d:0, rev_3d:0,
+      spend_7d:0, rev_7d:0, spend_window:0, rev_window:0,
+    });
+    const x = campStats.get(r.campaign_id);
+    const sp = r.spend || 0, rv = r.revenue || 0;
+    if (r.date === today)  { x.spend_today += sp; x.rev_today += rv; }
+    if (r.date >= d3Str)   { x.spend_3d    += sp; x.rev_3d    += rv; }
+    if (r.date >= d7Str)   { x.spend_7d    += sp; x.rev_7d    += rv; }
+    if (inWindow(r))       { x.spend_window+= sp; x.rev_window+= rv; }
+  }
+  const safeRoas = (rev, sp) => sp > 0 ? rev/sp : 0;
+
+  // 3) Build per-campaign rows (ACTIVE with daily_budget > 0 only)
+  const campRows = [];
+  for (const [cid, meta] of Object.entries(campMeta)) {
+    if (meta.status !== 'ACTIVE') continue;
+    const budget = meta.daily_budget || 0;
+    if (budget <= 0) continue;
+    const stats = campStats.get(cid) || {
+      spend_today:0, rev_today:0, spend_3d:0, rev_3d:0,
+      spend_7d:0, rev_7d:0, spend_window:0, rev_window:0,
+    };
+    campRows.push({
+      campaign_id: cid,
+      name: meta.name || '(unnamed)',
+      product: campToProduct.get(cid) || '(no product tag)',
+      portal: meta.portal || '',
+      daily_budget: budget,
+      spend_today: stats.spend_today,
+      utilization: budget > 0 ? (stats.spend_today / budget * 100) : 0,
+      spend_7d: stats.spend_7d,
+      roas_today: safeRoas(stats.rev_today, stats.spend_today),
+      roas_3d:    safeRoas(stats.rev_3d,    stats.spend_3d),
+      roas_7d:    safeRoas(stats.rev_7d,    stats.spend_7d),
+    });
+  }
+
+  // 4) KPI strip
+  const totalBudget = campRows.reduce((s, r) => s + r.daily_budget, 0);
+  const totalSpendToday = campRows.reduce((s, r) => s + r.spend_today, 0);
+  const overallUtil = totalBudget > 0 ? (totalSpendToday / totalBudget * 100) : 0;
+  const totalRev7d = campRows.reduce((s, r) => s + r.spend_7d * r.roas_7d, 0);
+  const totalSp7d  = campRows.reduce((s, r) => s + r.spend_7d, 0);
+  const blended7dRoas = totalSp7d > 0 ? totalRev7d / totalSp7d : 0;
+
+  const kpis = [
+    { l:'Active Campaigns',    v: fmt.num(campRows.length), s:'with daily budget configured' },
+    { l:'Total Daily Budget',  v: fmt.inr(totalBudget),     s:'sum across active campaigns' },
+    { l:'Spend Today',         v: fmt.inr(totalSpendToday), s:`${overallUtil.toFixed(0)}% of allocated` },
+    { l:'7D Spend',            v: fmt.inr(totalSp7d),       s:'last 7 days' },
+    { l:'7D ROAS (blended)',   v: fmt.roas(blended7dRoas),  s:'Meta-pixel-attributed', cls: blended7dRoas >= 2 ? 'good' : (blended7dRoas >= 1.5 ? 'warn' : 'bad') },
+  ];
+  document.getElementById('kpi-strip-prodbudget').innerHTML = kpis.map(c =>
+    `<div class="kpi-card${c.cls ? ' kpi-' + c.cls : ''}"><div class="kpi-lbl">${c.l}</div>` +
+    `<div class="kpi-val">${c.v}</div><div class="kpi-sub">${c.s}</div></div>`
+  ).join('');
+
+  // 5) Per-product rollup
+  const prodMap = new Map();
+  for (const r of campRows) {
+    if (!prodMap.has(r.product)) prodMap.set(r.product, {
+      product: r.product, camps:0, daily_budget:0, spend_today:0, spend_7d:0,
+      rev_7d_acc: 0, spend_window:0, rev_window:0,
+    });
+    const x = prodMap.get(r.product);
+    x.camps += 1;
+    x.daily_budget += r.daily_budget;
+    x.spend_today  += r.spend_today;
+    x.spend_7d     += r.spend_7d;
+    x.rev_7d_acc   += (r.spend_7d * r.roas_7d);     // recover revenue from roas*spend
+    const s = campStats.get(r.campaign_id) || { spend_window:0, rev_window:0 };
+    x.spend_window += s.spend_window;
+    x.rev_window   += s.rev_window;
+  }
+  const prodRows = [...prodMap.values()].map(x => ({
+    ...x,
+    utilization: x.daily_budget > 0 ? (x.spend_today / x.daily_budget * 100) : 0,
+    roas_7d:     x.spend_7d > 0     ? x.rev_7d_acc / x.spend_7d   : 0,
+    roas_window: x.spend_window > 0 ? x.rev_window / x.spend_window : 0,
+  }));
+
+  // 6) Render — both tables sortable. Default sort: daily budget DESC.
+  const sortedProds = sortRows(prodRows, 'tbl-prodbudget');
+  applySortHeaders('tbl-prodbudget');
+  document.querySelector('#tbl-prodbudget tbody').innerHTML = sortedProds.map(r =>
+    `<tr><td><strong>${r.product}</strong></td>` +
+    `<td>${fmt.num(r.camps)}</td>` +
+    `<td>${fmt.inr(r.daily_budget)}</td>` +
+    `<td>${fmt.inr(r.spend_today)}</td>` +
+    `<td>${r.utilization.toFixed(0)}%</td>` +
+    `<td>${fmt.inr(r.spend_7d)}</td>` +
+    `<td>${fmt.roas(r.roas_7d)}</td>` +
+    `<td>${fmt.roas(r.roas_window)}</td></tr>`
+  ).join('') || '<tr><td colspan="8" class="empty">No active campaigns with daily budget.</td></tr>';
+
+  const sortedCamps = sortRows(campRows, 'tbl-campbudget').slice(0, 100);
+  applySortHeaders('tbl-campbudget');
+  document.querySelector('#tbl-campbudget tbody').innerHTML = sortedCamps.map(r =>
+    `<tr><td><span class="cell-name" style="max-width:340px;display:inline-block;vertical-align:middle" title="${(r.name||'').replace(/"/g, '&quot;')}">${r.name}</span></td>` +
+    `<td>${r.product}</td>` +
+    `<td>${r.portal}</td>` +
+    `<td>${fmt.inr(r.daily_budget)}</td>` +
+    `<td>${fmt.inr(r.spend_today)}</td>` +
+    `<td>${r.utilization.toFixed(0)}%</td>` +
+    `<td>${fmt.inr(r.spend_7d)}</td>` +
+    `<td>${r.roas_today > 0 ? fmt.roas(r.roas_today) : '<span class="subtle">—</span>'}</td>` +
+    `<td>${r.roas_3d    > 0 ? fmt.roas(r.roas_3d)    : '<span class="subtle">—</span>'}</td>` +
+    `<td>${r.roas_7d    > 0 ? fmt.roas(r.roas_7d)    : '<span class="subtle">—</span>'}</td></tr>`
+  ).join('') || '<tr><td colspan="10" class="empty">No active campaigns with daily budget.</td></tr>';
+}
+
 function renderProductsPage(rows) {
   const prods = aggregate(rows, 'product').filter(x => x.key);
   const adIdsByProd = new Map();
@@ -1989,6 +2182,7 @@ function apply() {
   if (id === 'creatives')   renderCreativesPage(rows);
   if (id === 'sentiments')  renderSentimentsPage(rows);
   if (id === 'heatmap')     renderHeatmapPage(rows);
+  if (id === 'prodbudget')  renderProdBudgetPage(rows);
   if (id === 'products')    renderProductsPage(rows);
   if (id === 'prodsuccess') renderProdSuccessPage(rows);
   if (id === 'topads')      renderAdsPage(rows, 'top');
@@ -2000,6 +2194,8 @@ function apply() {
 // ── Setup sorts + initial render ────────────────────────────────────────
 setupSort('tbl-categories', 'spend');
 setupSort('tbl-creatives',  'spend');
+setupSort('tbl-prodbudget', 'daily_budget');
+setupSort('tbl-campbudget', 'daily_budget');
 setupSort('tbl-products',   'spend');
 setupSort('tbl-prodsuccess','spend');
 setupSort('tbl-topads',     'roas', 'desc');
