@@ -250,8 +250,15 @@ def derive_category_v2(campaign_or_ad_name):
     if n.startswith('ds_') or '_ds_bof_' in n or '_ds_tof_' in n:
         return 'DS'
 
-    # Aibot first — it's a distinct sub-brand, no overlap with other keywords
-    if 'aibot' in n or 'ai_bot' in n or 'aiblot' in n:
+    # Aibot — distinct sub-brand. Includes the 'astro_destiny' chatbot/report
+    # product family and mad2_astro_* interest-audience variants. This block
+    # must run before the Crystal Home Decor block (which previously claimed
+    # astro_destiny incorrectly, mis-routing ~250 SM ad-day rows).
+    if any(kw in n for kw in ['aibot', 'ai_bot', 'aiblot',
+                              'astro_destiny', 'destiny_report', 'destiny_reel',
+                              'astro_chatbot', 'astro_ab_', 'astro_int_',
+                              'astro_interest', 'astro_interested',
+                              '_astro_', 'mad2_astro']):
         return 'Aibot'
 
     # 24K Jewellery — must check before Skin (24k_gold_serum is skincare,
@@ -312,7 +319,8 @@ def derive_category_v2(campaign_or_ad_name):
                               'koi_fish', 'koifish', 'horses_of_harmony',
                               'pyrite_owl', 'baby_buddha', 'buddha',
                               'nazar_protection', 'wealth_success', 'fortune_flow',
-                              'astro_destiny', 'tree_of_life',
+                              # 'astro_destiny' removed — it's an Aibot product, see Aibot block above
+                              'tree_of_life',
                               'horses', 'horse']):
         return 'Crystal Home Decor'
 
