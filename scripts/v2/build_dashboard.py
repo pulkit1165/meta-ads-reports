@@ -843,15 +843,27 @@ function switchPage(page) {
   if (location.hash !== '#' + page) {
     history.replaceState(null, '', '#' + page);
   }
-  // Defer apply() to next animation frame. Chart.js measures canvas
-  // dimensions when instantiated; if we call it immediately after
-  // switching from display:none to display:block, the browser hasn't
-  // computed layout yet and the canvas reads as 0x0 → blank chart.
-  // requestAnimationFrame fires after the next layout/paint cycle.
-  if (typeof requestAnimationFrame === 'function') {
-    requestAnimationFrame(() => apply());
-  } else {
+  // Defer apply() so the browser computes layout for the just-shown
+  // .page section before Chart.js measures its canvases. requestAnimation
+  // Frame alone is sometimes not enough in Chrome — the canvas can still
+  // read 0x0 on first paint. Belt-and-braces:
+  //   1. rAF to wait for layout
+  //   2. apply() to render charts
+  //   3. window resize event so Chart.js (responsive:true) re-measures
+  //      and redraws if it got the wrong size on instantiation
+  const doApply = () => {
     apply();
+    // Force Chart.js to re-measure any responsive charts that may have
+    // been built on a 0x0 canvas. Tiny setTimeout so resize fires after
+    // chart instances are in place.
+    setTimeout(() => {
+      try { window.dispatchEvent(new Event('resize')); } catch (_) {}
+    }, 50);
+  };
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(doApply);
+  } else {
+    doApply();
   }
 }
 
@@ -1046,9 +1058,14 @@ function barChart(canvasId, labels, datasets, opts = {}) {
   destroyChart(canvasId);
   const el = document.getElementById(canvasId);
   if (!el) return;
+  // Chart.js v4 requires `type` at the TOP level of config — putting it
+  // inside `options` is silently ignored. Pull it out of opts; default to
+  // 'bar' since this helper is mostly used for bar charts.
+  const { type, ...restOpts } = opts;
   charts[canvasId] = new Chart(el, {
+    type: type || 'bar',
     data: { labels, datasets },
-    options: { responsive:true, maintainAspectRatio:false, ...opts },
+    options: { responsive:true, maintainAspectRatio:false, ...restOpts },
   });
 }
 
