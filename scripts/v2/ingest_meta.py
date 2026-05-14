@@ -223,6 +223,118 @@ def upsert_ads_daily(conn, ads: list):
 
 
 # ── Ad lifetime metadata (rolled from daily) ─────────────────────────────
+def fetch_adsets_targeting(conn, portal: str, account_id: str,
+                           ad_ids: list, *, max_age_days: int = 7) -> int:
+    """For every adset touched by today's ad ingest, fetch its targeting
+    (audience inclusions/exclusions) from Meta and cache it in meta_adsets.
+
+    Only refetches adsets whose cached row is missing or older than
+    `max_age_days` — audiences rarely change once an ad-set is live, so we
+    don't need to hammer the API every hour. Batches 50 IDs per call.
+    """
+    if not ad_ids:
+        return 0
+    # Discover which adsets these ads belong to
+    placeholders = ','.join(['?'] * len(ad_ids))
+    adset_rows = conn.execute(
+        f'SELECT DISTINCT adset_id FROM meta_ads_daily '
+        f'WHERE ad_id IN ({placeholders}) AND adset_id IS NOT NULL',
+        ad_ids
+    ).fetchall()
+    adset_ids = [r[0] for r in adset_rows if r[0]]
+    if not adset_ids:
+        return 0
+
+    # Filter to adsets with stale or missing cache
+    cutoff_iso = (datetime.now(IST) - timedelta(days=max_age_days)).isoformat()
+    cached = dict(conn.execute(
+        f'SELECT adset_id, last_fetched_at FROM meta_adsets '
+        f'WHERE adset_id IN ({",".join(["?"]*len(adset_ids))})',
+        adset_ids
+    ).fetchall())
+    to_fetch = [aid for aid in adset_ids
+                if aid not in cached
+                or not cached[aid]
+                or cached[aid] < cutoff_iso]
+    if not to_fetch:
+        print(f"     adset targeting: all {len(adset_ids)} adsets cached & fresh")
+        return 0
+
+    print(f"     adset targeting: fetching {len(to_fetch)} of {len(adset_ids)} (rest cached)")
+
+    def _names(items):
+        if not items: return ''
+        out = []
+        for it in items:
+            if isinstance(it, dict):
+                out.append(it.get('name') or it.get('id', ''))
+            else:
+                out.append(str(it))
+        return ', '.join(out)
+
+    def _summary(t: dict) -> str:
+        parts = []
+        geo = (t or {}).get('geo_locations') or {}
+        countries = geo.get('countries') or []
+        if countries: parts.append('geo: ' + ','.join(countries[:3]))
+        age_min = t.get('age_min'); age_max = t.get('age_max')
+        if age_min or age_max: parts.append(f'age {age_min or "?"}-{age_max or "?"}')
+        genders = t.get('genders') or []
+        if genders: parts.append('gender: ' + ','.join({1:'M',2:'F'}.get(g, str(g)) for g in genders))
+        return ' · '.join(parts)
+
+    rows = []
+    BATCH = 50
+    fetched_at = now_iso()
+    for i in range(0, len(to_fetch), BATCH):
+        batch = to_fetch[i:i+BATCH]
+        data = meta_get(GRAPH_API, {
+            'ids': ','.join(batch),
+            'fields': 'name,campaign_id,targeting',
+        })
+        if 'error' in data:
+            print(f"     batch {i//BATCH+1}: error {data['error'].get('message', '?')}")
+            continue
+        # Response is keyed by adset_id
+        for aid, info in data.items():
+            if not isinstance(info, dict): continue
+            targeting = info.get('targeting') or {}
+            incl = _names(targeting.get('custom_audiences'))
+            excl = _names(targeting.get('excluded_custom_audiences'))
+            rows.append((
+                aid, portal, account_id,
+                info.get('campaign_id'),
+                info.get('name'),
+                incl, excl,
+                _summary(targeting),
+                json.dumps(targeting)[:5000],   # cap to keep DB compact
+                fetched_at,
+            ))
+
+    if rows:
+        conn.executemany(
+            '''INSERT INTO meta_adsets
+               (adset_id, portal, account_id, campaign_id, name,
+                audiences_incl, audiences_excl, targeting_summary,
+                targeting_json, last_fetched_at)
+               VALUES(?,?,?,?,?,?,?,?,?,?)
+               ON CONFLICT(adset_id) DO UPDATE SET
+                 portal = excluded.portal,
+                 account_id = excluded.account_id,
+                 campaign_id = excluded.campaign_id,
+                 name = excluded.name,
+                 audiences_incl = excluded.audiences_incl,
+                 audiences_excl = excluded.audiences_excl,
+                 targeting_summary = excluded.targeting_summary,
+                 targeting_json = excluded.targeting_json,
+                 last_fetched_at = excluded.last_fetched_at''',
+            rows
+        )
+        conn.commit()
+    print(f"     adset targeting: wrote {len(rows)} adset rows")
+    return len(rows)
+
+
 def refresh_meta_ads_meta(conn, ad_ids: list):
     """For each ad in `ad_ids`, recompute first_seen/last_seen/days_active/
     total_spend/total_revenue/total_purchases from meta_ads_daily.
@@ -311,11 +423,22 @@ def ingest_for_date(conn, date_str: str, portals: list, *,
                     ]
                     n = upsert_ads_daily(conn, parsed)
                     total_ads += n
-                    affected_ad_ids.update(p['ad_id'] for p in parsed)
+                    ad_ids_in_account = [p['ad_id'] for p in parsed]
+                    affected_ad_ids.update(ad_ids_in_account)
                     print(f"     ads w/ spend on {date_str}: {n} upserted")
                 except MetaRateLimitError as e:
                     print(f"     ads: rate limit unrecoverable — {e}")
                     continue
+
+                # 3. Ad-set targeting (audience inclusions/exclusions). Cached
+                # 7 days so we only call Meta for new or stale adsets.
+                try:
+                    fetch_adsets_targeting(conn, portal, account_id,
+                                           ad_ids_in_account)
+                except MetaRateLimitError as e:
+                    print(f"     adset targeting: rate limit — {e}")
+                except Exception as e:
+                    print(f"     adset targeting: error {e}")
 
         # 3. Refresh lifetime ad metadata for all ads we touched
         if affected_ad_ids:

@@ -131,6 +131,42 @@ def fetch_dimensions(conn, since: str, until: str):
     }
 
 
+def fetch_adsets(conn, since: str, until: str):
+    """Adset metadata (name + audience inclusions/exclusions) for any adset
+    that had spend in the period. Used by the Categories page drill-down
+    to show camp structure including audience targeting.
+
+    Returns an empty dict if the meta_adsets table hasn't been created
+    yet (first deploy after the schema change, before db_init runs).
+    """
+    has_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='meta_adsets'"
+    ).fetchone()
+    if not has_table:
+        return {}
+    rows = conn.execute('''
+        SELECT a.adset_id, a.portal, a.campaign_id, a.name,
+               a.audiences_incl, a.audiences_excl, a.targeting_summary
+        FROM meta_adsets a
+        WHERE a.adset_id IN (
+            SELECT DISTINCT adset_id FROM meta_ads_daily
+            WHERE date BETWEEN ? AND ? AND adset_id IS NOT NULL
+        )
+    ''', (since, until)).fetchall()
+    out = {}
+    for r in rows:
+        aid, portal, camp, name, incl, excl, summary = r
+        out[aid] = {
+            'portal': portal,
+            'campaign_id': camp,
+            'name': name,
+            'audiences_incl': incl or '',
+            'audiences_excl': excl or '',
+            'targeting_summary': summary or '',
+        }
+    return out
+
+
 def fetch_shopify_daily(conn, since: str, until: str):
     """Per-(portal, date) Shopify aggregates: real orders + real revenue.
     These are the GROUND TRUTH numbers — Meta's purchases/revenue from
@@ -469,18 +505,19 @@ tr:hover td { background:#fafbff; }
           <tbody id="drill-ct-tbody"></tbody>
         </table>
 
-        <h4 style="margin:22px 0 6px;font-size:12px;color:#1a3d7c;letter-spacing:.6px;text-transform:uppercase">Campaigns</h4>
-        <table id="tbl-drill-camp">
+        <h4 style="margin:22px 0 6px;font-size:12px;color:#1a3d7c;letter-spacing:.6px;text-transform:uppercase">Ad-set structure · audience inclusions & exclusions</h4>
+        <table id="tbl-drill-adset">
           <thead><tr>
-            <th data-col="name" data-type="str">Campaign</th>
+            <th data-col="campaign" data-type="str">Campaign → Ad-set</th>
             <th data-col="portal" data-type="str">Portal</th>
+            <th data-col="incl" data-type="str">Audience incl.</th>
+            <th data-col="excl" data-type="str">Audience excl.</th>
             <th data-col="ads" data-type="num">Ads</th>
             <th data-col="spend" data-type="num">Spend</th>
             <th data-col="orders" data-type="num">Orders</th>
-            <th data-col="revenue" data-type="num">Revenue</th>
             <th data-col="roas" data-type="num">ROAS</th>
           </tr></thead>
-          <tbody id="drill-camp-tbody"></tbody>
+          <tbody id="drill-adset-tbody"></tbody>
         </table>
       </div>
 
@@ -1304,9 +1341,12 @@ function renderDrillDown(rows) {
   if (singleCt)  titleParts.push(`Creative = ${singleCt}`);
   document.getElementById('drill-title').textContent = titleParts.join(' · ');
 
-  // Aggregate the filtered rows by creative_type and by campaign_id.
+  // Aggregate the filtered rows by creative_type and by adset_id.
+  // Adset is the level where audience targeting lives in Meta, so the
+  // structure table is grouped per-adset (campaigns appear in the first
+  // column as "Campaign → Ad-set").
   const byCT = new Map();
-  const byCamp = new Map();
+  const byAdset = new Map();
   const allAds = new Set();
   let totalSpend = 0, totalRev = 0, totalPur = 0;
   for (const r of rows) {
@@ -1323,12 +1363,14 @@ function renderDrillDown(rows) {
     x.revenue   += r.revenue   || 0;
     x.purchases += r.purchases || 0;
 
-    if (r.campaign_id) {
-      if (!byCamp.has(r.campaign_id)) byCamp.set(r.campaign_id, {
-        name: r.campaign_name || '(unnamed)', portal: r.portal || '',
+    if (r.adset_id) {
+      if (!byAdset.has(r.adset_id)) byAdset.set(r.adset_id, {
+        campaign_name: r.campaign_name || '(unnamed)',
+        adset_name:    r.adset_name    || '(no adset name)',
+        portal:        r.portal        || '',
         ads: new Set(), spend: 0, revenue: 0, purchases: 0,
       });
-      const y = byCamp.get(r.campaign_id);
+      const y = byAdset.get(r.adset_id);
       y.ads.add(r.ad_id);
       y.spend     += r.spend     || 0;
       y.revenue   += r.revenue   || 0;
@@ -1360,22 +1402,49 @@ function renderDrillDown(rows) {
     `<td>${fmt.roas(r.roas)}</td></tr>`
   ).join('') || '<tr><td colspan="6" class="empty">No data for current filter.</td></tr>';
 
-  // Campaign breakdown (top 50 by spend so the page doesn't drag if a
-  // category has 200 campaigns)
-  const campRows = [...byCamp.values()].map(v => ({
-    name: v.name, portal: v.portal,
-    ads: v.ads.size, spend: v.spend, revenue: v.revenue, orders: v.purchases,
-    roas: v.spend > 0 ? v.revenue / v.spend : 0,
-  })).sort((a, b) => b.spend - a.spend).slice(0, 50);
-  document.getElementById('drill-camp-tbody').innerHTML = campRows.map(r =>
-    `<tr><td><span class="cell-name" title="${(r.name || '').replace(/"/g, '&quot;')}">${r.name}</span></td>` +
-    `<td>${r.portal}</td>` +
-    `<td>${fmt.num(r.ads)}</td>` +
-    `<td>${fmt.inr(r.spend)}</td>` +
-    `<td>${fmt.num(r.orders)}</td>` +
-    `<td>${fmt.inr(r.revenue)}</td>` +
-    `<td>${fmt.roas(r.roas)}</td></tr>`
-  ).join('') || '<tr><td colspan="7" class="empty">No data for current filter.</td></tr>';
+  // Adset breakdown (top 50 by spend) — joined with PAYLOAD.adsets so we
+  // get audience inclusions / exclusions per adset.
+  const adsetMeta = PAYLOAD.adsets || {};
+  const adsetRows = [...byAdset.entries()].map(([id, v]) => {
+    const meta = adsetMeta[id] || {};
+    return {
+      adset_id: id,
+      campaign: v.campaign_name,
+      adset: v.adset_name,
+      portal: v.portal,
+      incl: meta.audiences_incl || '',
+      excl: meta.audiences_excl || '',
+      ads: v.ads.size,
+      spend: v.spend,
+      revenue: v.revenue,
+      orders: v.purchases,
+      roas: v.spend > 0 ? v.revenue / v.spend : 0,
+    };
+  }).sort((a, b) => b.spend - a.spend).slice(0, 50);
+
+  const audienceCell = (s) => {
+    if (!s) return '<span class="subtle">—</span>';
+    const escaped = s.replace(/"/g, '&quot;');
+    return `<span class="cell-name" style="max-width:240px;display:inline-block;vertical-align:middle" title="${escaped}">${s}</span>`;
+  };
+
+  document.getElementById('drill-adset-tbody').innerHTML = adsetRows.map(r =>
+    `<tr>` +
+      `<td>` +
+        `<span class="cell-name" style="max-width:340px;display:inline-block;vertical-align:middle" title="${(r.campaign+' / '+r.adset).replace(/"/g, '&quot;')}">` +
+          `<strong>${r.campaign}</strong><br>` +
+          `<span class="subtle">↳ ${r.adset}</span>` +
+        `</span>` +
+      `</td>` +
+      `<td>${r.portal}</td>` +
+      `<td>${audienceCell(r.incl)}</td>` +
+      `<td>${audienceCell(r.excl)}</td>` +
+      `<td>${fmt.num(r.ads)}</td>` +
+      `<td>${fmt.inr(r.spend)}</td>` +
+      `<td>${fmt.num(r.orders)}</td>` +
+      `<td>${fmt.roas(r.roas)}</td>` +
+    `</tr>`
+  ).join('') || '<tr><td colspan="8" class="empty">No data for current filter.</td></tr>';
 }
 
 function renderCategoriesPage(rows) {
@@ -1845,12 +1914,14 @@ def main():
     dimensions = fetch_dimensions(conn, since, until)
     freshness = fetch_freshness(conn)
     shopify_daily = fetch_shopify_daily(conn, since, until)
+    adsets = fetch_adsets(conn, since, until)
 
     payload = {
         'since': since,
         'until': until,
         'rows': rows,
         'shopify_daily': shopify_daily,    # Real orders + revenue per portal/date
+        'adsets': adsets,                   # adset_id -> {name, audiences_incl, audiences_excl, ...}
         'dimensions': dimensions,
         'freshness': freshness,
         'updated_at': now_iso(),

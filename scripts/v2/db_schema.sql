@@ -102,6 +102,25 @@ CREATE TABLE IF NOT EXISTS meta_campaigns (
 CREATE INDEX IF NOT EXISTS idx_mc_portal       ON meta_campaigns(portal);
 CREATE INDEX IF NOT EXISTS idx_mc_status       ON meta_campaigns(effective_status);
 
+-- ── Meta: ad-set targeting (one row per adset_id) ────────────────────────
+-- Targeting (custom-audience inclusions/exclusions) lives at the ad-set
+-- level in Meta. Cached so we don't hammer the API every ingest — only
+-- re-fetch if last_fetched_at is missing or older than 7 days.
+CREATE TABLE IF NOT EXISTS meta_adsets (
+    adset_id          TEXT PRIMARY KEY,
+    portal            TEXT,
+    account_id        TEXT,
+    campaign_id       TEXT,
+    name              TEXT,
+    audiences_incl    TEXT,                  -- comma-separated audience names
+    audiences_excl    TEXT,                  -- comma-separated audience names
+    targeting_summary TEXT,                  -- short human summary (geo + spec etc)
+    targeting_json    TEXT,                  -- raw JSON (future use)
+    last_fetched_at   TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_madsets_campaign ON meta_adsets(campaign_id);
+CREATE INDEX IF NOT EXISTS idx_madsets_portal   ON meta_adsets(portal);
+
 -- ── Shopify: orders (one row per order) ──────────────────────────────────
 CREATE TABLE IF NOT EXISTS shopify_orders (
     order_id      TEXT PRIMARY KEY,
