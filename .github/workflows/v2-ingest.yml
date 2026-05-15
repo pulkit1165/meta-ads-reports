@@ -1,15 +1,13 @@
 name: v2 Ingest (Meta + Shopify → SQLite)
 
 on:
-  # 24/7 hourly schedule. Shopify orders + Meta ad delivery continue
-  # overnight, so the dashboard's "Real Orders / Real Revenue / ROAS"
-  # must keep refreshing through the night too. Multi-shot at
-  # :00,:15,:30,:45 UTC each hour gives ~99% coverage at GHA's ~70%
-  # cron reliability. The workflow has concurrency cancel-in-progress:
-  # false so duplicates queue and run serially. The 23:00 UTC firing
-  # also doubles as the daily yesterday-lock-in run.
+  # SCALED BACK to once daily. v2 pipeline now runs hourly on EC2 (see
+  # scripts/v2/ec2_hourly.sh + docs/EC2_DEPLOYMENT.md) — GHA exists as
+  # a fallback if EC2 is unreachable. Frequent GHA runs hit a billing
+  # block in mid-May 2026 ("recent account payments have failed or your
+  # spending limit needs to be increased").
   schedule:
-    - cron: "0,15,30,45 * * * *"
+    - cron: "0 23 * * *"
   workflow_dispatch:
     inputs:
       backfill_days:
