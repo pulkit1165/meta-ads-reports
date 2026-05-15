@@ -427,9 +427,10 @@ tr:hover td { background:#fafbff; }
         <span class="ctrl-lbl">Creative</span>
         <div class="multi-sel" id="filter-creatives"></div>
       </div>
-      <div class="ctrl-group">
-        <span class="ctrl-lbl">Product</span>
-        <select class="ctrl-select" id="filter-product"><option value="">All Products</option></select>
+      <div class="ctrl-group" style="flex:1;min-width:280px;max-width:520px">
+        <span class="ctrl-lbl">Product · families <span style="color:#9ca3af;font-weight:400">(type to search · click multiple)</span></span>
+        <input type="text" class="ctrl-input" id="product-search" placeholder="🔎 type product name..." style="margin-bottom:4px;width:100%">
+        <div class="multi-sel" id="filter-products" style="max-height:120px;overflow-y:auto"></div>
       </div>
       <div class="ctrl-group">
         <span class="ctrl-lbl">&nbsp;</span>
@@ -885,8 +886,33 @@ const F = {
   portals:  new Set(),
   categories: new Set(),
   creative_types: new Set(),
-  product:  '',
+  product_families: new Set(),    // multi-select; was F.product (string)
 };
+
+// Collapse SKU variants into a "product family" so 'AM/PM Booster Kit [165ml]',
+// 'AM PM Pigmentation Combo', 'AM PM 180ml' all bucket under 'am pm'. Used
+// by the product filter and by drill-down lookups. Leaves auto-derived
+// slugs (~prefixed) intact — they're already short identifiers.
+const _PRODUCT_FAMILY_STOP = new Set([
+  'the','a','an','of','for','with','and','&',
+  'nuskhe','by','paras','studd','muffyn','sm','sml','nbp','ntn',
+  'combo','combo:','kit','pack','set','bundle','bottle','jar',
+]);
+function productFamily(name) {
+  if (!name) return '(no product tag)';
+  if (name[0] === '~') {
+    const slug = name.slice(1).split('_').slice(0, 2).join(' ');
+    return '~' + slug;
+  }
+  let n = name.replace(/\s*[\(\[\{][^\)\]\}]*[\)\]\}]\s*/g, ' '); // strip (...)/[...]
+  n = n.toLowerCase().replace(/[\/\-,]/g, ' ').replace(/\s+/g, ' ').trim();
+  const tokens = n.split(' ').filter(t => t);
+  const significant = tokens.filter(t => !_PRODUCT_FAMILY_STOP.has(t) && t.length > 1);
+  const pick = significant.length >= 2 ? significant.slice(0, 2)
+             : significant.length === 1 ? significant
+             : tokens.slice(0, 2);
+  return pick.join(' ') || name;
+}
 
 const fmt = {
   inr:  n => n == null ? '—' : '₹' + Math.round(n).toLocaleString('en-IN'),
@@ -928,13 +954,44 @@ buildChips('filter-portals',    DIM.portals,        F.portals);
 buildChips('filter-categories', DIM.categories,     F.categories);
 buildChips('filter-creatives',  DIM.creative_types, F.creative_types);
 
-const prodSel = document.getElementById('filter-product');
+// Build product-family chips with type-to-search.
+// Each chip = one family; count = SKUs grouped into it.
+const _famCount = new Map();
 DIM.products.forEach(p => {
-  const o = document.createElement('option');
-  o.value = p; o.textContent = p;
-  prodSel.appendChild(o);
+  const fam = productFamily(p);
+  _famCount.set(fam, (_famCount.get(fam) || 0) + 1);
 });
-prodSel.addEventListener('change', e => { F.product = e.target.value; apply(); });
+const _famList = [...new Set(DIM.products.map(productFamily))].sort();
+const prodChipContainer = document.getElementById('filter-products');
+function renderProductChips(filterText) {
+  const q = (filterText || '').trim().toLowerCase();
+  prodChipContainer.innerHTML = '';
+  let shown = 0;
+  for (const fam of _famList) {
+    if (q && !fam.toLowerCase().includes(q)) continue;
+    const chip = document.createElement('span');
+    chip.className = 'chip';
+    if (F.product_families.has(fam)) chip.classList.add('active');
+    const cnt = _famCount.get(fam) || 1;
+    chip.textContent = cnt > 1 ? `${fam} (${cnt})` : fam;
+    chip.title = `${fam} — ${cnt} SKU variant${cnt > 1 ? 's' : ''}`;
+    chip.addEventListener('click', () => {
+      if (F.product_families.has(fam)) { F.product_families.delete(fam); chip.classList.remove('active'); }
+      else { F.product_families.add(fam); chip.classList.add('active'); }
+      apply();
+    });
+    prodChipContainer.appendChild(chip);
+    shown++;
+    if (shown >= 200) break;   // cap so search-of-empty doesn't render 1000 chips
+  }
+  if (shown === 0) {
+    prodChipContainer.innerHTML = '<span class="subtle" style="padding:6px">no products match</span>';
+  }
+}
+renderProductChips('');
+document.getElementById('product-search').addEventListener('input', e => {
+  renderProductChips(e.target.value);
+});
 
 document.getElementById('from-date').value = F.fromDate;
 document.getElementById('to-date').value   = F.toDate;
@@ -972,7 +1029,10 @@ function clearActivePreset() {
 }
 
 document.getElementById('btn-clear').addEventListener('click', () => {
-  F.portals.clear(); F.categories.clear(); F.creative_types.clear(); F.product = '';
+  F.portals.clear(); F.categories.clear(); F.creative_types.clear(); F.product_families.clear();
+  // Clear search box + re-render full chip list
+  const ps = document.getElementById('product-search'); if (ps) ps.value = '';
+  renderProductChips('');
   document.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
   prodSel.value = '';
   apply();
@@ -1042,7 +1102,7 @@ function applyFilters(rows) {
     if (F.portals.size && !F.portals.has(r.portal)) return false;
     if (F.categories.size && !F.categories.has(r.category)) return false;
     if (F.creative_types.size && !F.creative_types.has(r.creative_type)) return false;
-    if (F.product && r.product !== F.product) return false;
+    if (F.product_families.size && !F.product_families.has(productFamily(r.product))) return false;
     return true;
   });
 }
@@ -1060,7 +1120,7 @@ function getCompareSet() {
     if (F.portals.size && !F.portals.has(r.portal)) return false;
     if (F.categories.size && !F.categories.has(r.category)) return false;
     if (F.creative_types.size && !F.creative_types.has(r.creative_type)) return false;
-    if (F.product && r.product !== F.product) return false;
+    if (F.product_families.size && !F.product_families.has(productFamily(r.product))) return false;
     return true;
   });
 }
@@ -1280,7 +1340,7 @@ function renderOverview(rows, prevRows) {
   // CTR, Success Rate) stay alongside Shopify orders/revenue.
   const shop = aggregateShopify();
   const realROAS  = a.spend > 0 ? (shop.revenue / a.spend) : 0;
-  const filterNote = (F.categories.size || F.creative_types.size || F.product)
+  const filterNote = (F.categories.size || F.creative_types.size || F.product_families.size)
     ? "⚠ Shopify can't filter by category/creative — portal-level total"
     : 'all portals · all orders';
 
@@ -1404,17 +1464,17 @@ function renderDrillDown(rows) {
   // Otherwise the tables would just repeat the page-level totals.
   const card = document.getElementById('card-drilldown');
   if (!card) return;
-  const product   = F.product;
+  const prodFams  = [...F.product_families];
   const singleCat = F.categories.size === 1 ? [...F.categories][0] : null;
   const singleCt  = F.creative_types.size === 1 ? [...F.creative_types][0] : null;
-  if (!product && !singleCat && !singleCt) {
+  if (prodFams.length === 0 && !singleCat && !singleCt) {
     card.style.display = 'none';
     return;
   }
   card.style.display = '';
 
   const titleParts = [];
-  if (product)   titleParts.push(`Product = ${product}`);
+  if (prodFams.length) titleParts.push(`Product${prodFams.length>1?'s':''} = ${prodFams.join(', ')}`);
   if (singleCat) titleParts.push(`Category = ${singleCat}`);
   if (singleCt)  titleParts.push(`Creative = ${singleCt}`);
   document.getElementById('drill-title').textContent = titleParts.join(' · ');
@@ -1500,7 +1560,7 @@ function renderDrillDown(rows) {
     if (F.portals.size && !F.portals.has(r.portal)) return false;
     if (F.categories.size && !F.categories.has(r.category)) return false;
     if (F.creative_types.size && !F.creative_types.has(r.creative_type)) return false;
-    if (F.product && r.product !== F.product) return false;
+    if (F.product_families.size && !F.product_families.has(productFamily(r.product))) return false;
     return true;
   };
   for (const r of RAW) {
