@@ -32,10 +32,16 @@ from _utils import (  # noqa: E402
 )
 
 # Action types we extract from the `actions` array
-PURCHASE_ACTIONS = {'omni_purchase', 'purchase'}
-ATC_ACTIONS      = {'omni_add_to_cart', 'add_to_cart'}
+# CRITICAL: only ONE of (omni_X, X) per action. Meta returns BOTH for every
+# web event because omni_* is the omnichannel rollup that already INCLUDES
+# the pixel-attributed X. Summing both double-counts every purchase, ATC,
+# IC, and revenue value. We use omni_* exclusively because that's what
+# Meta Ads Manager's columns show (matches dashboard expectation: spend ×
+# Meta's reported ROAS == our computed revenue).
+PURCHASE_ACTIONS = {'omni_purchase'}
+ATC_ACTIONS      = {'omni_add_to_cart'}
 LPV_ACTIONS      = {'landing_page_view'}
-IC_ACTIONS       = {'omni_initiated_checkout', 'initiate_checkout'}
+IC_ACTIONS       = {'omni_initiated_checkout'}
 OUTBOUND_ACTIONS = {'outbound_click'}
 
 
