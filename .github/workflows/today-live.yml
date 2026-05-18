@@ -6,9 +6,7 @@ on:
     # The :20 UTC firing = IST :50 of the previous hour — operator's preferred
     # check time (data fresh ~10 min before each hour ticks). 4 attempts/hour
     # so even at GHA's ~30% cron reliability, we land at least one near :50.
-    # Scaled back to once daily — primary cadence is now EC2
-    # (scripts/v2/ec2_hourly.sh). GHA stays as a daily fallback.
-    - cron: "5 23 * * *"
+    - cron: "5,20,35,50 * * * *"
   workflow_dispatch:
 
 concurrency:

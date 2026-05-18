@@ -1,13 +1,14 @@
 name: v2 Ingest (Meta + Shopify → SQLite)
 
 on:
-  # SCALED BACK to once daily. v2 pipeline now runs hourly on EC2 (see
-  # scripts/v2/ec2_hourly.sh + docs/EC2_DEPLOYMENT.md) — GHA exists as
-  # a fallback if EC2 is unreachable. Frequent GHA runs hit a billing
-  # block in mid-May 2026 ("recent account payments have failed or your
-  # spending limit needs to be increased").
+  # 24/7 hourly schedule. Repo is public so Actions minutes are
+  # unlimited (no billing block). Multi-shot at :00,:15,:30,:45 UTC
+  # gives ~99% coverage at GHA's ~70% per-slot reliability. The
+  # workflow has concurrency cancel-in-progress:false so duplicates
+  # queue and run serially. EC2 cron (scripts/v2/ec2_hourly.sh) is
+  # the off-platform fallback if we ever go private again.
   schedule:
-    - cron: "0 23 * * *"
+    - cron: "0,15,30,45 * * * *"
   workflow_dispatch:
     inputs:
       backfill_days:
