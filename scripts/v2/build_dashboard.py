@@ -1161,32 +1161,33 @@ function aggregate(rows, groupKey) {
 }
 
 function successRateWindowDays() {
-  // Threshold = length of the current date filter, in days (inclusive).
-  // Filter "today" → 1 day · "last 7 days" → 7 days · etc.
+  // Length of the current date filter, in days (inclusive). Used for
+  // labelling only — the metric below is ROAS-based, not window-based.
   const fromD = new Date(F.fromDate + 'T00:00:00');
   const toD   = new Date(F.toDate   + 'T00:00:00');
   return Math.max(1, Math.round((toD - fromD) / 86400000) + 1);
 }
 
-function successRate(rows, threshold) {
-  if (threshold == null) threshold = successRateWindowDays();
-  const seen = new Set();
-  const buckets = { launched: 0, survived: 0 };
-  // Only count ads that have had at least `threshold` days of elapsed time
-  // since first_seen — otherwise they can't possibly have days_active >=
-  // threshold yet, and including them drags the rate to 0%.
-  const cutoff = new Date();
-  cutoff.setDate(cutoff.getDate() - threshold);
-  const cutoffStr = cutoff.toISOString().slice(0, 10);
+// % of ads in the current filter window with ROAS >= roasThreshold (default
+// 1.0x = broke even or better). Aggregates each ad's spend+revenue across
+// the window, then computes per-ad ROAS. Works for any window length —
+// today, 3d, 7d, 30d — because it doesn't depend on calendar-time
+// survival like the old definition did.
+function successRate(rows, roasThreshold = 1.0) {
+  const adAgg = new Map();
   for (const r of rows) {
-    if (seen.has(r.ad_id)) continue;
-    seen.add(r.ad_id);
-    if (!r.first_seen || r.first_seen < F.fromDate || r.first_seen > F.toDate) continue;
-    if (r.first_seen > cutoffStr) continue;  // not enough elapsed time
-    buckets.launched++;
-    if ((r.days_active || 0) >= threshold) buckets.survived++;
+    if (!adAgg.has(r.ad_id)) adAgg.set(r.ad_id, { spend: 0, revenue: 0 });
+    const a = adAgg.get(r.ad_id);
+    a.spend   += (r.spend   || 0);
+    a.revenue += (r.revenue || 0);
   }
-  return buckets.launched > 0 ? (100 * buckets.survived / buckets.launched) : null;
+  let total = 0, success = 0;
+  for (const a of adAgg.values()) {
+    if (a.spend <= 0) continue;
+    total++;
+    if ((a.revenue / a.spend) >= roasThreshold) success++;
+  }
+  return total > 0 ? (100 * success / total) : null;
 }
 
 // Per-date Shopify totals respecting current date+portal filter.
@@ -1368,7 +1369,7 @@ function renderOverview(rows, prevRows) {
     { l:'ROAS',           v: fmt.roas(realROAS),     s: 'Shopify rev ÷ Meta spend',  cls: realROAS >= 2 ? 'good' : (realROAS >= 1.5 ? 'warn' : 'bad') },
     { l:'CPM',            v: fmt.inr(a.cpm),         s: 'cost / 1k impr' },
     { l:'CTR',            v: fmt.pct(a.ctr),         s: 'click-through' },
-    { l:`Success Rate (${successRateWindowDays()}d)`, v: (() => { const s = successRate(rows); return s == null ? '—' : fmt.pct(s); })(), s: `launched in period · survived ${successRateWindowDays()}d` },
+    { l:`Success Rate (${successRateWindowDays()}d)`, v: (() => { const s = successRate(rows); return s == null ? '—' : fmt.pct(s); })(), s: '% of ads with ROAS ≥ 1.0x' },
   ];
   document.getElementById('kpi-strip-shopify').innerHTML = cards.map(c =>
     `<div class="kpi-card${c.cls ? ' kpi-' + c.cls : ''}"><div class="kpi-lbl">${c.l}</div>` +
