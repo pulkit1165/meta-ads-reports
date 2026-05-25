@@ -1,0 +1,87 @@
+name: Creative Success Rate (daily, 5 PM IST)
+
+# Fires once a day at 11:30 UTC = 17:00 IST. Pulls today's ad-level Meta data
+# across all 3 portals, computes ROAS-bucket pivot (>=1.5 / >=2 / >=2.5 / >=3),
+# and pushes a fresh "Success YYYY-MM-DD min0" tab to the operator's tracker
+# sheet (1L4wOeOSNB2K…). See scripts/creative_success_rate.py and
+# scripts/push_success_rate_to_sheet.py.
+#
+# Note: GHA cron is best-effort — a delayed firing can land 10–30 min late under
+# heavy queue load. That's fine for a 5 PM operator-facing report.
+
+on:
+  schedule:
+    - cron: "30 11 * * *"
+  workflow_dispatch:
+    inputs:
+      date:
+        description: "Override date (YYYY-MM-DD). Leave blank for today."
+        required: false
+        default: ""
+
+concurrency:
+  group: creative-success-daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TZ: Asia/Kolkata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load ad account IDs
+        run: grep -E '^[A-Z][A-Z0-9_]*=' config/accounts.env >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
+      - name: Resolve target date (IST)
+        id: target
+        run: |
+          if [ -n "${{ github.event.inputs.date }}" ]; then
+            DATE="${{ github.event.inputs.date }}"
+          else
+            DATE="$(date +%F)"
+          fi
+          echo "date=$DATE" >> "$GITHUB_OUTPUT"
+          echo "→ target date: $DATE"
+
+      - name: Build CSV (creative success rate, no spend filter)
+        run: python3 scripts/creative_success_rate.py ${{ steps.target.outputs.date }} --min-spend=0
+
+      - name: Push to Google Sheet (with highlighting)
+        run: python3 scripts/push_success_rate_to_sheet.py ${{ steps.target.outputs.date }} --min-spend=0
+
+      - name: Upload CSV artifact (so we can re-push without re-fetching)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: creative-success-${{ steps.target.outputs.date }}
+          path: out/creative_success_rate_${{ steps.target.outputs.date }}_minspend0.csv
+          if-no-files-found: warn
+          retention-days: 30
