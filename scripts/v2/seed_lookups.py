@@ -66,19 +66,17 @@ NTN_SEED = [
 ]
 
 
-# Pre-create empty sentiment slots so the table has rows even before user
-# tags any ads. We create st1..st20; extend below if more needed.
-SENTIMENT_CODES = [f'st{i}' for i in range(1, 21)]
-
-# (code, label) — user-defined labels for the codes Pulkit uses to tag
-# video creatives. UPSERT-with-COALESCE in seed() preserves anything
-# manually set via SQL afterwards.
+# Sentiment taxonomy — only these 4 codes are valid. Keep in sync with
+# ALLOWED_SENTIMENTS in classify_ads.py. Anything outside this set found
+# in an ad name (e.g. _st9_) is ignored by classify_ads → renders as
+# (unset) on the Sentiments page.
 SENTIMENT_SEED = [
     ('st1', 'Style/Design + Quality + Crystal Energy'),
     ('st2', 'Unisex Products + Quality + Crystal Energy'),
     ('st3', 'OG Gold Price Fear'),
     ('st4', 'Animal Storyline + Crystal Energy + Quality'),
 ]
+SENTIMENT_CODES = [code for code, _ in SENTIMENT_SEED]
 SENTIMENT_LABEL_MAP = dict(SENTIMENT_SEED)
 
 
@@ -99,9 +97,8 @@ def seed(conn):
         )
         n_ntn += 1
 
-    # Sentiment slots — seed user-defined labels from SENTIMENT_LABEL_MAP,
-    # leave the rest as placeholders. UPSERT preserves any label set
-    # manually in the DB (COALESCE on the existing value).
+    # Sentiment slots — UPSERT the 4 valid codes with labels. COALESCE
+    # preserves any label set manually in the DB after seeding.
     n_sent = 0
     for code in SENTIMENT_CODES:
         seed_label = SENTIMENT_LABEL_MAP.get(code)
@@ -115,9 +112,30 @@ def seed(conn):
         )
         n_sent += 1
 
+    # Drop any sentiment codes outside the current taxonomy. These were
+    # seeded as empty placeholders (st5..st20) in earlier versions and
+    # serve no purpose now that classify_ads rejects non-allowed codes.
+    placeholders = ','.join(['?'] * len(SENTIMENT_CODES))
+    n_dropped = conn.execute(
+        f'DELETE FROM sentiment_labels WHERE code NOT IN ({placeholders})',
+        SENTIMENT_CODES,
+    ).rowcount
+    # And blank out the sentiment field for any ad that's still pointing
+    # at a now-invalid code, so the dashboard doesn't show ghost buckets.
+    n_unset_ads = conn.execute(
+        f'''UPDATE meta_ads_meta
+            SET sentiment = NULL, updated_at = ?
+            WHERE sentiment IS NOT NULL
+              AND sentiment NOT IN ({placeholders})''',
+        [ts] + SENTIMENT_CODES,
+    ).rowcount
+
     print(f"✅ Seeded {n_ntn} NTN codes")
-    print(f"✅ Seeded {n_sent} sentiment slots — {len(SENTIMENT_SEED)} with labels, "
-          f"{n_sent - len(SENTIMENT_SEED)} placeholders ({SENTIMENT_CODES[0]}…{SENTIMENT_CODES[-1]})")
+    print(f"✅ Seeded {n_sent} sentiment codes ({', '.join(SENTIMENT_CODES)})")
+    if n_dropped:
+        print(f"🗑  Removed {n_dropped} out-of-taxonomy sentiment_labels rows")
+    if n_unset_ads:
+        print(f"🗑  Cleared sentiment on {n_unset_ads} ads using invalid codes")
     print()
     # Show count of NTN codes still unmapped (product=NULL)
     unmapped = conn.execute(

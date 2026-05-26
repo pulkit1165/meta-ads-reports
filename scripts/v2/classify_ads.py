@@ -118,6 +118,12 @@ NTN_PATTERN = re.compile(r'(?<![A-Za-z0-9])(NTN_?(\d{2,5}))(?![A-Za-z0-9])', re.
 # things like "static" (which has 'st' but not as a code).
 SENTIMENT_PATTERN = re.compile(r'(?<![A-Za-z0-9])(st(\d{1,3}))(?![A-Za-z0-9])', re.IGNORECASE)
 
+# Only these sentiment codes are considered valid. Anything outside this
+# set (e.g. _st9_, _st15_) is treated as unset — keeps the Sentiments page
+# limited to the operator's defined taxonomy. Update SENTIMENT_SEED in
+# seed_lookups.py if you add a new code here.
+ALLOWED_SENTIMENTS = {'st1', 'st2', 'st3', 'st4'}
+
 # Creative type — order matters, first match wins. Each rule is a list of
 # keywords. A keyword matches when it appears as a token (preceded/followed
 # by underscore OR start/end of string) — handles `paras_x`, `x_paras`,
@@ -151,12 +157,15 @@ def extract_ntn_code(text: str) -> str | None:
 
 
 def extract_sentiment(text: str) -> str | None:
-    """Returns 'st1' / 'st2' / etc. (lowercased) or None."""
+    """Returns 'st1' / 'st2' / 'st3' / 'st4' (lowercased) or None.
+    Codes outside ALLOWED_SENTIMENTS are ignored — the dashboard's
+    Sentiments page only tracks the operator's defined taxonomy."""
     if not text: return None
     m = SENTIMENT_PATTERN.search(text)
     if not m: return None
     digits = m.group(2)
-    return f'st{digits}'
+    code = f'st{digits}'
+    return code if code in ALLOWED_SENTIMENTS else None
 
 
 def _match_creative_type(text: str) -> str | None:
