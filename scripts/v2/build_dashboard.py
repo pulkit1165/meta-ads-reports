@@ -1173,7 +1173,7 @@ function successRateWindowDays() {
 // the window, then computes per-ad ROAS. Works for any window length —
 // today, 3d, 7d, 30d — because it doesn't depend on calendar-time
 // survival like the old definition did.
-function successRate(rows, roasThreshold = 1.0) {
+function successRateDetail(rows, roasThreshold = 1.0) {
   const adAgg = new Map();
   for (const r of rows) {
     if (!adAgg.has(r.ad_id)) adAgg.set(r.ad_id, { spend: 0, revenue: 0 });
@@ -1187,7 +1187,12 @@ function successRate(rows, roasThreshold = 1.0) {
     total++;
     if ((a.revenue / a.spend) >= roasThreshold) success++;
   }
-  return total > 0 ? (100 * success / total) : null;
+  return { total, success, rate: total > 0 ? (100 * success / total) : null };
+}
+
+// Back-compat wrapper — many callers just want the rate number.
+function successRate(rows, roasThreshold = 1.0) {
+  return successRateDetail(rows, roasThreshold).rate;
 }
 
 // Per-date Shopify totals respecting current date+portal filter.
@@ -1369,7 +1374,7 @@ function renderOverview(rows, prevRows) {
     { l:'ROAS',           v: fmt.roas(realROAS),     s: 'Shopify rev ÷ Meta spend',  cls: realROAS >= 2 ? 'good' : (realROAS >= 1.5 ? 'warn' : 'bad') },
     { l:'CPM',            v: fmt.inr(a.cpm),         s: 'cost / 1k impr' },
     { l:'CTR',            v: fmt.pct(a.ctr),         s: 'click-through' },
-    { l:`Success Rate (${successRateWindowDays()}d)`, v: (() => { const s = successRate(rows); return s == null ? '—' : fmt.pct(s); })(), s: '% of ads with ROAS ≥ 1.0x' },
+    { l:`Success Rate (${successRateWindowDays()}d)`, v: (() => { const d = successRateDetail(rows); return d.rate == null ? '—' : fmt.pct(d.rate); })(), s: (() => { const d = successRateDetail(rows); return d.total === 0 ? 'no spending ads in filter' : `${d.success} of ${d.total} ads · ROAS ≥ 1.0x`; })() },
   ];
   document.getElementById('kpi-strip-shopify').innerHTML = cards.map(c =>
     `<div class="kpi-card${c.cls ? ' kpi-' + c.cls : ''}"><div class="kpi-lbl">${c.l}</div>` +
@@ -1648,7 +1653,10 @@ function renderCategoriesPage(rows) {
   const cats = aggregate(rows, 'category').filter(c => c.key);
   for (const c of cats) {
     const subset = rows.filter(r => r.category === c.key);
-    c.success_rate = successRate(subset);
+    const d = successRateDetail(subset);
+    c.success_rate = d.rate;
+    c.success_n = d.success;
+    c.success_total = d.total;
     c.category = c.key;
   }
   const onPage = document.getElementById('page-categories').classList.contains('active');
@@ -1784,7 +1792,7 @@ function renderCategoriesPage(rows) {
     `<td>${fmt.inr(c.spend)}</td><td>${fmt.inr(c.revenue)}</td><td>${fmt.num(c.purchases)}</td>` +
     `<td>${fmt.roas(c.roas)}</td><td>${fmt.inr(c.cpm)}</td><td>${fmt.num1(c.ctr)}</td>` +
     `<td>${fmt.num1(c.atc_rate)}</td>` +
-    `<td>${c.success_rate == null ? '<span class="subtle">—</span>' : fmt.pct(c.success_rate)}</td></tr>`
+    `<td title="${c.success_n} of ${c.success_total} ads ROAS ≥ 1.0x">${c.success_rate == null ? '<span class="subtle">—</span>' : fmt.pct(c.success_rate) + `<span class="subtle"> (${c.success_n}/${c.success_total})</span>`}</td></tr>`
   ).join('') || '<tr><td colspan="11" class="empty">No data.</td></tr>';
 }
 
@@ -1792,7 +1800,10 @@ function renderCreativesPage(rows) {
   const cts = aggregate(rows, 'creative_type').filter(c => c.key);
   for (const c of cts) {
     const subset = rows.filter(r => r.creative_type === c.key);
-    c.success_rate = successRate(subset);
+    const d = successRateDetail(subset);
+    c.success_rate = d.rate;
+    c.success_n = d.success;
+    c.success_total = d.total;
     c.creative_type = c.key;
   }
   if (document.getElementById('page-creatives').classList.contains('active')) {
@@ -1813,7 +1824,7 @@ function renderCreativesPage(rows) {
     `<tr><td><strong>${c.creative_type}</strong></td>` +
     `<td>${fmt.num(c.active_ads)}</td><td>${fmt.inr(c.spend)}</td><td>${fmt.inr(c.revenue)}</td>` +
     `<td>${fmt.num(c.purchases)}</td><td>${fmt.roas(c.roas)}</td>` +
-    `<td>${c.success_rate == null ? '<span class="subtle">—</span>' : fmt.pct(c.success_rate)}</td></tr>`
+    `<td title="${c.success_n} of ${c.success_total} ads ROAS ≥ 1.0x">${c.success_rate == null ? '<span class="subtle">—</span>' : fmt.pct(c.success_rate) + `<span class="subtle"> (${c.success_n}/${c.success_total})</span>`}</td></tr>`
   ).join('') || '<tr><td colspan="7" class="empty">No data.</td></tr>';
 }
 
