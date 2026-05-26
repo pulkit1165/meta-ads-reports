@@ -565,6 +565,15 @@ tr:hover td { background:#fafbff; }
         <div class="chart-wrap" style="height:320px"><canvas id="chart-cat-trend-spend"></canvas></div>
         <div id="cat-trend-spend-hint" class="empty" style="display:none">Pick <b>3D</b> or longer to see daily category trends — a single-day window has no line to draw.</div>
       </div>
+      <div class="card" id="card-cat-stack-spend">
+        <h3>📊 Daily Spend Stack <span class="meta">each bar = one day, split by category</span></h3>
+        <div class="chart-wrap" style="height:320px"><canvas id="chart-cat-stack-spend"></canvas></div>
+        <div id="cat-stack-spend-hint" class="empty" style="display:none">Pick <b>3D</b> or longer to see the daily stack.</div>
+      </div>
+      <div class="card" id="card-cat-daily-table">
+        <h3>📋 Daily Spend × Category <span class="meta">row = date · col = category · value = spend</span> <button class="btn-csv" onclick="exportCSV('catdaily')">↓ CSV</button></h3>
+        <div style="overflow-x:auto"><table id="tbl-cat-daily"></table></div>
+      </div>
       <div class="card" id="card-cat-trend-roas">
         <h3>🎯 Daily ROAS by Category <span class="meta">Meta-attributed (pixel)</span></h3>
         <div class="chart-wrap" style="height:320px"><canvas id="chart-cat-trend-roas"></canvas></div>
@@ -1480,6 +1489,54 @@ function categoryTimeSeries(rows) {
   return { dates, spend: buildDataset('spend'), roas: buildDataset('roas') };
 }
 
+// Daily Spend × Category matrix table — rows = dates (newest first), cols
+// = categories. Last row = per-category total, last column = per-day total.
+// Hidden + cleared on single-day windows (no breakdown to show).
+function renderCatDailyTable(cts, singleDay) {
+  const card = document.getElementById('card-cat-daily-table');
+  const tbl  = document.getElementById('tbl-cat-daily');
+  if (!card || !tbl) return;
+  if (singleDay || cts.dates.length === 0) {
+    card.style.display = 'none';
+    return;
+  }
+  card.style.display = '';
+
+  const cats = cts.spend.map(s => s.label);
+  // Newest first — easier to scan recent days at the top
+  const order = cts.dates.map((_, i) => i).sort((a, b) => cts.dates[b].localeCompare(cts.dates[a]));
+
+  let html = '<thead><tr><th>Date</th>';
+  cats.forEach(c => { html += `<th data-type="num">${c}</th>`; });
+  html += '<th data-type="num"><strong>Day Total</strong></th></tr></thead><tbody>';
+
+  const colTotals = cats.map(() => 0);
+  let grandTotal = 0;
+  for (const i of order) {
+    const dayRow = cats.map((_, ci) => cts.spend[ci].data[i] || 0);
+    const dayTotal = dayRow.reduce((a, b) => a + b, 0);
+    grandTotal += dayTotal;
+    dayRow.forEach((v, ci) => colTotals[ci] += v);
+    html += `<tr><td><strong>${cts.dates[i]}</strong></td>`;
+    dayRow.forEach((v, ci) => {
+      // Color cells with > 5% of the day's spend so the eye lands on
+      // dominant categories per day without scanning every number.
+      const pct = dayTotal > 0 ? (v / dayTotal) : 0;
+      const style = pct >= 0.30 ? 'background:#dbeafe;font-weight:600'
+                   : pct >= 0.15 ? 'background:#eff6ff'
+                   : '';
+      html += `<td style="${style}">${v > 0 ? fmt.inr(v) : '<span class="subtle">—</span>'}</td>`;
+    });
+    html += `<td><strong>${fmt.inr(dayTotal)}</strong></td></tr>`;
+  }
+  // Footer: per-category totals
+  html += '<tr style="background:#f8f9fc;border-top:2px solid #e5e7eb"><td><strong>Total</strong></td>';
+  colTotals.forEach(v => { html += `<td><strong>${fmt.inr(v)}</strong></td>`; });
+  html += `<td><strong>${fmt.inr(grandTotal)}</strong></td></tr>`;
+  html += '</tbody>';
+  tbl.innerHTML = html;
+}
+
 function renderDrillDown(rows) {
   // Show only when the operator is drilling into something specific:
   // a product, OR exactly one category chip, OR exactly one creative chip.
@@ -1764,6 +1821,7 @@ function renderCategoriesPage(rows) {
       if (h) h.style.display = hide ? 'block' : 'none';
     };
     toggle('chart-cat-trend-spend', 'cat-trend-spend-hint', singleDay);
+    toggle('chart-cat-stack-spend', 'cat-stack-spend-hint', singleDay);
     toggle('chart-cat-trend-roas',  'cat-trend-roas-hint',  singleDay);
     if (!singleDay) {
       const tsForLineChart = cts.dates.map(d => ({ date: d }));
@@ -1772,12 +1830,37 @@ function renderCategoriesPage(rows) {
         scales:{ y:{ beginAtZero:true, ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : (v >= 1000 ? (v/1000).toFixed(0)+'K' : v)) } } },
         interaction:{ mode:'index', intersect:false },
       });
+      // Stacked-bar version of the same data — each bar is one day,
+      // colored segments show how much of that day went to each category.
+      // Better than the line chart for spotting day-over-day shifts in
+      // budget mix; complementary, not a replacement.
+      const stackDatasets = cts.spend.map(s => ({
+        label: s.label,
+        data: s.data,
+        backgroundColor: s.borderColor || catColor(s.label),
+        stack: 'spend',
+      }));
+      barChart('chart-cat-stack-spend', cts.dates, stackDatasets, {
+        type: 'bar',
+        plugins: { legend: { position: 'bottom' }, tooltip: { mode: 'index' } },
+        scales: {
+          x: { stacked: true },
+          y: { stacked: true, beginAtZero: true,
+               ticks: { callback: v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : (v >= 1000 ? (v/1000).toFixed(0)+'K' : v)) } },
+        },
+        interaction: { mode: 'index', intersect: false },
+      });
       lineChart('chart-cat-trend-roas', tsForLineChart, cts.roas, {
         plugins:{ legend:{ position:'bottom' } },
         scales:{ y:{ beginAtZero:true, ticks:{ callback:v => v.toFixed(1) + 'x' } } },
         interaction:{ mode:'index', intersect:false },
       });
     }
+
+    // Daily Spend × Category table. Rows = dates (newest first), cols =
+    // categories. Last row is a per-category total, last col is per-day
+    // total. Hidden on single-day windows (only one row to show).
+    renderCatDailyTable(cts, singleDay);
 
     // Drill-down: visible only when operator picks a Product or a single Category.
     // Otherwise we'd be summing across all categories and the per-creative /
@@ -2288,6 +2371,19 @@ function exportCSV(which) {
     const prods = aggregate(rows, 'product').filter(x => x.key);
     csv = 'Product,Active Ads,Spend,Revenue,Orders,ROAS\n' +
       prods.map(p => `"${p.key}",${p.active_ads},${Math.round(p.spend)},${Math.round(p.revenue)},${p.purchases},${p.roas.toFixed(2)}`).join('\n');
+  } else if (which === 'catdaily') {
+    // Daily Spend × Category — same matrix as the on-screen table
+    const cts = categoryTimeSeries(rows);
+    const cats = cts.spend.map(s => s.label);
+    csv = 'Date,' + cats.map(c => `"${c}"`).join(',') + ',Total\n';
+    cts.dates.forEach((d, i) => {
+      const row = cats.map((_, ci) => Math.round(cts.spend[ci].data[i] || 0));
+      const total = row.reduce((a, b) => a + b, 0);
+      csv += `${d},${row.join(',')},${total}\n`;
+    });
+    // Footer: per-category totals
+    const colTotals = cats.map((_, ci) => cts.spend[ci].data.reduce((a, b) => a + (b || 0), 0));
+    csv += `Total,${colTotals.map(v => Math.round(v)).join(',')},${Math.round(colTotals.reduce((a,b)=>a+b,0))}\n`;
   } else if (which === 'prodsuccess') {
     const ROASBKT = [1.5, 2.0, 2.5, 3.0, 4.0, 5.0];
     const MIN = 500;
