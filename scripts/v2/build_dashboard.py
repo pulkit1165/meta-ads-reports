@@ -1828,34 +1828,115 @@ function renderCreativesPage(rows) {
   ).join('') || '<tr><td colspan="7" class="empty">No data.</td></tr>';
 }
 
+// JS-side fallback for sentiment code → readable label. The DB also
+// COALESCEs against sentiment_labels, but this kicks in immediately
+// (before seed_lookups runs on EC2) and protects against blank rows.
+// Keep in sync with SENTIMENT_SEED in scripts/v2/seed_lookups.py.
+const SENTIMENT_LABELS = {
+  st1: 'Style/Design + Quality + Crystal Energy',
+  st2: 'Unisex Products + Quality + Crystal Energy',
+  st3: 'OG Gold Price Fear',
+  st4: 'Animal Storyline + Crystal Energy + Quality',
+};
+
+function prettySentiment(raw) {
+  if (!raw) return null;
+  // DB join may have already resolved to a label; if it still starts with
+  // "st" + digit, swap in our JS map.
+  if (/^st\d+$/i.test(raw)) return SENTIMENT_LABELS[raw.toLowerCase()] || raw;
+  return raw;
+}
+
 function renderSentimentsPage(rows) {
-  const map = new Map();
+  // ── First pass: per-ad rollup so the summary uses real ad counts (not
+  // ad-day rows). Tag each ad as classified or unclassified.
+  const adAgg = new Map();  // ad_id -> {sentiment, creative_type, spend, revenue}
   for (const r of rows) {
-    const key = (r.sentiment || '(unset)') + '||' + (r.creative_type || '?');
-    if (!map.has(key)) map.set(key, {
-      sentiment: r.sentiment || '(unset)',
+    if (!adAgg.has(r.ad_id)) adAgg.set(r.ad_id, {
+      sentiment: r.sentiment || null,
       creative_type: r.creative_type || '?',
-      ads: new Set(), spend:0, revenue:0,
+      spend: 0, revenue: 0,
     });
-    const a = map.get(key);
-    a.ads.add(r.ad_id);
+    const a = adAgg.get(r.ad_id);
     a.spend   += r.spend   || 0;
     a.revenue += r.revenue || 0;
   }
-  const arr = [...map.values()].map(a => ({
-    sentiment: a.sentiment,
-    creative_type: a.creative_type,
-    active_ads: a.ads.size,
-    spend: a.spend, revenue: a.revenue,
-    roas: a.spend > 0 ? a.revenue / a.spend : 0,
+
+  // ── Summary stats — total ads, classified count, % classified, spend split
+  let totalAds = 0, classifiedAds = 0;
+  let totalSpend = 0, classifiedSpend = 0;
+  for (const a of adAgg.values()) {
+    totalAds++;
+    totalSpend += a.spend;
+    if (a.sentiment) {
+      classifiedAds++;
+      classifiedSpend += a.spend;
+    }
+  }
+  const pctAds   = totalAds   ? (100 * classifiedAds   / totalAds  ) : 0;
+  const pctSpend = totalSpend ? (100 * classifiedSpend / totalSpend) : 0;
+
+  // ── Group rows by (sentiment, creative_type) for the detail table.
+  const groupMap = new Map();
+  for (const a of adAgg.values()) {
+    const sentLabel = prettySentiment(a.sentiment) || '(unset)';
+    const key = sentLabel + '||' + a.creative_type;
+    if (!groupMap.has(key)) groupMap.set(key, {
+      sentiment: sentLabel,
+      sentiment_raw: a.sentiment,  // for sorting / styling
+      creative_type: a.creative_type,
+      active_ads: 0, spend: 0, revenue: 0,
+    });
+    const g = groupMap.get(key);
+    g.active_ads++;
+    g.spend   += a.spend;
+    g.revenue += a.revenue;
+  }
+  const arr = [...groupMap.values()].map(g => ({
+    ...g,
+    roas: g.spend > 0 ? g.revenue / g.spend : 0,
   }));
+
   const sorted = sortRows(arr, 'tbl-sentiment');
   applySortHeaders('tbl-sentiment');
-  document.querySelector('#tbl-sentiment tbody').innerHTML = sorted.map(s =>
-    `<tr><td><strong>${s.sentiment}</strong></td><td>${s.creative_type}</td>` +
-    `<td>${fmt.num(s.active_ads)}</td><td>${fmt.inr(s.spend)}</td>` +
-    `<td>${fmt.inr(s.revenue)}</td><td>${fmt.roas(s.roas)}</td></tr>`
-  ).join('') || '<tr><td colspan="6" class="empty">No data.</td></tr>';
+
+  // ── Render summary card (replaces the prior plain h3) + detail table
+  const summaryHTML = `
+    <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-bottom:1rem;padding:1rem;background:#f8f9fc;border-radius:8px">
+      <div style="flex:1;min-width:140px">
+        <div style="font-size:.75rem;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">Classified ads</div>
+        <div style="font-size:1.5rem;font-weight:700;color:${pctAds >= 80 ? '#059669' : pctAds >= 30 ? '#d97706' : '#dc2626'}">${fmt.num(classifiedAds)} / ${fmt.num(totalAds)}</div>
+        <div style="font-size:.85rem;color:#6b7280">${pctAds.toFixed(1)}% of ads</div>
+      </div>
+      <div style="flex:1;min-width:140px">
+        <div style="font-size:.75rem;color:#6b7280;text-transform:uppercase;letter-spacing:.05em">Classified spend</div>
+        <div style="font-size:1.5rem;font-weight:700;color:${pctSpend >= 80 ? '#059669' : pctSpend >= 30 ? '#d97706' : '#dc2626'}">${fmt.inr(classifiedSpend)}</div>
+        <div style="font-size:.85rem;color:#6b7280">${pctSpend.toFixed(1)}% of ₹${fmt.inr(totalSpend).replace('₹','')}</div>
+      </div>
+      <div style="flex:2;min-width:240px;font-size:.85rem;color:#475569">
+        ${pctAds < 30 ? '<strong style="color:#dc2626">⚠ Most ads are (unset)</strong> — run <code>scripts/v2/classify_ads_llm.py</code> on EC2 to tag them via Claude API.' : pctAds < 80 ? 'Run the LLM classifier again to tag the remaining (unset) rows.' : '<strong style="color:#059669">✓ Most ads classified.</strong>'}
+      </div>
+    </div>`;
+
+  // Inject summary just above the table (idempotent — replace if present)
+  const tbl = document.getElementById('tbl-sentiment');
+  let summaryEl = document.getElementById('sentiment-summary');
+  if (!summaryEl) {
+    summaryEl = document.createElement('div');
+    summaryEl.id = 'sentiment-summary';
+    tbl.parentNode.insertBefore(summaryEl, tbl);
+  }
+  summaryEl.innerHTML = summaryHTML;
+
+  document.querySelector('#tbl-sentiment tbody').innerHTML = sorted.map(s => {
+    const isUnset = !s.sentiment_raw;
+    const cellStyle = isUnset ? 'color:#9ca3af;font-style:italic' : '';
+    return `<tr style="${isUnset ? 'background:#fafafa' : ''}">` +
+      `<td style="${cellStyle}"><strong>${s.sentiment}</strong></td>` +
+      `<td>${s.creative_type}</td>` +
+      `<td>${fmt.num(s.active_ads)}</td><td>${fmt.inr(s.spend)}</td>` +
+      `<td>${fmt.inr(s.revenue)}</td><td>${fmt.roas(s.roas)}</td></tr>`;
+  }).join('') || '<tr><td colspan="6" class="empty">No data.</td></tr>';
 }
 
 function renderHeatmapPage(rows) {

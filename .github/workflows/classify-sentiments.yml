@@ -1,0 +1,78 @@
+name: Classify Sentiments (LLM)
+
+# Manually-triggered workflow that runs the Claude-API-based sentiment
+# classifier against ads in meta_ads_meta where sentiment IS NULL AND
+# total_spend > 100. Idempotent — re-running only touches new ads.
+#
+# Triggers from GitHub UI: Actions → "Classify Sentiments (LLM)" →
+# Run workflow → pick limit + dry-run.
+
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Max ads to classify this run (default 500). Each run takes ~8-12 min per 500."
+        required: false
+        default: "500"
+      dry_run:
+        description: "Dry-run (compute classifications but don't UPDATE DB)"
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  group: classify-sentiments
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  classify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    env:
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      TZ: Asia/Kolkata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install deps
+        run: |
+          pip install -r requirements.txt
+          pip install anthropic
+
+      - name: Restore SQLite from state branch
+        uses: ./.github/actions/state-sync
+        with:
+          direction: restore
+
+      - name: Seed sentiment labels (idempotent — ensures st1..st4 rows exist)
+        run: python3 scripts/v2/seed_lookups.py
+
+      - name: Run LLM classifier
+        run: |
+          DRY_RUN_FLAG=""
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            DRY_RUN_FLAG="--dry-run"
+          fi
+          python3 scripts/v2/classify_ads_llm.py \
+            --limit ${{ inputs.limit || '500' }} \
+            $DRY_RUN_FLAG
+
+      - name: Save SQLite back to state branch
+        if: ${{ inputs.dry_run != 'true' && success() }}
+        uses: ./.github/actions/state-sync
+        with:
+          direction: save
