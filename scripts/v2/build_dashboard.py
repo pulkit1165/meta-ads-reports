@@ -464,7 +464,11 @@ tr:hover td { background:#fafbff; }
       <div class="kpi-strip" id="kpi-strip-shopify"></div>
 
       <div class="card">
-        <h3>📈 Spend & ROAS by Day <span class="meta">spend-weighted, current filter</span></h3>
+        <h3>📈 Spend & ROAS by Day <span class="meta">spend bars + ROAS line · spend-weighted, current filter</span></h3>
+        <div class="chart-wrap" style="height:340px"><canvas id="chart-spend-roas-combined"></canvas></div>
+      </div>
+      <div class="card">
+        <h3>📊 Spend vs Revenue · Daily ROAS <span class="meta">side-by-side detail</span></h3>
         <div class="charts-row">
           <div class="chart-wrap"><canvas id="chart-spend-rev"></canvas></div>
           <div class="chart-wrap"><canvas id="chart-roas"></canvas></div>
@@ -1393,6 +1397,44 @@ function renderOverview(rows, prevRows) {
   // Mini charts
   if (document.getElementById('page-overview').classList.contains('active')) {
     const ts = timeSeries(rows);
+    const labels = ts.map(t => t.date);
+
+    // Primary chart: spend bars + ROAS line on dual axis. One picture,
+    // answers "how much did I spend today and how did it perform?"
+    // without scanning two separate plots.
+    barChart('chart-spend-roas-combined', labels, [
+      { label:'Spend (₹)',
+        data: ts.map(t => Math.round(t.spend)),
+        backgroundColor:'#1a3d7c',
+        yAxisID:'y',
+        order: 2,
+      },
+      { label:'ROAS',
+        data: ts.map(t => +((t.roas || 0).toFixed(2))),
+        borderColor:'#d97706',
+        backgroundColor:'#d9770633',
+        type:'line',
+        yAxisID:'y1',
+        tension:.25,
+        pointRadius: 3,
+        order: 1,
+      },
+    ], {
+      plugins:{ legend:{ position:'bottom' }, tooltip:{ mode:'index', intersect:false } },
+      interaction:{ mode:'index', intersect:false },
+      scales:{
+        y:{ beginAtZero:true, position:'left',
+            title:{ display:true, text:'Spend (₹)' },
+            ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : (v >= 1000 ? (v/1000).toFixed(0)+'K' : v)) } },
+        y1:{ beginAtZero:true, position:'right',
+             title:{ display:true, text:'ROAS' },
+             grid:{ drawOnChartArea:false },
+             ticks:{ callback:v => v.toFixed(1) + 'x' } },
+      },
+    });
+
+    // Detail charts (kept for users who want spend+revenue together,
+    // or a standalone ROAS line without the spend bars).
     lineChart('chart-spend-rev', ts, [
       { label:'Spend',   data: ts.map(t => t.spend),   borderColor:'#1a3d7c', backgroundColor:'#1a3d7c33', fill:true, tension:.25 },
       { label:'Revenue', data: ts.map(t => t.revenue), borderColor:'#059669', backgroundColor:'#05966933', fill:true, tension:.25 },
