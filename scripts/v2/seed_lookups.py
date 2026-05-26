@@ -67,9 +67,19 @@ NTN_SEED = [
 
 
 # Pre-create empty sentiment slots so the table has rows even before user
-# tags any ads. User fills in label/description via SQL UPDATE or an admin
-# UI later. We create st1..st20; extend with seed_lookups.py if more needed.
+# tags any ads. We create st1..st20; extend below if more needed.
 SENTIMENT_CODES = [f'st{i}' for i in range(1, 21)]
+
+# (code, label) — user-defined labels for the codes Pulkit uses to tag
+# video creatives. UPSERT-with-COALESCE in seed() preserves anything
+# manually set via SQL afterwards.
+SENTIMENT_SEED = [
+    ('st1', 'Style/Design + Quality + Crystal Energy'),
+    ('st2', 'Unisex Products + Quality + Crystal Energy'),
+    ('st3', 'OG Gold Price Fear'),
+    ('st4', 'Animal Storyline + Crystal Energy + Quality'),
+]
+SENTIMENT_LABEL_MAP = dict(SENTIMENT_SEED)
 
 
 def seed(conn):
@@ -89,19 +99,25 @@ def seed(conn):
         )
         n_ntn += 1
 
-    # Sentiment placeholders — same idempotency rule
+    # Sentiment slots — seed user-defined labels from SENTIMENT_LABEL_MAP,
+    # leave the rest as placeholders. UPSERT preserves any label set
+    # manually in the DB (COALESCE on the existing value).
     n_sent = 0
     for code in SENTIMENT_CODES:
+        seed_label = SENTIMENT_LABEL_MAP.get(code)
         conn.execute(
-            '''INSERT INTO sentiment_labels(code, created_at, updated_at)
-               VALUES(?, ?, ?)
-               ON CONFLICT(code) DO UPDATE SET updated_at = excluded.updated_at''',
-            (code, ts, ts)
+            '''INSERT INTO sentiment_labels(code, label, created_at, updated_at)
+               VALUES(?, ?, ?, ?)
+               ON CONFLICT(code) DO UPDATE SET
+                 label = COALESCE(sentiment_labels.label, excluded.label),
+                 updated_at = excluded.updated_at''',
+            (code, seed_label, ts, ts)
         )
         n_sent += 1
 
     print(f"✅ Seeded {n_ntn} NTN codes")
-    print(f"✅ Seeded {n_sent} sentiment placeholders ({SENTIMENT_CODES[0]}…{SENTIMENT_CODES[-1]})")
+    print(f"✅ Seeded {n_sent} sentiment slots — {len(SENTIMENT_SEED)} with labels, "
+          f"{n_sent - len(SENTIMENT_SEED)} placeholders ({SENTIMENT_CODES[0]}…{SENTIMENT_CODES[-1]})")
     print()
     # Show count of NTN codes still unmapped (product=NULL)
     unmapped = conn.execute(
