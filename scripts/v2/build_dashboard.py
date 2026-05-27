@@ -1591,12 +1591,14 @@ function categoryTimeSeries(rows) {
 
 // Daily Spend × Category matrix table — rows = dates (newest first), cols
 // = categories. Last row = per-category total, last column = per-day total.
-// Hidden + cleared on single-day windows (no breakdown to show).
-function renderCatDailyTable(cts, singleDay) {
+// Shows for any window size — single-day = one row (Today filter), 3D = 3
+// rows, 7D = 7 rows, etc. Hidden only when there are literally zero dates
+// in the filtered set.
+function renderCatDailyTable(cts, _singleDay) {
   const card = document.getElementById('card-cat-daily-table');
   const tbl  = document.getElementById('tbl-cat-daily');
   if (!card || !tbl) return;
-  if (singleDay || cts.dates.length === 0) {
+  if (cts.dates.length === 0) {
     card.style.display = 'none';
     return;
   }
