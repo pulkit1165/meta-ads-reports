@@ -399,9 +399,9 @@ tr:hover td { background:#fafbff; }
       <div class="ctrl-group">
         <span class="ctrl-lbl">Date Range</span>
         <div class="preset-btns" id="preset-btns">
-          <button class="preset-btn active" data-days="1">Today</button>
+          <button class="preset-btn" data-days="1">Today</button>
           <button class="preset-btn" data-days="3">3D</button>
-          <button class="preset-btn" data-days="7">7D</button>
+          <button class="preset-btn active" data-days="7">7D</button>
           <button class="preset-btn" data-days="14">14D</button>
           <button class="preset-btn" data-days="30">30D</button>
           <button class="preset-btn" data-days="all">All</button>
@@ -487,7 +487,12 @@ tr:hover td { background:#fafbff; }
     <!-- ── PAGE: Trends ───────────────────────────────────────────── -->
     <section class="page" id="page-trends">
       <h2>📈 Trends Over Time</h2>
-      <p class="page-intro">Time-series view of spend, revenue, ROAS, and orders.</p>
+      <p class="page-intro">Time-series view of spend, revenue, ROAS, and orders. <strong>Pick 3D or longer at the top</strong> — a single-day filter has nothing to trend over.</p>
+
+      <div id="trend-single-day-hint" class="empty" style="display:none;padding:1rem;background:#fef3c7;border:1px solid #fbbf24;border-radius:6px;margin-bottom:1rem">
+        ⚠ Current filter is a single day, so the trends below show only one point.
+        Click <b>3D</b>, <b>7D</b>, or <b>30D</b> at the top of the page to see a real trend.
+      </div>
 
       <div class="card">
         <h3>Spend vs Revenue</h3>
@@ -2546,7 +2551,10 @@ setupSort('tbl-topads',     'roas', 'desc');
 setupSort('tbl-bottomads',  'roas', 'asc');
 setupSort('tbl-sentiment',  'spend');
 
-document.querySelector('.preset-btn[data-days="1"]').click();
+// Default to 7-day window so trends/charts are immediately useful.
+// Operator can drop to "Today" or extend to 30D from the chip row.
+(document.querySelector('.preset-btn[data-days="7"]') ||
+ document.querySelector('.preset-btn[data-days="1"]')).click();
 activatePageFromHash();
 </script>
 </body>
