@@ -122,12 +122,15 @@ def seed(conn):
     ).rowcount
     # And blank out the sentiment field for any ad that's still pointing
     # at a now-invalid code, so the dashboard doesn't show ghost buckets.
+    # NOTE: meta_ads_meta has no updated_at column (per db_schema.sql),
+    # so don't try to set one here — that's what was 500-ing v2-ingest
+    # and leaving the dashboard with an empty payload.
     n_unset_ads = conn.execute(
         f'''UPDATE meta_ads_meta
-            SET sentiment = NULL, updated_at = ?
+            SET sentiment = NULL
             WHERE sentiment IS NOT NULL
               AND sentiment NOT IN ({placeholders})''',
-        [ts] + SENTIMENT_CODES,
+        SENTIMENT_CODES,
     ).rowcount
 
     print(f"✅ Seeded {n_ntn} NTN codes")

@@ -251,7 +251,6 @@ def main():
     print(f"   fetched creative for {len(ads)}/{len(rows)}")
 
     counts = {'st1': 0, 'st2': 0, 'st3': 0, 'st4': 0, 'null': 0, 'missing': 0}
-    ts = now_iso()
     total_batches = (len(ads) + BATCH_SIZE - 1) // BATCH_SIZE
 
     for bi in range(0, len(ads), BATCH_SIZE):
@@ -284,10 +283,10 @@ def main():
                 continue
             counts[sent] += 1
             if not args.dry_run:
+                # meta_ads_meta has no updated_at column (per db_schema.sql)
                 conn.execute(
-                    'UPDATE meta_ads_meta SET sentiment = ?, updated_at = ? '
-                    'WHERE ad_id = ?',
-                    (sent, ts, aid),
+                    'UPDATE meta_ads_meta SET sentiment = ? WHERE ad_id = ?',
+                    (sent, aid),
                 )
 
     print()
