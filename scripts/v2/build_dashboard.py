@@ -2014,12 +2014,25 @@ function renderCreativesPage(rows) {
   ).join('') || '<tr><td colspan="7" class="empty">No data.</td></tr>';
 }
 
+// Sentiment code → short label for display. Operator wants both the
+// code AND the name together: "st1 — Style/Design + Quality + Crystal
+// Energy". Keep in sync with SENTIMENT_SEED in seed_lookups.py.
+const SENTIMENT_LABELS = {
+  st1: 'Style/Design + Quality + Crystal Energy',
+  st2: 'Unisex Products + Quality + Crystal Energy',
+  st3: 'OG Gold Price Fear',
+  st4: 'Animal Storyline + Crystal Energy + Quality',
+};
+function sentimentDisplay(code) {
+  if (!code) return '(unset)';
+  const label = SENTIMENT_LABELS[code.toLowerCase()];
+  return label ? `${code} — ${label}` : code;
+}
+
 function renderSentimentsPage(rows) {
   // ── First pass: per-ad rollup so the summary uses real ad counts (not
   // ad-day rows). Tag each ad as classified or unclassified.
-  // Use sentiment_code (raw st1/st2/...) for display — operator prefers the
-  // short codes over the verbose labels, since the codes are unambiguous
-  // and fit the table width better.
+  // Display shows the code + label together (e.g. "st1 — Style/Design...").
   const adAgg = new Map();  // ad_id -> {sentiment_code, creative_type, spend, revenue}
   for (const r of rows) {
     if (!adAgg.has(r.ad_id)) adAgg.set(r.ad_id, {
@@ -2049,7 +2062,7 @@ function renderSentimentsPage(rows) {
   // ── Group rows by (sentiment_code, creative_type) for the detail table.
   const groupMap = new Map();
   for (const a of adAgg.values()) {
-    const sentDisplay = a.sentiment_code || '(unset)';
+    const sentDisplay = sentimentDisplay(a.sentiment_code);
     const key = sentDisplay + '||' + a.creative_type;
     if (!groupMap.has(key)) groupMap.set(key, {
       sentiment: sentDisplay,
