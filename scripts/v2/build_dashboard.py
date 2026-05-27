@@ -1485,14 +1485,38 @@ function renderOverview(rows, prevRows) {
 function renderTrends(rows) {
   if (!document.getElementById('page-trends').classList.contains('active')) return;
   const ts = timeSeries(rows);
-  lineChart('chart-trend-spend-rev', ts, [
-    { label:'Spend',   data: ts.map(t => t.spend),   borderColor:'#1a3d7c', backgroundColor:'#1a3d7c33', fill:true, tension:.25 },
-    { label:'Revenue', data: ts.map(t => t.revenue), borderColor:'#059669', backgroundColor:'#05966933', fill:true, tension:.25 },
-  ], { scales:{ y:{ ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : v) } } } });
+  const labels = ts.map(t => t.date.slice(5));
+  // Spend bars + Revenue line on same ₹ axis — matches the Overview view.
+  // When the green line sits above a day's blue bar, that day was
+  // profitable; below means it lost money.
+  barChart('chart-trend-spend-rev', labels, [
+    { label:'Spend (₹)',
+      data: ts.map(t => t.spend),
+      backgroundColor:'#1a3d7c',
+      order: 2,
+    },
+    { label:'Revenue (Shopify ₹)',
+      data: ts.map(t => t.revenue),
+      borderColor:'#059669',
+      backgroundColor:'#059669',
+      type:'line',
+      tension:.25,
+      pointRadius: 3,
+      fill: false,
+      order: 1,
+    },
+  ], {
+    plugins:{ legend:{ position:'bottom' }, tooltip:{ mode:'index', intersect:false } },
+    interaction:{ mode:'index', intersect:false },
+    scales:{
+      y:{ beginAtZero:true,
+          ticks:{ callback:v => '₹' + (v >= 100000 ? (v/100000).toFixed(1)+'L' : (v >= 1000 ? (v/1000).toFixed(0)+'K' : v)) } },
+    },
+  });
   lineChart('chart-trend-roas', ts, [
     { label:'ROAS', data: ts.map(t => t.roas), borderColor:'#d97706', backgroundColor:'#d9770633', fill:true, tension:.25 },
   ]);
-  barChart('chart-trend-orders', ts.map(t => t.date.slice(5)), [
+  barChart('chart-trend-orders', labels, [
     { label:'Orders', data: ts.map(t => t.orders), backgroundColor:'#1a3d7c' },
   ], { type: 'bar' });
 
