@@ -1912,20 +1912,21 @@ function renderCategoriesPage(rows) {
       } });
 
     // Daily trend — one line per category over the selected window.
-    // Single-day windows have no lines to draw; show a hint and hide the
-    // empty canvas so the area doesn't look broken.
+    // Show on any filter (including Today, which renders as one point/
+    // bar per category). Hints stay hidden — operator wants data visible
+    // for every window size.
     const cts = categoryTimeSeries(rows);
-    const singleDay = cts.dates.length <= 1;
+    const noData = cts.dates.length === 0;
     const toggle = (canvasId, hintId, hide) => {
       const c = document.getElementById(canvasId);
       const h = document.getElementById(hintId);
       if (c) c.style.display = hide ? 'none' : '';
       if (h) h.style.display = hide ? 'block' : 'none';
     };
-    toggle('chart-cat-trend-spend', 'cat-trend-spend-hint', singleDay);
-    toggle('chart-cat-stack-spend', 'cat-stack-spend-hint', singleDay);
-    toggle('chart-cat-trend-roas',  'cat-trend-roas-hint',  singleDay);
-    if (!singleDay) {
+    toggle('chart-cat-trend-spend', 'cat-trend-spend-hint', noData);
+    toggle('chart-cat-stack-spend', 'cat-stack-spend-hint', noData);
+    toggle('chart-cat-trend-roas',  'cat-trend-roas-hint',  noData);
+    if (!noData) {
       const tsForLineChart = cts.dates.map(d => ({ date: d }));
       lineChart('chart-cat-trend-spend', tsForLineChart, cts.spend, {
         plugins:{ legend:{ position:'bottom' } },
