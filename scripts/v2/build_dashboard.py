@@ -1953,32 +1953,16 @@ function renderCreativesPage(rows) {
   ).join('') || '<tr><td colspan="7" class="empty">No data.</td></tr>';
 }
 
-// JS-side fallback for sentiment code → readable label. The DB also
-// COALESCEs against sentiment_labels, but this kicks in immediately
-// (before seed_lookups runs on EC2) and protects against blank rows.
-// Keep in sync with SENTIMENT_SEED in scripts/v2/seed_lookups.py.
-const SENTIMENT_LABELS = {
-  st1: 'Style/Design + Quality + Crystal Energy',
-  st2: 'Unisex Products + Quality + Crystal Energy',
-  st3: 'OG Gold Price Fear',
-  st4: 'Animal Storyline + Crystal Energy + Quality',
-};
-
-function prettySentiment(raw) {
-  if (!raw) return null;
-  // DB join may have already resolved to a label; if it still starts with
-  // "st" + digit, swap in our JS map.
-  if (/^st\d+$/i.test(raw)) return SENTIMENT_LABELS[raw.toLowerCase()] || raw;
-  return raw;
-}
-
 function renderSentimentsPage(rows) {
   // ── First pass: per-ad rollup so the summary uses real ad counts (not
   // ad-day rows). Tag each ad as classified or unclassified.
-  const adAgg = new Map();  // ad_id -> {sentiment, creative_type, spend, revenue}
+  // Use sentiment_code (raw st1/st2/...) for display — operator prefers the
+  // short codes over the verbose labels, since the codes are unambiguous
+  // and fit the table width better.
+  const adAgg = new Map();  // ad_id -> {sentiment_code, creative_type, spend, revenue}
   for (const r of rows) {
     if (!adAgg.has(r.ad_id)) adAgg.set(r.ad_id, {
-      sentiment: r.sentiment || null,
+      sentiment_code: r.sentiment_code || null,
       creative_type: r.creative_type || '?',
       spend: 0, revenue: 0,
     });
@@ -1993,7 +1977,7 @@ function renderSentimentsPage(rows) {
   for (const a of adAgg.values()) {
     totalAds++;
     totalSpend += a.spend;
-    if (a.sentiment) {
+    if (a.sentiment_code) {
       classifiedAds++;
       classifiedSpend += a.spend;
     }
@@ -2001,14 +1985,14 @@ function renderSentimentsPage(rows) {
   const pctAds   = totalAds   ? (100 * classifiedAds   / totalAds  ) : 0;
   const pctSpend = totalSpend ? (100 * classifiedSpend / totalSpend) : 0;
 
-  // ── Group rows by (sentiment, creative_type) for the detail table.
+  // ── Group rows by (sentiment_code, creative_type) for the detail table.
   const groupMap = new Map();
   for (const a of adAgg.values()) {
-    const sentLabel = prettySentiment(a.sentiment) || '(unset)';
-    const key = sentLabel + '||' + a.creative_type;
+    const sentDisplay = a.sentiment_code || '(unset)';
+    const key = sentDisplay + '||' + a.creative_type;
     if (!groupMap.has(key)) groupMap.set(key, {
-      sentiment: sentLabel,
-      sentiment_raw: a.sentiment,  // for sorting / styling
+      sentiment: sentDisplay,
+      sentiment_raw: a.sentiment_code,  // for sorting / styling
       creative_type: a.creative_type,
       active_ads: 0, spend: 0, revenue: 0,
     });
