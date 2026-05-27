@@ -854,6 +854,12 @@ function renderLastUpdated() {
 renderLastUpdated();
 setInterval(renderLastUpdated, 30000);
 
+// Auto-reload the page every 15 min so the operator sees fresh data
+// without having to remember to refresh. v2-ingest + today-live run on
+// their own hourly schedules, so each reload picks up whatever Cloudflare
+// has freshest — including today's partial-day data as it accumulates.
+setInterval(() => location.reload(), 15 * 60 * 1000);
+
 // "Refresh now" button — fires the Cloudflare Worker pings that dispatch
 // v2-ingest immediately, then today-live ~8 min later (after ingest finishes).
 // User can also navigate away — both Worker pings are fire-and-forget, and
