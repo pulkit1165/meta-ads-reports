@@ -1962,8 +1962,8 @@ function renderCategoriesPage(rows) {
 
     // Daily Spend × Category table. Rows = dates (newest first), cols =
     // categories. Last row is a per-category total, last col is per-day
-    // total. Hidden on single-day windows (only one row to show).
-    renderCatDailyTable(cts, singleDay);
+    // total. Shows on any window now (single-day = one row).
+    renderCatDailyTable(cts, false);
 
     // Drill-down: visible only when operator picks a Product or a single Category.
     // Otherwise we'd be summing across all categories and the per-creative /
