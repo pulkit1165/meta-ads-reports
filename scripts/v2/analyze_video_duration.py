@@ -77,22 +77,39 @@ def main():
                 ad_to_video[aid] = vid
     print(f'  Found video_id for {len(ad_to_video)} / {len(ad_ids)} ads')
 
-    # Batch-fetch video lengths
+    # Batch-fetch video lengths.
+    # `length` field on advideo objects sometimes requires also requesting
+    # `source` to unlock it, and Meta's response may use `length` (float
+    # seconds) or be missing entirely on page videos. We probe a couple
+    # fields and dump one full response for debugging.
     unique_videos = list(set(ad_to_video.values()))
     video_to_len = {}
     print(f'Fetching length for {len(unique_videos)} unique videos...')
+    sample_dumped = False
     for i in range(0, len(unique_videos), 50):
         batch = unique_videos[i:i+50]
         data = meta_get('', {
             'ids': ','.join(batch),
-            'fields': 'length',
+            'fields': 'length,source,permalink_url,picture,status',
         })
         if 'error' in data:
             print(f'  err: {data["error"].get("message")}'); continue
         for vid, info in data.items():
-            if isinstance(info, dict) and info.get('length'):
-                video_to_len[vid] = float(info['length'])
+            if not sample_dumped and isinstance(info, dict):
+                import json as _json
+                print(f'  SAMPLE Meta response for video {vid}:')
+                print('  ' + _json.dumps(info, indent=2)[:500].replace('\n', '\n  '))
+                sample_dumped = True
+            if isinstance(info, dict):
+                # Try length first (float seconds), then any field that smells right
+                v = info.get('length') or info.get('duration')
+                if v:
+                    try: video_to_len[vid] = float(v)
+                    except (TypeError, ValueError): pass
     print(f'  Got length for {len(video_to_len)} videos')
+
+    # Fallback for missing durations: derive from video_thruplay
+    # vs video_p100 ratios — not reliable enough to use, so leave for now.
 
     # Bucket
     def bucket(secs):
