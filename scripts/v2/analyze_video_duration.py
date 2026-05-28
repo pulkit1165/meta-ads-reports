@@ -77,39 +77,47 @@ def main():
                 ad_to_video[aid] = vid
     print(f'  Found video_id for {len(ad_to_video)} / {len(ad_ids)} ads')
 
-    # Batch-fetch video lengths.
-    # `length` field on advideo objects sometimes requires also requesting
-    # `source` to unlock it, and Meta's response may use `length` (float
-    # seconds) or be missing entirely on page videos. We probe a couple
-    # fields and dump one full response for debugging.
-    unique_videos = list(set(ad_to_video.values()))
-    video_to_len = {}
-    print(f'Fetching length for {len(unique_videos)} unique videos...')
-    sample_dumped = False
-    for i in range(0, len(unique_videos), 50):
-        batch = unique_videos[i:i+50]
-        data = meta_get('', {
-            'ids': ','.join(batch),
-            'fields': 'length,source,permalink_url,picture,status',
-        })
-        if 'error' in data:
-            print(f'  err: {data["error"].get("message")}'); continue
-        for vid, info in data.items():
-            if not sample_dumped and isinstance(info, dict):
-                import json as _json
-                print(f'  SAMPLE Meta response for video {vid}:')
-                print('  ' + _json.dumps(info, indent=2)[:500].replace('\n', '\n  '))
-                sample_dumped = True
-            if isinstance(info, dict):
-                # Try length first (float seconds), then any field that smells right
-                v = info.get('length') or info.get('duration')
-                if v:
-                    try: video_to_len[vid] = float(v)
-                    except (TypeError, ValueError): pass
-    print(f'  Got length for {len(video_to_len)} videos')
+    # Get the account_id for each ad — we need to query advideos via the
+    # ad account context. The direct /{video_id} endpoint returns
+    # "Application does not have permission" with a standard Marketing API
+    # token; /act_<id>/advideos?fields=id,length works.
+    placeholders = ','.join(['?'] * len(ad_ids))
+    ad_account = dict(conn.execute(
+        f'SELECT ad_id, account_id FROM meta_ads_meta WHERE ad_id IN ({placeholders})',
+        ad_ids
+    ).fetchall())
+    accounts_seen = set(filter(None, ad_account.values()))
+    print(f'Listing advideos across {len(accounts_seen)} ad account(s)...')
 
-    # Fallback for missing durations: derive from video_thruplay
-    # vs video_p100 ratios — not reliable enough to use, so leave for now.
+    video_to_len = {}
+    for acct in accounts_seen:
+        # Paginate the advideos listing — accounts can have thousands of
+        # videos. We page until done OR until we've covered all video_ids
+        # we care about.
+        next_url = f'{acct}/advideos'
+        next_params = {'fields': 'id,length', 'limit': 200}
+        page = 0
+        while page < 50:   # hard cap on pagination
+            r = requests.get(f'{GRAPH}/{next_url}', params={**next_params, 'access_token': TOKEN}, timeout=30)
+            d = r.json()
+            if 'error' in d:
+                print(f'  {acct}: {d["error"].get("message")}'); break
+            got = 0
+            for v in d.get('data', []) or []:
+                vid = v.get('id')
+                ln  = v.get('length')
+                if vid and ln is not None:
+                    try: video_to_len[vid] = float(ln); got += 1
+                    except (TypeError, ValueError): pass
+            paging = d.get('paging', {})
+            next_after = paging.get('cursors', {}).get('after')
+            if not next_after or not d.get('data'):
+                break
+            next_params = {**next_params, 'after': next_after}
+            page += 1
+        # Optional: short log so we can see progress per account
+        # print(f'  {acct}: {len([v for v in ad_to_video.values() if v in video_to_len])} resolved so far')
+    print(f'  Got length for {len(video_to_len)} videos total (account-scoped listing)')
 
     # Bucket
     def bucket(secs):
