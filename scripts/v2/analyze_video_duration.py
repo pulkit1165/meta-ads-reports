@@ -119,6 +119,16 @@ def main():
         # print(f'  {acct}: {len([v for v in ad_to_video.values() if v in video_to_len])} resolved so far')
     print(f'  Got length for {len(video_to_len)} videos total (account-scoped listing)')
 
+    # Diagnostic — did any of the videos we care about actually show up?
+    want = set(ad_to_video.values())
+    found = want & set(video_to_len.keys())
+    missing = list(want - set(video_to_len.keys()))[:5]
+    print(f'  Of {len(want)} videos we want, {len(found)} are in the listing.')
+    if missing:
+        print(f'  Sample missing video_ids: {missing}')
+    sample_listing = list(video_to_len.keys())[:3]
+    print(f'  Sample listing video_ids:  {sample_listing}')
+
     # Bucket
     def bucket(secs):
         if secs is None: return 'unknown'
