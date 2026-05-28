@@ -127,6 +127,44 @@ jobs:
           mkdir -p out/v2
           python3 scripts/v2/build_dashboard.py --days 30 --out out/v2/categories.html
 
+      # Deploy straight from v2-ingest so the live dashboard is fresh the
+      # moment the DB is. Previously only today-live deployed, and its cron
+      # is flaky (~30% slot reliability + concurrency cancels), so the
+      # dashboard often lagged the DB by hours. Now every successful ingest
+      # publishes immediately. today-live still deploys on its own schedule
+      # as a backstop.
+      - name: Prepare landing page + cache headers
+        id: prepare_landing
+        if: ${{ success() && vars.CLOUDFLARE_PAGES_PROJECT != '' }}
+        run: |
+          if [ -f out/v2/categories.html ]; then
+            cp out/v2/categories.html out/index.html
+            echo "should_deploy=true" >> "$GITHUB_OUTPUT"
+            echo "→ index.html from v2/categories.html"
+          else
+            echo "should_deploy=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️  v2/categories.html missing — skip deploy, keep previous"
+          fi
+          cat > out/_headers <<'EOF'
+          /*.html
+            Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+          /v2/*
+            Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+          /
+            Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+          /categories
+            Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
+          EOF
+
+      - name: Deploy to Cloudflare Pages
+        if: ${{ success() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.prepare_landing.outputs.should_deploy == 'true' }}
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          wranglerVersion: '3.99.0'
+          command: pages deploy out --project-name=${{ vars.CLOUDFLARE_PAGES_PROJECT }} --branch=main --commit-dirty=true --commit-message="auto-deploy from v2-ingest workflow"
+
       - name: Print DB summary
         if: always()
         run: |
