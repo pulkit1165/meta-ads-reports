@@ -1,0 +1,45 @@
+name: Video duration analysis (ad-hoc)
+
+# Fetches video lengths for the top-spending ads in the last 40 days,
+# buckets them by duration, and prints performance per bucket. One-off
+# answer to the operator's "which video duration is working best" question.
+# Re-runnable any time via workflow_dispatch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      days:
+        description: "Look-back window (default 40)"
+        required: false
+        default: "40"
+      top_n:
+        description: "Analyze top N ads by spend (default 150)"
+        required: false
+        default: "150"
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.11', cache: pip }
+      - run: pip install requests
+
+      - name: Restore SQLite from state branch
+        uses: ./.github/actions/state-sync
+        with:
+          direction: restore
+
+      - name: Run duration analysis
+        run: |
+          export DAYS="${{ inputs.days || '40' }}"
+          export TOP_N="${{ inputs.top_n || '150' }}"
+          python3 scripts/v2/analyze_video_duration.py
