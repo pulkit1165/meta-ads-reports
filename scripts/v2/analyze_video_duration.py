@@ -53,26 +53,48 @@ def main():
     ''').fetchall()
     print(f'Fetched {len(rows)} top ads by spend (last {DAYS} days)')
 
-    # Batch-fetch creative video_id for each ad
+    # Batch-fetch creative video_id + inline length for each ad.
+    # The page-level video_id namespace (16-digit IDs) isn't readable via
+    # /<id> with a standard Marketing API token. Try to pull length straight
+    # from creative.object_story_spec.video_data — and dump one sample so we
+    # can see what Meta actually returns.
     ad_ids = [r[0] for r in rows]
     ad_to_video = {}
-    print(f'Fetching creative.video_id for {len(ad_ids)} ads...')
+    ad_to_len = {}
+    print(f'Fetching creative for {len(ad_ids)} ads (with inline video length attempts)...')
+    sample_dumped = False
     for i in range(0, len(ad_ids), 50):
         batch = ad_ids[i:i+50]
         data = meta_get('', {
             'ids': ','.join(batch),
-            'fields': 'creative{id,video_id,object_story_spec{video_data{video_id}}}',
+            'fields': (
+                'creative{'
+                  'id,video_id,thumbnail_url,'
+                  'object_story_spec{video_data{video_id,call_to_action,title}},'
+                  'effective_object_story_id,'
+                  'asset_feed_spec{videos{video_id,thumbnail_url}}'
+                '}'
+            ),
         })
         if 'error' in data:
             print(f'  err: {data["error"].get("message")}'); continue
         for aid, info in data.items():
             if not isinstance(info, dict): continue
+            if not sample_dumped:
+                import json as _json
+                print(f'  SAMPLE creative response for ad {aid}:')
+                print('  ' + _json.dumps(info, indent=2)[:800].replace('\n', '\n  '))
+                sample_dumped = True
             cr = info.get('creative') or {}
             vid = cr.get('video_id')
             if not vid:
                 oss = cr.get('object_story_spec') or {}
                 vd = oss.get('video_data') or {}
                 vid = vd.get('video_id')
+            if not vid:
+                afs = cr.get('asset_feed_spec') or {}
+                vids = afs.get('videos') or []
+                if vids: vid = vids[0].get('video_id')
             if vid:
                 ad_to_video[aid] = vid
     print(f'  Found video_id for {len(ad_to_video)} / {len(ad_ids)} ads')
