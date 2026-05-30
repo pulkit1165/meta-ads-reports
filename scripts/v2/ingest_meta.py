@@ -389,6 +389,48 @@ def refresh_meta_ads_meta(conn, ad_ids: list):
     return len(rows)
 
 
+# ── Ad effective_status refresh ─────────────────────────────────────────
+def ensure_effective_status_column(conn):
+    """Add effective_status column to meta_ads_meta if it doesn't exist.
+    Idempotent self-heal so old DBs don't need a separate migration."""
+    cols = {r[1] for r in conn.execute(
+        "PRAGMA table_info(meta_ads_meta)").fetchall()}
+    if 'effective_status' not in cols:
+        print("   adding effective_status column to meta_ads_meta")
+        conn.execute(
+            'ALTER TABLE meta_ads_meta ADD COLUMN effective_status TEXT')
+
+
+def refresh_ad_effective_status(conn, portals):
+    """Fetch current effective_status (ACTIVE/PAUSED/DELETED/etc.) for every
+    ad across all accounts in the given portals, and UPDATE meta_ads_meta.
+    Independent of any date window — captures live status."""
+    ensure_effective_status_column(conn)
+    total = 0
+    for portal in portals:
+        for env_key, account_name in PORTAL_ACCOUNTS[portal]:
+            account_id = os.environ.get(env_key)
+            if not account_id:
+                continue
+            try:
+                rows = meta_paginate(
+                    f'{GRAPH_API}/{account_id}/ads',
+                    {'fields': 'id,effective_status', 'limit': 500},
+                )
+            except MetaRateLimitError as e:
+                print(f"   {account_name}: rate-limit on status fetch — {e}")
+                continue
+            for r in rows:
+                conn.execute(
+                    'UPDATE meta_ads_meta SET effective_status = ? '
+                    'WHERE ad_id = ?',
+                    (r.get('effective_status'), r.get('id'))
+                )
+            total += len(rows)
+            print(f"   {account_name}: {len(rows)} ad statuses")
+    return total
+
+
 # ── Main ingest pipeline for a single date ───────────────────────────────
 def ingest_for_date(conn, date_str: str, portals: list, *,
                     campaigns_only: bool = False):
@@ -450,6 +492,15 @@ def ingest_for_date(conn, date_str: str, portals: list, *,
         if affected_ad_ids:
             updated = refresh_meta_ads_meta(conn, list(affected_ad_ids))
             print(f"\n📋 Refreshed meta_ads_meta for {updated} ads")
+
+        # 4. Refresh effective_status for ALL ads (not just touched ones) —
+        # the dashboard "Active Ads" KPI uses this to match what Meta UI
+        # shows, so we need every ad's current ACTIVE/PAUSED/DELETED state.
+        try:
+            n = refresh_ad_effective_status(conn, portals)
+            print(f"\n📡 Refreshed effective_status for {n} ads")
+        except Exception as e:
+            print(f"\n⚠️  effective_status refresh failed: {e}")
 
         log_ingest_finish(conn, 'ingest_meta', date_str, started,
                           status='success',

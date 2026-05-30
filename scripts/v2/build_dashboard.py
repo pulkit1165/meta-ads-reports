@@ -73,7 +73,8 @@ def fetch_ad_days(conn, since: str, until: str):
           m.days_active,
           m.total_spend AS lifetime_spend,
           m.total_revenue AS lifetime_revenue,
-          m.total_purchases AS lifetime_purchases
+          m.total_purchases AS lifetime_purchases,
+          m.effective_status
         FROM meta_ads_daily d
         LEFT JOIN meta_ads_meta  m ON d.ad_id = m.ad_id
         LEFT JOIN sentiment_labels sl ON sl.code = m.sentiment
@@ -89,7 +90,8 @@ def fetch_ad_days(conn, since: str, until: str):
             'video_thruplay',
             'category', 'creative_type', 'sentiment', 'sentiment_code',
             'product', 'ntn_code', 'first_seen', 'last_seen', 'days_active',
-            'lifetime_spend', 'lifetime_revenue', 'lifetime_purchases']
+            'lifetime_spend', 'lifetime_revenue', 'lifetime_purchases',
+            'effective_status']
     out = []
     for r in rows:
         d = dict(zip(cols, r))
@@ -1160,8 +1162,16 @@ function aggregate(rows, groupKey) {
       atc:0, lpv:0,
     });
     const a = map.get(k);
-    a.active_ads.add(r.ad_id);
-    a.active_camps.add(r.campaign_id);
+    // "Active Ads" matches Meta's definition — only count ads whose
+    // effective_status is currently ACTIVE. An ad that spent in the window
+    // but has since been paused/deleted is NOT counted here, even though
+    // its spend/revenue/orders still roll into the totals below. This is
+    // what makes the dashboard's 270 match Meta UI's 248 instead of
+    // counting "ads with spend in window" (the prior definition).
+    if (r.effective_status === 'ACTIVE') {
+      a.active_ads.add(r.ad_id);
+      if (r.campaign_id) a.active_camps.add(r.campaign_id);
+    }
     a.spend       += r.spend       || 0;
     a.revenue     += r.revenue     || 0;
     a.purchases   += r.purchases   || 0;
