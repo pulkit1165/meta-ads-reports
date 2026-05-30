@@ -1,14 +1,15 @@
 name: v2 Ingest (Meta + Shopify → SQLite)
 
 on:
-  # 24/7 hourly schedule. Repo is public so Actions minutes are
-  # unlimited (no billing block). Multi-shot at :00,:15,:30,:45 UTC
-  # gives ~99% coverage at GHA's ~70% per-slot reliability. The
-  # workflow has concurrency cancel-in-progress:false so duplicates
-  # queue and run serially. EC2 cron (scripts/v2/ec2_hourly.sh) is
-  # the off-platform fallback if we ever go private again.
+  # Every 10 min — operator wants the dashboard as close to Meta/Shopify
+  # reality as practical. Repo is public so Actions minutes are unlimited.
+  # At 10 min the worst-case stale window is 10 min + ~5 min runtime =
+  # ~15 min, average ~5 min. concurrency:cancel-in-progress:false queues
+  # overlapping runs. Don't go below 10 min without a runtime audit —
+  # ingests take 5-7 min so any tighter spacing risks back-to-back queue
+  # buildup.
   schedule:
-    - cron: "0,15,30,45 * * * *"
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       backfill_days:
