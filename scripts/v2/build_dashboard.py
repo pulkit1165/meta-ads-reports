@@ -27,6 +27,13 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _utils import db_connect, IST, now_iso  # noqa: E402
 
+# product_catalogue lives in scripts/ (parent of this v2/ dir) — used to
+# classify tonight's new campaigns by name on the Heatmap page card.
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from product_catalogue import (  # noqa: E402
+    derive_category_v2, derive_product_and_category,
+)
+
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 OUT_DIR = REPO_ROOT / 'out'
 OUT_DIR.mkdir(parents=True, exist_ok=True)
@@ -160,6 +167,112 @@ def fetch_active_campaign_budgets(conn, since: str, until: str):
             'lifetime_budget': float(r[5] or 0),
         }
     return out
+
+
+def fetch_new_today(conn):
+    """Campaigns that STARTED today (IST) and are currently ACTIVE — i.e. the
+    ads pushed tonight. Classified by name (v2 category + product) and carrying
+    their configured daily budget. Powers the Heatmap page's 'Aaj ki Nayi Ads'
+    card.
+
+    Recomputed on every hourly rebuild and keyed off start_time's date, so it
+    is a rolling "today" that resets at IST midnight. created_time isn't stored
+    in meta_ads_meta (always NULL here), so start_time is the reliable
+    "went live today" signal — it matches the live created_time count within a
+    camp or two.
+    """
+    today = datetime.now(IST).strftime('%Y-%m-%d')
+    rows = conn.execute('''
+        SELECT campaign_id, portal, name,
+               COALESCE(daily_budget, 0)    AS daily,
+               COALESCE(lifetime_budget, 0) AS lifetime
+        FROM meta_campaigns
+        WHERE substr(start_time, 1, 10) = ?
+          AND effective_status = 'ACTIVE'
+    ''', (today,)).fetchall()
+    out = []
+    for cid, portal, name, daily, lifetime in rows:
+        budget = float(daily or 0) or float(lifetime or 0)
+        if budget <= 0:
+            continue
+        nm = name or ''
+        out.append({
+            'campaign_id': cid,
+            'portal': portal or '',
+            'name': nm,
+            'category': derive_category_v2(nm),
+            'product': derive_product_and_category(nm)[0],
+            'budget': round(budget, 0),
+        })
+
+    # Increase/Decrease vs the budget when each campaign was first seen TODAY.
+    # We snapshot into campaign_budget_history on every build (this script runs
+    # inside v2-ingest, which restores+saves state/ntn.db, so the table
+    # persists across runs). first_budget is written once per (date, camp) and
+    # never overwritten; last_budget tracks the current value. The card then
+    # shows how each new ad's budget has moved since it went live today.
+    # Writes are best-effort — a failure here must never break the dashboard.
+    _annotate_budget_change(conn, today, out)
+
+    out.sort(key=lambda r: (r['category'], -r['budget']))
+    return {'date': today, 'camps': out}
+
+
+def _annotate_budget_change(conn, today, camps):
+    """Mutates each camp dict in-place, adding 'change_kind' and 'change_amt'.
+
+    change_kind ∈ {'new','up','down','same'} — 'new' the first build that sees
+    the campaign today, then up/down/same vs that first-of-day budget.
+    """
+    try:
+        conn.execute('''
+            CREATE TABLE IF NOT EXISTS campaign_budget_history (
+                date           TEXT NOT NULL,
+                campaign_id    TEXT NOT NULL,
+                first_budget   REAL,
+                last_budget    REAL,
+                first_recorded TEXT,
+                last_recorded  TEXT,
+                PRIMARY KEY (date, campaign_id)
+            )
+        ''')
+    except Exception as e:  # noqa: BLE001
+        print(f"   ⚠️  budget-history table unavailable ({e}) — skipping inc/dec")
+        for c in camps:
+            c['change_kind'], c['change_amt'] = 'new', 0
+        return
+
+    now = now_iso()
+    for c in camps:
+        cid, budget = c['campaign_id'], c['budget']
+        try:
+            cur = conn.execute(
+                'INSERT OR IGNORE INTO campaign_budget_history'
+                '(date, campaign_id, first_budget, last_budget, first_recorded, last_recorded)'
+                ' VALUES (?,?,?,?,?,?)',
+                (today, cid, budget, budget, now, now),
+            )
+            if cur.rowcount:                       # first sighting today
+                c['change_kind'], c['change_amt'] = 'new', 0
+                continue
+            row = conn.execute(
+                'SELECT first_budget FROM campaign_budget_history'
+                ' WHERE date=? AND campaign_id=?', (today, cid)
+            ).fetchone()
+            first = float(row[0]) if row and row[0] is not None else budget
+            conn.execute(
+                'UPDATE campaign_budget_history SET last_budget=?, last_recorded=?'
+                ' WHERE date=? AND campaign_id=?', (budget, now, today, cid)
+            )
+            delta = round(budget - first, 0)
+            if delta > 0:
+                c['change_kind'], c['change_amt'] = 'up', delta
+            elif delta < 0:
+                c['change_kind'], c['change_amt'] = 'down', delta
+            else:
+                c['change_kind'], c['change_amt'] = 'same', 0
+        except Exception:  # noqa: BLE001
+            c['change_kind'], c['change_amt'] = 'new', 0
 
 
 def fetch_adsets(conn, since: str, until: str):
@@ -350,6 +463,11 @@ tr:hover td { background:#fafbff; }
 .cell-name { max-width:340px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .btn-csv { background:#1a3d7c; color:#fff; border:none; padding:6px 11px; border-radius:6px; font-size:10px; cursor:pointer; font-weight:700; }
 .btn-csv:hover { background:#0d2145; }
+
+/* Aaj-ki-nayi-ads detail table: text cols left; budget + change right */
+#tbl-newtoday-detail th, #tbl-newtoday-detail td { text-align:left; }
+#tbl-newtoday-detail th:nth-child(5), #tbl-newtoday-detail td:nth-child(5),
+#tbl-newtoday-detail th:nth-child(6), #tbl-newtoday-detail td:nth-child(6) { text-align:right; }
 
 /* Heatmap success cells */
 .sr-0 { background:#fef2f2; color:#7f1d1d; padding:2px 6px; border-radius:4px; }
@@ -662,6 +780,28 @@ tr:hover td { background:#fafbff; }
     <section class="page" id="page-heatmap">
       <h2>🔥 Creative Type × Category Heatmap</h2>
       <p class="page-intro">Spend-weighted ROAS for each (category, creative) cell. Green ≥2.5x, amber 1.5-2.5x, red &lt;1.5x.</p>
+
+      <!-- Aaj ki nayi ads — campaigns that STARTED today (IST), category-wise
+           daily budget. Independent of the date/portal filters above; resets
+           at IST midnight on each hourly rebuild. -->
+      <div class="card">
+        <h3>🌙 Aaj ki Nayi Ads — Category-wise Budget <span class="meta" id="newtoday-meta"></span></h3>
+        <p class="page-intro" style="margin:0 0 10px">Jo campaigns aaj (12 AM IST se) live hui — category &amp; product wise, daily budget ke saath. Roz apne aap refresh hoti hai.</p>
+        <div class="kpi-strip" id="newtoday-kpis" style="margin-bottom:12px"></div>
+        <table id="tbl-newtoday-rollup" style="margin-bottom:14px">
+          <thead><tr><th>Category</th><th>Camps</th><th>Daily Budget (₹)</th><th>Share %</th></tr></thead>
+          <tbody></tbody>
+        </table>
+        <details>
+          <summary style="cursor:pointer;font-weight:700;font-size:12px;color:#1a3d7c;margin:4px 0 10px">▼ Har ad ka detail (category → product → campaign)</summary>
+          <div style="overflow-x:auto">
+            <table id="tbl-newtoday-detail">
+              <thead><tr><th>Category</th><th>Product</th><th>Campaign (Ad)</th><th>Portal</th><th>Daily Budget (₹)</th><th>Change (since launch)</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </details>
+      </div>
 
       <div class="card" style="overflow-x:auto">
         <table id="tbl-heatmap"></table>
@@ -2158,6 +2298,70 @@ function renderHeatmapPage(rows) {
   document.getElementById('tbl-heatmap').innerHTML = html;
 }
 
+// Aaj ki nayi ads — campaigns that started today (IST), category-wise budget.
+// Reads PAYLOAD.new_today (precomputed server-side, independent of filters),
+// so it's rendered once on load rather than from the filtered ad-day rows.
+function renderNewToday() {
+  const data = PAYLOAD.new_today || { date: '', camps: [] };
+  const camps = data.camps || [];
+  const total = camps.reduce((s, c) => s + (c.budget || 0), 0);
+
+  const meta = document.getElementById('newtoday-meta');
+  if (meta) meta.textContent =
+    `${data.date} · ${camps.length} nayi ads · ${fmt.inr(total)} daily budget`;
+
+  // Group by category
+  const byCat = {};
+  camps.forEach(c => {
+    (byCat[c.category] = byCat[c.category] || { n: 0, budget: 0 }).n++;
+    byCat[c.category].budget += (c.budget || 0);
+  });
+  const catEntries = Object.entries(byCat).sort((a, b) => b[1].budget - a[1].budget);
+
+  // KPI cards
+  const kpis = document.getElementById('newtoday-kpis');
+  if (kpis) kpis.innerHTML =
+    `<div class="kpi-card"><div class="kpi-lbl">Total Nayi Ads</div><div class="kpi-val">${camps.length}</div><div class="kpi-sub">aaj ${data.date}</div></div>` +
+    `<div class="kpi-card"><div class="kpi-lbl">Total Daily Budget</div><div class="kpi-val">${fmt.inr(total)}</div><div class="kpi-sub">${catEntries.length} categories</div></div>`;
+
+  // Rollup table
+  const rollup = document.querySelector('#tbl-newtoday-rollup tbody');
+  if (rollup) {
+    rollup.innerHTML = camps.length
+      ? catEntries.map(([cat, v]) =>
+          `<tr><td><strong>${cat}</strong></td><td>${v.n}</td><td>${fmt.inr(v.budget)}</td><td>${total ? (v.budget / total * 100).toFixed(1) : '0.0'}%</td></tr>`
+        ).join('') +
+        `<tr style="background:#f8faff;font-weight:800"><td>TOTAL</td><td>${camps.length}</td><td>${fmt.inr(total)}</td><td>100.0%</td></tr>`
+      : '<tr><td colspan="4" class="empty">Aaj abhi tak koi nayi ad live nahi hui.</td></tr>';
+  }
+
+  // Detail table (already sorted server-side: category, then budget desc)
+  const detail = document.querySelector('#tbl-newtoday-detail tbody');
+  if (detail) {
+    detail.innerHTML = camps.length
+      ? camps.map(c =>
+          `<tr><td>${c.category}</td><td>${c.product}</td>` +
+          `<td class="cell-name" title="${(c.name || '').replace(/"/g, '&quot;')}">${c.name}</td>` +
+          `<td>${tag(c.portal)}</td><td>${fmt.inr(c.budget)}</td>` +
+          `<td>${newTodayChange(c)}</td></tr>`
+        ).join('')
+      : '<tr><td colspan="6" class="empty">—</td></tr>';
+  }
+}
+
+// Budget change cell for a new-today campaign: ↑/↓ vs the budget when it was
+// first seen today, 🆕 on its first build, = when unchanged since launch.
+function newTodayChange(c) {
+  const amt = Math.abs(c.change_amt || 0);
+  if (c.change_kind === 'up')
+    return `<span class="delta-up">↑ +${Math.round(amt).toLocaleString('en-IN')}</span>`;
+  if (c.change_kind === 'down')
+    return `<span class="delta-down">↓ -${Math.round(amt).toLocaleString('en-IN')}</span>`;
+  if (c.change_kind === 'same')
+    return `<span class="subtle">=</span>`;
+  return `<span style="color:#e37400;font-weight:700">🆕 NEW</span>`;
+}
+
 // Product Budget page: roll up daily_budget per product (via dominant
 // product label per campaign) and per campaign. Shows current day's
 // utilization + rolling ROAS so the operator can see where the budget
@@ -2581,6 +2785,7 @@ setupSort('tbl-sentiment',  'spend');
 // Operator can drop to "Today" or extend to 30D from the chip row.
 (document.querySelector('.preset-btn[data-days="7"]') ||
  document.querySelector('.preset-btn[data-days="1"]')).click();
+renderNewToday();   // filter-independent — render once on load
 activatePageFromHash();
 </script>
 </body>
@@ -2616,6 +2821,7 @@ def main():
     shopify_daily = fetch_shopify_daily(conn, since, until)
     adsets = fetch_adsets(conn, since, until)
     campaigns = fetch_active_campaign_budgets(conn, since, until)
+    new_today = fetch_new_today(conn)
 
     payload = {
         'since': since,
@@ -2624,6 +2830,7 @@ def main():
         'shopify_daily': shopify_daily,    # Real orders + revenue per portal/date
         'adsets': adsets,                   # adset_id -> {name, audiences_incl, audiences_excl, ...}
         'campaigns': campaigns,             # campaign_id -> {name, daily_budget, status, portal}
+        'new_today': new_today,             # {date, camps[]} — campaigns started today, category-wise
         'dimensions': dimensions,
         'freshness': freshness,
         'updated_at': now_iso(),
