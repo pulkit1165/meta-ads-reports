@@ -281,74 +281,72 @@ def _annotate_budget_change(conn, today, camps):
             c['change_kind'], c['change_amt'] = 'new', 0
 
 
-# Success-estimate tunables. A past ad "succeeded" if it SURVIVED — i.e. it
-# stayed active >= SURVIVE_DAYS rather than being killed off quickly (the
-# operator cuts losers fast, so survival mirrors their own keep/scale calls;
-# this is also the dashboard's canonical success_rate_7d notion). Only ads with
-# meaningful spend AND old enough to have HAD the chance to survive are counted,
-# and a bucket needs a minimum sample to be trusted.
-SCALE_SURVIVE_DAYS = 7
-SCALE_MIN_SPEND    = 1000
-SCALE_MIN_SAMPLE   = 8
+# Success-estimate tunables. The estimate is the historical SPEND-WEIGHTED
+# lifetime ROAS of the new ad's product (fallback category) — how profitably
+# past ads of this kind actually performed, weighting bigger-spend ads more
+# (so it reflects both ROAS and spend). Bands are calibrated to this account's
+# product-level ROAS, which clusters ~1.0-1.5x — NOT the heatmap's per-cell
+# bands. Only ads with real spend feed a bucket, and a bucket needs enough
+# total historical spend to be trusted.
+SCALE_SUCCESS_ROAS     = 1.35   # spend-weighted ROAS >= this -> Likely Success
+SCALE_FAIL_ROAS        = 1.10   # < this -> Likely Fail; in between -> 50-50
+SCALE_MIN_SPEND        = 1000   # per-ad floor to enter a bucket
+SCALE_MIN_BUCKET_SPEND = 50000  # bucket needs this much total spend to trust
 
 
 def _annotate_scale_estimate(conn, camps):
-    """Adds 'est_kind' ('success'|'fail'|'uncertain'|'lowdata'), 'est_rate'
-    (0-100 or None), 'est_n', 'est_basis' to each camp dict.
+    """Adds 'est_kind' ('success'|'fail'|'uncertain'|'lowdata'), 'est_roas'
+    (float or None), 'est_spend' (bucket total spend), 'est_n', 'est_basis'.
 
-    Builds per-product and per-category SURVIVAL rates from meta_ads_meta:
-    of past ads in a bucket (old enough + real spend), what fraction stayed
-    active >= SURVIVE_DAYS. Historical ads are classified by NAME with the SAME
+    For each new ad, looks up the SPEND-WEIGHTED lifetime ROAS of its product
+    (fallback category) from meta_ads_meta — sum(revenue)/sum(spend) over past
+    ads with real spend. Historical ads are classified by NAME with the SAME
     functions used for the new campaigns so the product/category keys line up.
-    Each new camp uses its product's rate, falling back to category, then
-    low-data.
+    A bucket is only trusted once it has SCALE_MIN_BUCKET_SPEND of history.
     """
-    cutoff = (datetime.now(IST).date()
-              - timedelta(days=SCALE_SURVIVE_DAYS)).isoformat()
-    by_product, by_category = {}, {}     # key -> [n, survived]
+    by_product, by_category = {}, {}     # key -> [spend, revenue, n]
     try:
         rows = conn.execute(
-            'SELECT ad_name, total_spend, days_active, first_seen '
-            'FROM meta_ads_meta'
+            'SELECT ad_name, total_spend, total_revenue FROM meta_ads_meta'
         ).fetchall()
     except Exception:  # noqa: BLE001
         rows = []
-    for ad_name, spend, days_active, first_seen in rows:
+    for ad_name, spend, revenue in rows:
         spend = float(spend or 0)
         if spend < SCALE_MIN_SPEND:
             continue
-        # Only ads that launched early enough to have had the full window —
-        # otherwise a 2-day-old ad would unfairly count as a "fail".
-        if not first_seen or first_seen > cutoff:
-            continue
-        survived = 1 if (days_active or 0) >= SCALE_SURVIVE_DAYS else 0
+        revenue = float(revenue or 0)
         nm = ad_name or ''
         prod = derive_product_and_category(nm)[0]
         cat = derive_category_v2(nm)
         for key, table in ((prod, by_product), (cat, by_category)):
-            slot = table.setdefault(key, [0, 0])
-            slot[0] += 1
-            slot[1] += survived
+            slot = table.setdefault(key, [0.0, 0.0, 0])
+            slot[0] += spend
+            slot[1] += revenue
+            slot[2] += 1
 
-    def _classify(rate):
-        if rate >= 55:   return 'success'
-        if rate <= 35:   return 'fail'
+    def _classify(roas):
+        if roas >= SCALE_SUCCESS_ROAS:  return 'success'
+        if roas <  SCALE_FAIL_ROAS:     return 'fail'
         return 'uncertain'
 
     for c in camps:
-        n = w = 0
+        spend = rev = 0.0
+        n = 0
         basis = 'lowdata'
         ps = by_product.get(c['product'])
         cs = by_category.get(c['category'])
-        if ps and ps[0] >= SCALE_MIN_SAMPLE:
-            n, w, basis = ps[0], ps[1], 'product'
-        elif cs and cs[0] >= SCALE_MIN_SAMPLE:
-            n, w, basis = cs[0], cs[1], 'category'
-        if basis == 'lowdata' or n == 0:
-            c['est_kind'], c['est_rate'], c['est_n'], c['est_basis'] = 'lowdata', None, n, basis
+        if ps and ps[0] >= SCALE_MIN_BUCKET_SPEND:
+            spend, rev, n, basis = ps[0], ps[1], ps[2], 'product'
+        elif cs and cs[0] >= SCALE_MIN_BUCKET_SPEND:
+            spend, rev, n, basis = cs[0], cs[1], cs[2], 'category'
+        if basis == 'lowdata' or spend <= 0:
+            c['est_kind'], c['est_roas'], c['est_spend'], c['est_n'], c['est_basis'] = \
+                'lowdata', None, 0, n, basis
         else:
-            rate = round(w / n * 100)
-            c['est_kind'], c['est_rate'], c['est_n'], c['est_basis'] = _classify(rate), rate, n, basis
+            roas = round(rev / spend, 2)
+            c['est_kind'], c['est_roas'], c['est_spend'], c['est_n'], c['est_basis'] = \
+                _classify(roas), roas, round(spend), n, basis
 
 
 def fetch_adsets(conn, since: str, until: str):
@@ -873,7 +871,7 @@ tr:hover td { background:#fafbff; }
           <summary style="cursor:pointer;font-weight:700;font-size:12px;color:#1a3d7c;margin:4px 0 10px">▼ Har ad ka detail (category → product → campaign)</summary>
           <div style="overflow-x:auto">
             <table id="tbl-newtoday-detail">
-              <thead><tr><th>Category</th><th>Product</th><th>Campaign (Ad)</th><th>Portal</th><th>Daily Budget (₹)</th><th>Change (since launch)</th><th title="Will this new ad likely succeed? Based on how often past ads of this product/category were kept ≥7 days (success) vs cut quickly (fail). A historical base-rate, not a guarantee.">Success Estimate ⓘ</th></tr></thead>
+              <thead><tr><th>Category</th><th>Product</th><th>Campaign (Ad)</th><th>Portal</th><th>Daily Budget (₹)</th><th>Change (since launch)</th><th title="Will this new ad likely succeed? Based on the spend-weighted lifetime ROAS of past ads of this product/category (≥1.35x = success, 1.10–1.35x = 50-50, <1.10x = fail). A historical base-rate, not a guarantee.">Success Estimate ⓘ</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -2480,19 +2478,21 @@ function renderNewTodayChart(camps, catEntries) {
 }
 
 // Success estimate cell: per-ad call — will this new ad likely SUCCEED or
-// FAIL — from the historical survival rate of its product/category (how often
-// past ads of this kind were kept ≥7 days vs cut). A base-rate, not a
-// guarantee; the % and sample size are in the tooltip.
+// FAIL — from the historical SPEND-WEIGHTED ROAS of its product/category (how
+// profitably past ads of this kind performed, bigger spend weighted more). A
+// base-rate, not a guarantee; the ROAS, spend and sample are in the tooltip.
 function scaleEstimate(c) {
-  if (c.est_kind === 'lowdata' || c.est_rate == null)
-    return `<span class="subtle" title="Not enough past ads with spend to estimate">❔ low data</span>`;
+  if (c.est_kind === 'lowdata' || c.est_roas == null)
+    return `<span class="subtle" title="Not enough past ad spend to estimate">❔ low data</span>`;
   const basis = c.est_basis === 'product' ? 'product' : 'category';
-  const tip = `${c.est_rate}% of ${c.est_n} past ${basis} ads survived ≥7 days (kept/scaled)`;
+  // ROAS drives the call but is kept off-screen — only the verdict shows. The
+  // number stays in the hover tooltip for anyone who wants to verify.
+  const tip = `Based on past ${basis} ads' spend-weighted ROAS (${c.est_roas}x)`;
   if (c.est_kind === 'success')
-    return `<span class="delta-up" title="${tip}">✅ Likely Success · ${c.est_rate}%</span>`;
+    return `<span class="delta-up" title="${tip}">✅ Likely Success</span>`;
   if (c.est_kind === 'fail')
-    return `<span class="delta-down" title="${tip}">❌ Likely Fail · ${c.est_rate}%</span>`;
-  return `<span style="color:#a35a00;font-weight:700" title="${tip}">🟡 50-50 · ${c.est_rate}%</span>`;
+    return `<span class="delta-down" title="${tip}">❌ Likely Fail</span>`;
+  return `<span style="color:#a35a00;font-weight:700" title="${tip}">🟡 50-50</span>`;
 }
 
 // Budget change cell for a new-today campaign: ↑/↓ vs the budget when it was
