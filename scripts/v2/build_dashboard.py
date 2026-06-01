@@ -855,8 +855,8 @@ tr:hover td { background:#fafbff; }
 
     <!-- ── PAGE: Heatmap ──────────────────────────────────────────── -->
     <section class="page" id="page-heatmap">
-      <h2>🔥 Creative Type × Category Heatmap</h2>
-      <p class="page-intro">Spend-weighted ROAS for each (category, creative) cell. Green ≥2.5x, amber 1.5-2.5x, red &lt;1.5x.</p>
+      <h2>🔥 Heatmap</h2>
+      <p class="page-intro">Aaj ki nayi ads (category-wise budget) + Creative Type × Category ROAS heatmap.</p>
 
       <!-- Aaj ki nayi ads — campaigns that STARTED today (IST), category-wise
            daily budget. Independent of the date/portal filters above; resets
@@ -878,9 +878,12 @@ tr:hover td { background:#fafbff; }
             </table>
           </div>
         </details>
+        <div style="font-size:11px;font-weight:700;color:#0d2145;margin:16px 0 6px;border-top:1px solid #eef2ff;padding-top:12px">📊 Daily budget by category — split by success estimate</div>
+        <div class="chart-wrap" id="newtoday-chart-wrap" style="height:300px"><canvas id="chart-newtoday"></canvas></div>
       </div>
 
       <div class="card" style="overflow-x:auto">
+        <h3>🔥 Creative Type × Category Heatmap <span class="meta">Spend-weighted ROAS per cell · Green ≥2.5x, amber 1.5-2.5x, red &lt;1.5x</span></h3>
         <table id="tbl-heatmap"></table>
       </div>
     </section>
@@ -2424,6 +2427,56 @@ function renderNewToday() {
         ).join('')
       : '<tr><td colspan="7" class="empty">—</td></tr>';
   }
+
+  // Stacked horizontal bar: per-category daily budget, split by success
+  // estimate so it's obvious at a glance where tonight's budget is going and
+  // how much of it lands on likely-success vs likely-fail ads.
+  renderNewTodayChart(camps, catEntries);
+}
+
+function renderNewTodayChart(camps, catEntries) {
+  const wrap = document.getElementById('newtoday-chart-wrap');
+  if (!wrap) return;
+  if (!camps.length) { destroyChart('chart-newtoday'); wrap.style.display = 'none'; return; }
+  wrap.style.display = '';
+  const cats = catEntries.map(([cat]) => cat);          // budget desc (same order)
+  const buckets = [
+    { key: 'success',   label: '✅ Likely Success', color: '#0b8043' },
+    { key: 'uncertain', label: '🟡 50-50',          color: '#e0a000' },
+    { key: 'fail',      label: '❌ Likely Fail',     color: '#c5221f' },
+    { key: 'lowdata',   label: '❔ Low data',        color: '#9ca3af' },
+  ];
+  const sums = {};                                      // cat -> kind -> budget
+  cats.forEach(c => { sums[c] = {}; });
+  camps.forEach(c => {
+    const k = c.est_kind || 'lowdata';
+    sums[c.category][k] = (sums[c.category][k] || 0) + (c.budget || 0);
+  });
+  const datasets = buckets.map(b => ({
+    label: b.label,
+    data: cats.map(c => Math.round(sums[c][b.key] || 0)),
+    backgroundColor: b.color,
+    borderWidth: 0,
+  }));
+  // Grow height with the category count so bars stay readable.
+  wrap.style.height = Math.max(180, cats.length * 34 + 60) + 'px';
+  barChart('chart-newtoday', cats, datasets, {
+    indexAxis: 'y',
+    animation: false,
+    scales: {
+      x: { stacked: true, ticks: { callback: v => '₹' + Number(v).toLocaleString('en-IN') } },
+      y: { stacked: true },
+    },
+    plugins: {
+      legend: { position: 'top', labels: { boxWidth: 12, font: { size: 11 } } },
+      tooltip: { callbacks: { label: ctx =>
+        `${ctx.dataset.label}: ₹${Number(ctx.parsed.x).toLocaleString('en-IN')}` } },
+    },
+  });
+  // If the chart was built before the just-shown page finished laying out, the
+  // canvas can come up under-sized — re-measure shortly after (setTimeout
+  // fires reliably; rAF can be throttled when the tab isn't painting).
+  setTimeout(() => { const c = charts['chart-newtoday']; if (c) c.resize(); }, 120);
 }
 
 // Success estimate cell: per-ad call — will this new ad likely SUCCEED or
@@ -2853,7 +2906,7 @@ function apply() {
   if (id === 'categories')  renderCategoriesPage(rows);
   if (id === 'creatives')   renderCreativesPage(rows);
   if (id === 'sentiments')  renderSentimentsPage(rows);
-  if (id === 'heatmap')     renderHeatmapPage(rows);
+  if (id === 'heatmap')   { renderHeatmapPage(rows); renderNewToday(); }
   if (id === 'prodbudget')  renderProdBudgetPage(rows);
   if (id === 'products')    renderProductsPage(rows);
   if (id === 'prodsuccess') renderProdSuccessPage(rows);
@@ -2878,8 +2931,7 @@ setupSort('tbl-sentiment',  'spend');
 // Operator can drop to "Today" or extend to 30D from the chip row.
 (document.querySelector('.preset-btn[data-days="7"]') ||
  document.querySelector('.preset-btn[data-days="1"]')).click();
-renderNewToday();   // filter-independent — render once on load
-activatePageFromHash();
+activatePageFromHash();   // heatmap card renders via apply() when that page is shown
 </script>
 </body>
 </html>
