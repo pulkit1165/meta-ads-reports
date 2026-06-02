@@ -193,6 +193,17 @@ def fetch_new_today(conn):
         WHERE substr(start_time, 1, 10) = ?
           AND effective_status = 'ACTIVE'
     ''', (today,)).fetchall()
+
+    # Today's ACTUAL spend per campaign (vs the configured daily budget above),
+    # summed from the ad-day grid. Accrues through the day as ingest runs.
+    today_spend = {}
+    for cid, sp in conn.execute(
+        'SELECT campaign_id, COALESCE(SUM(spend), 0) FROM meta_ads_daily '
+        'WHERE date = ? AND campaign_id IS NOT NULL GROUP BY campaign_id',
+        (today,),
+    ).fetchall():
+        today_spend[cid] = float(sp or 0)
+
     out = []
     for cid, portal, name, daily, lifetime in rows:
         budget = float(daily or 0) or float(lifetime or 0)
@@ -206,6 +217,7 @@ def fetch_new_today(conn):
             'category': derive_category_v2(nm),
             'product': derive_product_and_category(nm)[0],
             'budget': round(budget, 0),
+            'spent_today': round(today_spend.get(cid, 0)),
         })
 
     # Scale estimate: for each new ad, the historical likelihood that an ad of
@@ -606,11 +618,12 @@ tr:hover td { background:#fafbff; }
 .btn-csv { background:#1a3d7c; color:#fff; border:none; padding:6px 11px; border-radius:6px; font-size:10px; cursor:pointer; font-weight:700; }
 .btn-csv:hover { background:#0d2145; }
 
-/* Aaj-ki-nayi-ads detail table: text cols left; budget + change + estimate right */
+/* Aaj-ki-nayi-ads detail table: text cols left; budget/spent/change/estimate right */
 #tbl-newtoday-detail th, #tbl-newtoday-detail td { text-align:left; }
 #tbl-newtoday-detail th:nth-child(5), #tbl-newtoday-detail td:nth-child(5),
 #tbl-newtoday-detail th:nth-child(6), #tbl-newtoday-detail td:nth-child(6),
-#tbl-newtoday-detail th:nth-child(7), #tbl-newtoday-detail td:nth-child(7) { text-align:right; }
+#tbl-newtoday-detail th:nth-child(7), #tbl-newtoday-detail td:nth-child(7),
+#tbl-newtoday-detail th:nth-child(8), #tbl-newtoday-detail td:nth-child(8) { text-align:right; }
 
 /* Heatmap success cells */
 .sr-0 { background:#fef2f2; color:#7f1d1d; padding:2px 6px; border-radius:4px; }
@@ -932,14 +945,14 @@ tr:hover td { background:#fafbff; }
         <p class="page-intro" style="margin:0 0 10px">Jo campaigns aaj (12 AM IST se) live hui — category &amp; product wise, daily budget ke saath. Roz apne aap refresh hoti hai.</p>
         <div class="kpi-strip" id="newtoday-kpis" style="margin-bottom:12px"></div>
         <table id="tbl-newtoday-rollup" style="margin-bottom:14px">
-          <thead><tr><th>Category</th><th>Camps</th><th>Daily Budget (₹)</th><th>Share %</th></tr></thead>
+          <thead><tr><th>Category</th><th>Camps</th><th>Daily Budget (₹)</th><th>Spent Today (₹)</th><th>Share %</th></tr></thead>
           <tbody></tbody>
         </table>
         <details>
           <summary style="cursor:pointer;font-weight:700;font-size:12px;color:#1a3d7c;margin:4px 0 10px">▼ Har ad ka detail (category → product → campaign)</summary>
           <div style="overflow-x:auto">
             <table id="tbl-newtoday-detail">
-              <thead><tr><th>Category</th><th>Product</th><th>Campaign (Ad)</th><th>Portal</th><th>Daily Budget (₹)</th><th>Change (since launch)</th><th title="Will this new ad likely succeed? Based on the spend-weighted lifetime ROAS of past ads of this product/category (≥1.35x = success, 1.10–1.35x = 50-50, <1.10x = fail). A historical base-rate, not a guarantee.">Success Estimate ⓘ</th></tr></thead>
+              <thead><tr><th>Category</th><th>Product</th><th>Campaign (Ad)</th><th>Portal</th><th>Daily Budget (₹)</th><th>Spent Today (₹)</th><th>Change (since launch)</th><th title="Will this new ad likely succeed? Based on the spend-weighted lifetime ROAS of past ads of this product/category (≥1.35x = success, 1.10–1.35x = 50-50, <1.10x = fail). A historical base-rate, not a guarantee.">Success Estimate ⓘ</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -2451,16 +2464,17 @@ function renderNewToday() {
   const data = PAYLOAD.new_today || { date: '', camps: [] };
   const camps = data.camps || [];
   const total = camps.reduce((s, c) => s + (c.budget || 0), 0);
+  const totalSpent = camps.reduce((s, c) => s + (c.spent_today || 0), 0);
 
   const meta = document.getElementById('newtoday-meta');
   if (meta) meta.textContent =
-    `${data.date} · ${camps.length} nayi ads · ${fmt.inr(total)} daily budget`;
+    `${data.date} · ${camps.length} nayi ads · ${fmt.inr(total)} daily budget · ${fmt.inr(totalSpent)} spent`;
 
   // Group by category
   const byCat = {};
   camps.forEach(c => {
-    (byCat[c.category] = byCat[c.category] || { n: 0, budget: 0 }).n++;
-    byCat[c.category].budget += (c.budget || 0);
+    const v = (byCat[c.category] = byCat[c.category] || { n: 0, budget: 0, spent: 0 });
+    v.n++; v.budget += (c.budget || 0); v.spent += (c.spent_today || 0);
   });
   const catEntries = Object.entries(byCat).sort((a, b) => b[1].budget - a[1].budget);
 
@@ -2468,17 +2482,18 @@ function renderNewToday() {
   const kpis = document.getElementById('newtoday-kpis');
   if (kpis) kpis.innerHTML =
     `<div class="kpi-card"><div class="kpi-lbl">Total Nayi Ads</div><div class="kpi-val">${camps.length}</div><div class="kpi-sub">aaj ${data.date}</div></div>` +
-    `<div class="kpi-card"><div class="kpi-lbl">Total Daily Budget</div><div class="kpi-val">${fmt.inr(total)}</div><div class="kpi-sub">${catEntries.length} categories</div></div>`;
+    `<div class="kpi-card"><div class="kpi-lbl">Total Daily Budget</div><div class="kpi-val">${fmt.inr(total)}</div><div class="kpi-sub">${catEntries.length} categories</div></div>` +
+    `<div class="kpi-card"><div class="kpi-lbl">Spent Today (actual)</div><div class="kpi-val">${fmt.inr(totalSpent)}</div><div class="kpi-sub">${total ? Math.round(totalSpent / total * 100) : 0}% of budget used</div></div>`;
 
   // Rollup table
   const rollup = document.querySelector('#tbl-newtoday-rollup tbody');
   if (rollup) {
     rollup.innerHTML = camps.length
       ? catEntries.map(([cat, v]) =>
-          `<tr><td><strong>${cat}</strong></td><td>${v.n}</td><td>${fmt.inr(v.budget)}</td><td>${total ? (v.budget / total * 100).toFixed(1) : '0.0'}%</td></tr>`
+          `<tr><td><strong>${cat}</strong></td><td>${v.n}</td><td>${fmt.inr(v.budget)}</td><td>${fmt.inr(v.spent)}</td><td>${total ? (v.budget / total * 100).toFixed(1) : '0.0'}%</td></tr>`
         ).join('') +
-        `<tr style="background:#f8faff;font-weight:800"><td>TOTAL</td><td>${camps.length}</td><td>${fmt.inr(total)}</td><td>100.0%</td></tr>`
-      : '<tr><td colspan="4" class="empty">Aaj abhi tak koi nayi ad live nahi hui.</td></tr>';
+        `<tr style="background:#f8faff;font-weight:800"><td>TOTAL</td><td>${camps.length}</td><td>${fmt.inr(total)}</td><td>${fmt.inr(totalSpent)}</td><td>100.0%</td></tr>`
+      : '<tr><td colspan="5" class="empty">Aaj abhi tak koi nayi ad live nahi hui.</td></tr>';
   }
 
   // Detail table (already sorted server-side: category, then budget desc)
@@ -2488,10 +2503,10 @@ function renderNewToday() {
       ? camps.map(c =>
           `<tr><td>${c.category}</td><td>${c.product}</td>` +
           `<td class="cell-name">${campCell(c)}</td>` +
-          `<td>${tag(c.portal)}</td><td>${fmt.inr(c.budget)}</td>` +
+          `<td>${tag(c.portal)}</td><td>${fmt.inr(c.budget)}</td><td>${fmt.inr(c.spent_today)}</td>` +
           `<td>${newTodayChange(c)}</td><td>${scaleEstimate(c)}</td></tr>`
         ).join('')
-      : '<tr><td colspan="7" class="empty">—</td></tr>';
+      : '<tr><td colspan="8" class="empty">—</td></tr>';
   }
 
   // Stacked horizontal bar: per-category daily budget, split by success
