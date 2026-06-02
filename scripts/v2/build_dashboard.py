@@ -172,6 +172,21 @@ def fetch_active_campaign_budgets(conn, since: str, until: str):
     return out
 
 
+def _schedule_days(start_time, stop_time):
+    """Whole days between a campaign's start and stop ISO timestamps (min 1),
+    or 0 if either is missing/unparseable. Used to turn a lifetime budget into
+    an effective per-day figure."""
+    if not start_time or not stop_time:
+        return 0
+    try:
+        a = datetime.fromisoformat(start_time)
+        b = datetime.fromisoformat(stop_time)
+    except (ValueError, TypeError):
+        return 0
+    days = (b - a).days
+    return days if days >= 1 else 1
+
+
 def fetch_new_today(conn):
     """Campaigns that STARTED today (IST) and are currently ACTIVE — i.e. the
     ads pushed tonight. Classified by name (v2 category + product) and carrying
@@ -188,7 +203,8 @@ def fetch_new_today(conn):
     rows = conn.execute('''
         SELECT campaign_id, portal, name,
                COALESCE(daily_budget, 0)    AS daily,
-               COALESCE(lifetime_budget, 0) AS lifetime
+               COALESCE(lifetime_budget, 0) AS lifetime,
+               start_time, stop_time
         FROM meta_campaigns
         WHERE substr(start_time, 1, 10) = ?
           AND effective_status = 'ACTIVE'
@@ -205,22 +221,31 @@ def fetch_new_today(conn):
         today_spend[cid] = float(sp or 0)
 
     out = []
-    for cid, portal, name, daily, lifetime in rows:
-        # "Pushed budget" = the budget the operator set on the campaign, shown
-        # WITH its type so daily and lifetime are never conflated/summed (that
-        # mixing inflated the old total). 'Spent Today' is the actual spend.
+    for cid, portal, name, daily, lifetime, start_time, stop_time in rows:
+        # "Pushed budget" = what the operator set on the ad, as a PER-DAY figure.
+        # Daily budgets show as-is. A lifetime budget is the whole campaign's
+        # total over its schedule, so we divide it by the scheduled days to get
+        # the effective daily — i.e. what's actually applied to the ad per day —
+        # instead of the misleading lifetime lump sum.
         nm = name or ''
         d, l = float(daily or 0), float(lifetime or 0)
+        bnote = ''
         if d > 0:
             bval, btype = round(d), 'daily'
         elif l > 0:
-            bval, btype = round(l), 'lifetime'
+            days = _schedule_days(start_time, stop_time)
+            if days >= 1:
+                bval, btype = round(l / days), 'daily'
+                bnote = f'₹{round(l):,} lifetime ÷ {days} din schedule'
+            else:
+                bval, btype = round(l), 'lifetime'
         else:
             bval, btype = 0, 'adset'      # budget lives on the ad sets (not in DB)
         out.append({
             'campaign_id': cid,
             'portal': portal or '',
             'name': nm,
+            'budget_note': bnote,
             'category': derive_category_v2(nm),
             'product': derive_product_and_category(nm)[0],
             'budget_val': bval,
@@ -2646,8 +2671,9 @@ function scaleEstimate(c) {
 function pushedCell(c) {
   if (!c.budget_val || c.budget_type === 'adset')
     return `<span class="subtle">ad-set</span>`;
+  const note = c.budget_note ? ` title="${c.budget_note}"` : '';
   return c.budget_type === 'daily'
-    ? `${fmt.inr(c.budget_val)}<span class="subtle">/day</span>`
+    ? `<span${note}>${fmt.inr(c.budget_val)}<span class="subtle">/day</span></span>`
     : `${fmt.inr(c.budget_val)}<span class="subtle"> total</span>`;
 }
 
