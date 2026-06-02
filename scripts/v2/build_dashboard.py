@@ -206,17 +206,25 @@ def fetch_new_today(conn):
 
     out = []
     for cid, portal, name, daily, lifetime in rows:
-        # Configured budget is intentionally NOT shown — campaigns mix daily and
-        # lifetime budgets, so one "budget" number is misleading (lifetime
-        # totals inflated it). The honest figure is ACTUAL spend today. All
-        # active campaigns that started today are listed (even ₹0-spent ones).
+        # "Pushed budget" = the budget the operator set on the campaign, shown
+        # WITH its type so daily and lifetime are never conflated/summed (that
+        # mixing inflated the old total). 'Spent Today' is the actual spend.
         nm = name or ''
+        d, l = float(daily or 0), float(lifetime or 0)
+        if d > 0:
+            bval, btype = round(d), 'daily'
+        elif l > 0:
+            bval, btype = round(l), 'lifetime'
+        else:
+            bval, btype = 0, 'adset'      # budget lives on the ad sets (not in DB)
         out.append({
             'campaign_id': cid,
             'portal': portal or '',
             'name': nm,
             'category': derive_category_v2(nm),
             'product': derive_product_and_category(nm)[0],
+            'budget_val': bval,
+            'budget_type': btype,
             'spent_today': round(today_spend.get(cid, 0)),
         })
 
@@ -606,10 +614,11 @@ tr:hover td { background:#fafbff; }
 .btn-csv { background:#1a3d7c; color:#fff; border:none; padding:6px 11px; border-radius:6px; font-size:10px; cursor:pointer; font-weight:700; }
 .btn-csv:hover { background:#0d2145; }
 
-/* Aaj-ki-nayi-ads detail table: text cols left; spent + estimate right */
+/* Aaj-ki-nayi-ads detail table: text cols left; pushed/spent/estimate right */
 #tbl-newtoday-detail th, #tbl-newtoday-detail td { text-align:left; }
 #tbl-newtoday-detail th:nth-child(5), #tbl-newtoday-detail td:nth-child(5),
-#tbl-newtoday-detail th:nth-child(6), #tbl-newtoday-detail td:nth-child(6) { text-align:right; }
+#tbl-newtoday-detail th:nth-child(6), #tbl-newtoday-detail td:nth-child(6),
+#tbl-newtoday-detail th:nth-child(7), #tbl-newtoday-detail td:nth-child(7) { text-align:right; }
 
 /* Heatmap success cells */
 .sr-0 { background:#fef2f2; color:#7f1d1d; padding:2px 6px; border-radius:4px; }
@@ -938,7 +947,7 @@ tr:hover td { background:#fafbff; }
           <summary style="cursor:pointer;font-weight:700;font-size:12px;color:#1a3d7c;margin:4px 0 10px">▼ Har ad ka detail (category → product → campaign)</summary>
           <div style="overflow-x:auto">
             <table id="tbl-newtoday-detail">
-              <thead><tr><th>Category</th><th>Product</th><th>Campaign (Ad)</th><th>Portal</th><th>Spent Today (₹)</th><th title="Will this new ad likely succeed? Based on the spend-weighted lifetime ROAS of past ads of this product/category (≥1.35x = success, 1.10–1.35x = 50-50, <1.10x = fail). A historical base-rate, not a guarantee.">Success Estimate ⓘ</th></tr></thead>
+              <thead><tr><th>Category</th><th>Product</th><th>Campaign (Ad)</th><th>Portal</th><th title="The budget the operator set on the campaign. /day = daily budget, total = lifetime budget for the whole campaign. ad-set = budget is set on the ad sets (not at campaign level).">Pushed Budget</th><th>Spent Today (₹)</th><th title="Will this new ad likely succeed? Based on the spend-weighted lifetime ROAS of past ads of this product/category (≥1.35x = success, 1.10–1.35x = 50-50, <1.10x = fail). A historical base-rate, not a guarantee.">Success Estimate ⓘ</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -2487,10 +2496,10 @@ function renderNewToday() {
       ? camps.map(c =>
           `<tr><td>${c.category}</td><td>${c.product}</td>` +
           `<td class="cell-name">${campCell(c)}</td>` +
-          `<td>${tag(c.portal)}</td><td>${fmt.inr(c.spent_today)}</td>` +
+          `<td>${tag(c.portal)}</td><td>${pushedCell(c)}</td><td>${fmt.inr(c.spent_today)}</td>` +
           `<td>${scaleEstimate(c)}</td></tr>`
         ).join('')
-      : '<tr><td colspan="6" class="empty">—</td></tr>';
+      : '<tr><td colspan="7" class="empty">—</td></tr>';
   }
 
   // Stacked horizontal bar: per-category daily budget, split by success
@@ -2560,6 +2569,17 @@ function scaleEstimate(c) {
   if (c.est_kind === 'fail')
     return `<span class="delta-down" title="${tip}">❌ Likely Fail</span>`;
   return `<span style="color:#a35a00;font-weight:700" title="${tip}">🟡 50-50</span>`;
+}
+
+// Pushed-budget cell — the budget the operator set, shown WITH its type so
+// daily and lifetime are never conflated. ad-set = budget set on the ad sets
+// (not stored at campaign level in the DB).
+function pushedCell(c) {
+  if (!c.budget_val || c.budget_type === 'adset')
+    return `<span class="subtle">ad-set</span>`;
+  return c.budget_type === 'daily'
+    ? `${fmt.inr(c.budget_val)}<span class="subtle">/day</span>`
+    : `${fmt.inr(c.budget_val)}<span class="subtle"> total</span>`;
 }
 
 // Campaign cell — ▶ opens the ad's video in a new tab. Prefers the direct mp4
