@@ -231,16 +231,11 @@ def fetch_new_today(conn):
         d, l = float(daily or 0), float(lifetime or 0)
         bnote = ''
         if d > 0:
-            bval, btype = round(d), 'daily'
+            bval, btype = round(d), 'daily'        # the daily budget set on the ad
         elif l > 0:
-            days = _schedule_days(start_time, stop_time)
-            if days >= 1:
-                bval, btype = round(l / days), 'daily'
-                bnote = f'₹{round(l):,} lifetime ÷ {days} din schedule'
-            else:
-                bval, btype = round(l), 'lifetime'
+            bval, btype = round(l), 'lifetime'     # raw lifetime budget set (as-is)
         else:
-            bval, btype = 0, 'adset'      # budget lives on the ad sets (not in DB)
+            bval, btype = 0, 'adset'               # budget lives on the ad sets (not in DB)
         out.append({
             'campaign_id': cid,
             'portal': portal or '',
@@ -1009,7 +1004,7 @@ tr:hover td { background:#fafbff; }
         <p class="page-intro" style="margin:0 0 10px">Jo campaigns aaj (12 AM IST se) live hui — category &amp; product wise, aaj ke <strong>actual spend</strong> ke saath. Roz apne aap refresh hoti hai.</p>
         <div class="kpi-strip" id="newtoday-kpis" style="margin-bottom:12px"></div>
         <table id="tbl-newtoday-rollup" style="margin-bottom:14px">
-          <thead><tr><th>Category</th><th>Camps</th><th>Pushed (₹/day)</th><th>Spent Today (₹)</th><th>Share %</th></tr></thead>
+          <thead><tr><th>Category</th><th>Camps</th><th>Pushed Budget (₹)</th><th>Spent Today (₹)</th><th>Share %</th></tr></thead>
           <tbody></tbody>
         </table>
         <details>
@@ -2559,7 +2554,7 @@ function renderNewToday() {
 
   const meta = document.getElementById('newtoday-meta');
   if (meta) meta.textContent =
-    `${data.date} · ${camps.length} nayi ads · ${fmt.inr(totalPushed)}/day pushed · ${fmt.inr(totalSpent)} spent today`;
+    `${data.date} · ${camps.length} nayi ads · ${fmt.inr(totalPushed)} pushed · ${fmt.inr(totalSpent)} spent today`;
 
   // Group by category
   const byCat = {};
@@ -2573,7 +2568,7 @@ function renderNewToday() {
   const kpis = document.getElementById('newtoday-kpis');
   if (kpis) kpis.innerHTML =
     `<div class="kpi-card"><div class="kpi-lbl">Total Nayi Ads</div><div class="kpi-val">${camps.length}</div><div class="kpi-sub">aaj ${data.date}</div></div>` +
-    `<div class="kpi-card"><div class="kpi-lbl">Total Pushed Budget /day</div><div class="kpi-val">${fmt.inr(totalPushed)}</div><div class="kpi-sub">${catEntries.length} categories</div></div>` +
+    `<div class="kpi-card"><div class="kpi-lbl">Total Pushed Budget</div><div class="kpi-val">${fmt.inr(totalPushed)}</div><div class="kpi-sub">${catEntries.length} categories</div></div>` +
     `<div class="kpi-card"><div class="kpi-lbl">Spent Today (actual)</div><div class="kpi-val">${fmt.inr(totalSpent)}</div><div class="kpi-sub">${totalPushed ? Math.round(totalSpent / totalPushed * 100) : 0}% of pushed</div></div>`;
 
   // Rollup table
