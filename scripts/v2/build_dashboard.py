@@ -356,14 +356,20 @@ def _annotate_scale_estimate(conn, camps):
 
 
 def _annotate_video_links(camps):
-    """Attach a clickable Facebook video/post link to each new campaign.
+    """Attach an inline-playable video to each new campaign.
 
     build_dashboard is otherwise DB-only, but tonight's new campaigns are few
     (~50) so a bounded live Meta lookup is cheap. For each campaign we pull its
-    first ad's creative and derive a public link (the post that carries the
-    video). Best-effort: token-gated, fails fast on rate limits (max_retries=1),
-    and a small circuit-breaker stops after a few errors so a grumpy Meta API
-    can never stall the dashboard build. No token / no link → no link shown.
+    first ad's creative, then the video's direct mp4 `source` (which plays even
+    for dark/unpublished ad posts that the public Facebook page link won't show)
+    plus a permalink as an open-on-FB fallback.
+
+    Sets c['video_src'] (mp4, for the in-dashboard player) and c['video_url']
+    (FB permalink fallback). Best-effort: token-gated, fails fast on rate limits
+    (max_retries=1), with a 3-error circuit breaker so a grumpy Meta API can
+    never stall the otherwise DB-only build. The mp4 source is a signed URL that
+    expires after some hours, but the dashboard rebuilds every ~10 min so links
+    stay fresh.
     """
     if not os.getenv('META_ACCESS_TOKEN'):
         return
@@ -375,7 +381,8 @@ def _annotate_video_links(camps):
             d = meta_get(
                 f"{GRAPH_API}/{c['campaign_id']}/ads",
                 {'fields': 'preview_shareable_link,'
-                           'creative{effective_object_story_id}',
+                           'creative{video_id,object_story_spec,'
+                           'effective_object_story_id}',
                  'limit': 1},
                 max_retries=1, initial_backoff=2,
             )
@@ -386,11 +393,28 @@ def _annotate_video_links(camps):
         if not ads:
             continue
         ad = ads[0]
-        story = (ad.get('creative') or {}).get('effective_object_story_id')
-        url = (f"https://www.facebook.com/{story}" if story
-               else ad.get('preview_shareable_link') or '')
-        if url:
-            c['video_url'] = url
+        cr = ad.get('creative') or {}
+        story = cr.get('effective_object_story_id')
+        if story:
+            c['video_url'] = f"https://www.facebook.com/{story}"
+        elif ad.get('preview_shareable_link'):
+            c['video_url'] = ad['preview_shareable_link']
+        vid = cr.get('video_id') or ((cr.get('object_story_spec') or {})
+                                     .get('video_data') or {}).get('video_id')
+        if not vid:
+            continue
+        try:
+            v = meta_get(f"{GRAPH_API}/{vid}",
+                         {'fields': 'source,permalink_url'},
+                         max_retries=1, initial_backoff=2)
+        except (MetaRateLimitError, Exception):  # noqa: BLE001
+            fails += 1
+            continue
+        if v.get('source'):
+            c['video_src'] = v['source']
+        if v.get('permalink_url') and not c.get('video_url'):
+            p = v['permalink_url']
+            c['video_url'] = ('https://www.facebook.com' + p) if p.startswith('/') else p
 
 
 def fetch_adsets(conn, since: str, until: str):
@@ -2539,14 +2563,16 @@ function scaleEstimate(c) {
   return `<span style="color:#a35a00;font-weight:700" title="${tip}">🟡 50-50</span>`;
 }
 
-// Campaign cell — clickable ▶ video link (opens the ad's Facebook post/video)
-// when we resolved one, else plain name. ▶ is prefixed so it stays visible
-// even when the long name truncates with an ellipsis.
+// Campaign cell — ▶ opens the ad's video in a new tab. Prefers the direct mp4
+// source (plays straight in the browser, works for dark/unpublished ad posts);
+// falls back to the Facebook permalink. ▶ is prefixed so it stays visible even
+// when the long name truncates.
 function campCell(c) {
   const nm = c.name || '';
   const t = nm.replace(/"/g, '&quot;');
-  if (c.video_url)
-    return `<a href="${c.video_url}" target="_blank" rel="noopener" title="▶ Watch video — ${t}"><span style="color:#1877f2;font-weight:700">▶</span> ${nm}</a>`;
+  const href = c.video_src || c.video_url;
+  if (href)
+    return `<a href="${href}" target="_blank" rel="noopener" title="▶ Watch video — ${t}"><span style="color:#1877f2;font-weight:700">▶</span> ${nm}</a>`;
   return `<span title="${t}">${nm}</span>`;
 }
 
