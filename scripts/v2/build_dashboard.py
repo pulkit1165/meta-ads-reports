@@ -1009,7 +1009,7 @@ tr:hover td { background:#fafbff; }
         <p class="page-intro" style="margin:0 0 10px">Jo campaigns aaj (12 AM IST se) live hui — category &amp; product wise, aaj ke <strong>actual spend</strong> ke saath. Roz apne aap refresh hoti hai.</p>
         <div class="kpi-strip" id="newtoday-kpis" style="margin-bottom:12px"></div>
         <table id="tbl-newtoday-rollup" style="margin-bottom:14px">
-          <thead><tr><th>Category</th><th>Camps</th><th>Spent Today (₹)</th><th>Share %</th></tr></thead>
+          <thead><tr><th>Category</th><th>Camps</th><th>Pushed (₹/day)</th><th>Spent Today (₹)</th><th>Share %</th></tr></thead>
           <tbody></tbody>
         </table>
         <details>
@@ -2552,35 +2552,39 @@ function renderHeatmapPage(rows) {
 function renderNewToday() {
   const data = PAYLOAD.new_today || { date: '', camps: [] };
   const camps = data.camps || [];
-  const totalSpent = camps.reduce((s, c) => s + (c.spent_today || 0), 0);
+  const totalSpent  = camps.reduce((s, c) => s + (c.spent_today || 0), 0);
+  // Total pushed = sum of per-day budgets (lifetime already converted to /day,
+  // so these are comparable). ad-set-budget camps contribute 0 (unknown).
+  const totalPushed = camps.reduce((s, c) => s + (c.budget_val || 0), 0);
 
   const meta = document.getElementById('newtoday-meta');
   if (meta) meta.textContent =
-    `${data.date} · ${camps.length} nayi ads · ${fmt.inr(totalSpent)} spent today`;
+    `${data.date} · ${camps.length} nayi ads · ${fmt.inr(totalPushed)}/day pushed · ${fmt.inr(totalSpent)} spent today`;
 
-  // Group by category (by actual spend)
+  // Group by category
   const byCat = {};
   camps.forEach(c => {
-    const v = (byCat[c.category] = byCat[c.category] || { n: 0, spent: 0 });
-    v.n++; v.spent += (c.spent_today || 0);
+    const v = (byCat[c.category] = byCat[c.category] || { n: 0, spent: 0, pushed: 0 });
+    v.n++; v.spent += (c.spent_today || 0); v.pushed += (c.budget_val || 0);
   });
-  const catEntries = Object.entries(byCat).sort((a, b) => b[1].spent - a[1].spent);
+  const catEntries = Object.entries(byCat).sort((a, b) => b[1].pushed - a[1].pushed);
 
   // KPI cards
   const kpis = document.getElementById('newtoday-kpis');
   if (kpis) kpis.innerHTML =
     `<div class="kpi-card"><div class="kpi-lbl">Total Nayi Ads</div><div class="kpi-val">${camps.length}</div><div class="kpi-sub">aaj ${data.date}</div></div>` +
-    `<div class="kpi-card"><div class="kpi-lbl">Spent Today (actual)</div><div class="kpi-val">${fmt.inr(totalSpent)}</div><div class="kpi-sub">${catEntries.length} categories</div></div>`;
+    `<div class="kpi-card"><div class="kpi-lbl">Total Pushed Budget /day</div><div class="kpi-val">${fmt.inr(totalPushed)}</div><div class="kpi-sub">${catEntries.length} categories</div></div>` +
+    `<div class="kpi-card"><div class="kpi-lbl">Spent Today (actual)</div><div class="kpi-val">${fmt.inr(totalSpent)}</div><div class="kpi-sub">${totalPushed ? Math.round(totalSpent / totalPushed * 100) : 0}% of pushed</div></div>`;
 
   // Rollup table
   const rollup = document.querySelector('#tbl-newtoday-rollup tbody');
   if (rollup) {
     rollup.innerHTML = camps.length
       ? catEntries.map(([cat, v]) =>
-          `<tr><td><strong>${cat}</strong></td><td>${v.n}</td><td>${fmt.inr(v.spent)}</td><td>${totalSpent ? (v.spent / totalSpent * 100).toFixed(1) : '0.0'}%</td></tr>`
+          `<tr><td><strong>${cat}</strong></td><td>${v.n}</td><td>${fmt.inr(v.pushed)}</td><td>${fmt.inr(v.spent)}</td><td>${totalPushed ? (v.pushed / totalPushed * 100).toFixed(1) : '0.0'}%</td></tr>`
         ).join('') +
-        `<tr style="background:#f8faff;font-weight:800"><td>TOTAL</td><td>${camps.length}</td><td>${fmt.inr(totalSpent)}</td><td>100.0%</td></tr>`
-      : '<tr><td colspan="4" class="empty">Aaj abhi tak koi nayi ad live nahi hui.</td></tr>';
+        `<tr style="background:#f8faff;font-weight:800"><td>TOTAL</td><td>${camps.length}</td><td>${fmt.inr(totalPushed)}</td><td>${fmt.inr(totalSpent)}</td><td>100.0%</td></tr>`
+      : '<tr><td colspan="5" class="empty">Aaj abhi tak koi nayi ad live nahi hui.</td></tr>';
   }
 
   // Detail table (sorted server-side: category, then spent desc)
