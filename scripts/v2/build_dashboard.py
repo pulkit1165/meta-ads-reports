@@ -493,6 +493,50 @@ def fetch_shopify_daily(conn, since: str, until: str):
     return out
 
 
+def fetch_active_snapshot(conn):
+    """Return the latest live ACTIVE-status snapshot.
+
+    {
+      'time': '2026-06-02T15:28:00+05:30',
+      'by_portal':  {'SM': {'active_camps': N, 'active_ads': M}, ...},
+      'by_account': [{'portal':..,'account_id':..,'account_name':..,
+                      'active_camps':N, 'active_ads':M}, ...]
+    }
+
+    Returns empty shape if the snapshot table doesn't exist yet (first
+    deploy before db_init runs) or is empty. The frontend falls back to
+    the per-ad effective_status filter in that case.
+    """
+    has_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name='meta_active_snapshot'"
+    ).fetchone()
+    if not has_table:
+        return {'time': None, 'by_portal': {}, 'by_account': []}
+
+    row = conn.execute(
+        'SELECT MAX(snapshot_time) FROM meta_active_snapshot'
+    ).fetchone()
+    if not row or not row[0]:
+        return {'time': None, 'by_portal': {}, 'by_account': []}
+    latest = row[0]
+    rows = conn.execute('''
+        SELECT portal, account_id, account_name, active_camps, active_ads
+        FROM meta_active_snapshot WHERE snapshot_time = ?
+    ''', (latest,)).fetchall()
+    by_portal = {}
+    by_account = []
+    for portal, aid, aname, cc, ac in rows:
+        bp = by_portal.setdefault(portal, {'active_camps': 0, 'active_ads': 0})
+        bp['active_camps'] += int(cc or 0)
+        bp['active_ads']   += int(ac or 0)
+        by_account.append({
+            'portal': portal, 'account_id': aid, 'account_name': aname,
+            'active_camps': int(cc or 0), 'active_ads': int(ac or 0),
+        })
+    return {'time': latest, 'by_portal': by_portal, 'by_account': by_account}
+
+
 def fetch_freshness(conn):
     out = {}
     for r in conn.execute('''
@@ -1446,6 +1490,20 @@ function getCompareSet() {
 }
 
 // ── Aggregations ────────────────────────────────────────────────────────
+// Live ACTIVE-status snapshot (matches Ads Manager). PAYLOAD.active_snapshot
+// is captured by ingest_meta.py via Meta's summary=total_count endpoint —
+// truth-source, independent of whether ads had spend in window.
+function getActiveSnapshot() {
+  const snap = (PAYLOAD.active_snapshot) || { time: null, by_portal: {} };
+  const portals = F.portals.size ? [...F.portals] : Object.keys(snap.by_portal);
+  let camps = 0, ads = 0;
+  for (const p of portals) {
+    const v = snap.by_portal[p];
+    if (v) { camps += (v.active_camps || 0); ads += (v.active_ads || 0); }
+  }
+  return { camps, ads, time: snap.time };
+}
+
 function aggregate(rows, groupKey) {
   const map = new Map();
   for (const r of rows) {
@@ -1695,7 +1753,18 @@ function renderOverview(rows, prevRows) {
     : 'all portals · all orders';
 
   const cards = [
-    { l:'Active Ads',     v: fmt.num(a.active_ads),  s: a.active_camps + ' campaigns' },
+    // "Active Ads" KPI: prefer live snapshot (= Meta API summary=total_count,
+    // matches Ads Manager). Falls back to per-ad row filter if the snapshot
+    // table hasn't been populated yet (first deploy / ingest hasn't run).
+    ...(() => {
+      const snap = getActiveSnapshot();
+      const ok   = !!snap.time;
+      const ads  = ok ? snap.ads   : a.active_ads;
+      const camps= ok ? snap.camps : a.active_camps;
+      const sub  = ok ? (camps + ' campaigns · live @ ' + snap.time.slice(11,16) + ' IST')
+                      : (camps + ' campaigns · ⚠ snapshot pending');
+      return [{ l:'Active Ads', v: fmt.num(ads), s: sub }];
+    })(),
     { l:'Meta Spend',     v: fmt.inr(a.spend),       s: fmt.delta(a.spend, p.spend) + ' vs prev' },
     { l:'Real Orders',    v: fmt.num(shop.orders),   s: filterNote },
     { l:'Real Revenue',   v: fmt.inr(shop.revenue),  s: filterNote },
@@ -3067,6 +3136,7 @@ def main():
     adsets = fetch_adsets(conn, since, until)
     campaigns = fetch_active_campaign_budgets(conn, since, until)
     new_today = fetch_new_today(conn)
+    active_snapshot = fetch_active_snapshot(conn)
 
     payload = {
         'since': since,
@@ -3076,6 +3146,7 @@ def main():
         'adsets': adsets,                   # adset_id -> {name, audiences_incl, audiences_excl, ...}
         'campaigns': campaigns,             # campaign_id -> {name, daily_budget, status, portal}
         'new_today': new_today,             # {date, camps[]} — campaigns started today, category-wise
+        'active_snapshot': active_snapshot, # live effective_status=ACTIVE counts straight from Meta API
         'dimensions': dimensions,
         'freshness': freshness,
         'updated_at': now_iso(),

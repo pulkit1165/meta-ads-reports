@@ -389,6 +389,61 @@ def refresh_meta_ads_meta(conn, ad_ids: list):
     return len(rows)
 
 
+# ── Active-status snapshot (matches Ads Manager exactly) ────────────────
+def fetch_active_status_counts(account_id: str) -> dict:
+    """Count campaigns + ads in effective_status=ACTIVE for one account.
+
+    Uses Meta's summary=total_count so we get the size without paginating
+    every row. Returns {'active_camps': N, 'active_ads': N}. Either
+    count falls back to 0 on transient errors (transients get retried
+    inside meta_get; only hard failures fall through)."""
+    flt = json.dumps([{
+        'field': 'effective_status',
+        'operator': 'IN',
+        'value': ['ACTIVE'],
+    }])
+    common = {'filtering': flt, 'limit': 1, 'summary': 'total_count'}
+
+    cc = 0
+    try:
+        d = meta_get(f'{GRAPH_API}/{account_id}/campaigns', common)
+        cc = int((d.get('summary') or {}).get('total_count') or 0)
+    except Exception as e:
+        print(f"     active_status: campaigns count failed — {e}")
+
+    ac = 0
+    try:
+        d = meta_get(f'{GRAPH_API}/{account_id}/ads', common)
+        ac = int((d.get('summary') or {}).get('total_count') or 0)
+    except Exception as e:
+        print(f"     active_status: ads count failed — {e}")
+
+    return {'active_camps': cc, 'active_ads': ac}
+
+
+def upsert_active_snapshot(conn, snapshot_time: str, snapshots: list):
+    """snapshots = [(portal, account_id, account_name, active_camps, active_ads), ...]"""
+    if not snapshots:
+        return 0
+    rows = [
+        (snapshot_time, p, aid, an, cc, ac)
+        for (p, aid, an, cc, ac) in snapshots
+    ]
+    conn.executemany(
+        '''INSERT INTO meta_active_snapshot
+             (snapshot_time, portal, account_id, account_name, active_camps, active_ads)
+           VALUES (?,?,?,?,?,?)
+           ON CONFLICT(snapshot_time, account_id) DO UPDATE SET
+             portal=excluded.portal,
+             account_name=excluded.account_name,
+             active_camps=excluded.active_camps,
+             active_ads=excluded.active_ads''',
+        rows,
+    )
+    conn.commit()
+    return len(rows)
+
+
 # ── Ad effective_status refresh ─────────────────────────────────────────
 def ensure_effective_status_column(conn):
     """Add effective_status column to meta_ads_meta if it doesn't exist.
@@ -560,6 +615,33 @@ def main():
         ok = ingest_for_date(conn, ds, portals,
                              campaigns_only=args.campaigns_only)
         all_ok = all_ok and ok
+
+    # ── Active-status snapshot ──────────────────────────────────────────
+    # ONE snapshot per ingest run, independent of date window. Captures
+    # effective_status=ACTIVE counts straight from Meta so the Overview
+    # KPI matches Ads Manager (rather than depending on whether the ad
+    # also has a row in meta_ads_daily).
+    print(f"\n══════ active-status snapshot ══════")
+    snap_time = now_iso()
+    snapshots = []
+    for portal in portals:
+        for env_key, account_name in PORTAL_ACCOUNTS[portal]:
+            account_id = os.environ.get(env_key)
+            if not account_id:
+                continue
+            print(f"  · {portal}/{account_name}")
+            counts = fetch_active_status_counts(account_id)
+            snapshots.append((
+                portal, account_id, account_name,
+                counts['active_camps'], counts['active_ads'],
+            ))
+            print(f"     camps={counts['active_camps']:>4}  ads={counts['active_ads']:>5}")
+    if snapshots:
+        n = upsert_active_snapshot(conn, snap_time, snapshots)
+        tot_c = sum(s[3] for s in snapshots)
+        tot_a = sum(s[4] for s in snapshots)
+        print(f"\n📸 Snapshot @ {snap_time}: {n} accounts · "
+              f"{tot_c} active camps · {tot_a} active ads")
 
     conn.close()
     sys.exit(0 if all_ok else 2)

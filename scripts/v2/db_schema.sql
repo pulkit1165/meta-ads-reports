@@ -102,6 +102,28 @@ CREATE TABLE IF NOT EXISTS meta_campaigns (
 CREATE INDEX IF NOT EXISTS idx_mc_portal       ON meta_campaigns(portal);
 CREATE INDEX IF NOT EXISTS idx_mc_status       ON meta_campaigns(effective_status);
 
+-- ── Meta: live active-status snapshot ───────────────────────────────────
+-- One row per (snapshot_time, account_id). Captures the TRUE count of
+-- campaigns + ads in effective_status=ACTIVE at snapshot time, fetched
+-- straight from Meta's Graph API (filtered, summary=total_count).
+--
+-- Why this exists on top of meta_ads_meta.effective_status: the per-ad
+-- filter only counts ads that ALSO had spend in the dashboard window.
+-- An ad that's ACTIVE but hasn't spent yet (e.g., just turned on mid-day)
+-- is still missing. This snapshot is window-independent and matches
+-- exactly what Ads Manager shows.
+CREATE TABLE IF NOT EXISTS meta_active_snapshot (
+    snapshot_time TEXT NOT NULL,                -- ISO timestamp
+    portal        TEXT NOT NULL,                -- SM / SML / NBP
+    account_id    TEXT NOT NULL,
+    account_name  TEXT,
+    active_camps  INTEGER NOT NULL DEFAULT 0,
+    active_ads    INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (snapshot_time, account_id)
+);
+CREATE INDEX IF NOT EXISTS idx_mas_time   ON meta_active_snapshot(snapshot_time);
+CREATE INDEX IF NOT EXISTS idx_mas_portal ON meta_active_snapshot(portal);
+
 -- ── Meta: ad-set targeting (one row per adset_id) ────────────────────────
 -- Targeting (custom-audience inclusions/exclusions) lives at the ad-set
 -- level in Meta. Cached so we don't hammer the API every ingest — only
