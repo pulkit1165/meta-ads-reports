@@ -20,12 +20,15 @@ Usage:
 
 import argparse
 import json
+import os
 import sys
 from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _utils import db_connect, IST, now_iso  # noqa: E402
+from _utils import (  # noqa: E402
+    db_connect, IST, now_iso, meta_get, GRAPH_API, MetaRateLimitError,
+)
 
 # product_catalogue lives in scripts/ (parent of this v2/ dir) — used to
 # classify tonight's new campaigns by name on the Heatmap page card.
@@ -211,6 +214,9 @@ def fetch_new_today(conn):
     # a base-rate from history, not a per-ad prediction.
     _annotate_scale_estimate(conn, out)
 
+    # Clickable Facebook video link per campaign (best-effort, token-gated).
+    _annotate_video_links(out)
+
     # Increase/Decrease vs the budget when each campaign was first seen TODAY.
     # We snapshot into campaign_budget_history on every build (this script runs
     # inside v2-ingest, which restores+saves state/ntn.db, so the table
@@ -347,6 +353,44 @@ def _annotate_scale_estimate(conn, camps):
             roas = round(rev / spend, 2)
             c['est_kind'], c['est_roas'], c['est_spend'], c['est_n'], c['est_basis'] = \
                 _classify(roas), roas, round(spend), n, basis
+
+
+def _annotate_video_links(camps):
+    """Attach a clickable Facebook video/post link to each new campaign.
+
+    build_dashboard is otherwise DB-only, but tonight's new campaigns are few
+    (~50) so a bounded live Meta lookup is cheap. For each campaign we pull its
+    first ad's creative and derive a public link (the post that carries the
+    video). Best-effort: token-gated, fails fast on rate limits (max_retries=1),
+    and a small circuit-breaker stops after a few errors so a grumpy Meta API
+    can never stall the dashboard build. No token / no link → no link shown.
+    """
+    if not os.getenv('META_ACCESS_TOKEN'):
+        return
+    fails = 0
+    for c in camps:
+        if fails >= 3:
+            break
+        try:
+            d = meta_get(
+                f"{GRAPH_API}/{c['campaign_id']}/ads",
+                {'fields': 'preview_shareable_link,'
+                           'creative{effective_object_story_id}',
+                 'limit': 1},
+                max_retries=1, initial_backoff=2,
+            )
+        except (MetaRateLimitError, Exception):  # noqa: BLE001
+            fails += 1
+            continue
+        ads = (d or {}).get('data') or []
+        if not ads:
+            continue
+        ad = ads[0]
+        story = (ad.get('creative') or {}).get('effective_object_story_id')
+        url = (f"https://www.facebook.com/{story}" if story
+               else ad.get('preview_shareable_link') or '')
+        if url:
+            c['video_url'] = url
 
 
 def fetch_adsets(conn, since: str, until: str):
@@ -2419,7 +2463,7 @@ function renderNewToday() {
     detail.innerHTML = camps.length
       ? camps.map(c =>
           `<tr><td>${c.category}</td><td>${c.product}</td>` +
-          `<td class="cell-name" title="${(c.name || '').replace(/"/g, '&quot;')}">${c.name}</td>` +
+          `<td class="cell-name">${campCell(c)}</td>` +
           `<td>${tag(c.portal)}</td><td>${fmt.inr(c.budget)}</td>` +
           `<td>${newTodayChange(c)}</td><td>${scaleEstimate(c)}</td></tr>`
         ).join('')
@@ -2493,6 +2537,17 @@ function scaleEstimate(c) {
   if (c.est_kind === 'fail')
     return `<span class="delta-down" title="${tip}">❌ Likely Fail</span>`;
   return `<span style="color:#a35a00;font-weight:700" title="${tip}">🟡 50-50</span>`;
+}
+
+// Campaign cell — clickable ▶ video link (opens the ad's Facebook post/video)
+// when we resolved one, else plain name. ▶ is prefixed so it stays visible
+// even when the long name truncates with an ellipsis.
+function campCell(c) {
+  const nm = c.name || '';
+  const t = nm.replace(/"/g, '&quot;');
+  if (c.video_url)
+    return `<a href="${c.video_url}" target="_blank" rel="noopener" title="▶ Watch video — ${t}"><span style="color:#1877f2;font-weight:700">▶</span> ${nm}</a>`;
+  return `<span title="${t}">${nm}</span>`;
 }
 
 // Budget change cell for a new-today campaign: ↑/↓ vs the budget when it was
