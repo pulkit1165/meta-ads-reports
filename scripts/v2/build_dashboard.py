@@ -2504,10 +2504,73 @@ function renderCreativesPage(rows) {
 // code AND the name together: "st1 — Style/Design + Quality + Crystal
 // Energy". Keep in sync with SENTIMENT_SEED in seed_lookups.py.
 const SENTIMENT_LABELS = {
-  st1: 'Style/Design + Quality + Crystal Energy',
-  st2: 'Unisex Products + Quality + Crystal Energy',
-  st3: 'OG Gold Price Fear',
-  st4: 'Animal Storyline + Crystal Energy + Quality',
+  // Legacy 4 — crystal/jewellery storyline framings
+  st1:    'Style/Design + Quality + Crystal Energy',
+  st2:    'Unisex Product + Quality + Crystal Energy',
+  st3:    'OG Gold Price Fear',
+  st4:    'Paras Storyline + Crystal Energy + Quality',
+  // ST101 — Quality / Achievement / Testing
+  st101a: 'Quality + Achievement + Testing',
+  st101b: 'Quality + Testing + Achievement',
+  st101c: 'Achievement + Quality + Testing',
+  st101d: 'Achievement + Testing + Quality',
+  st101e: 'Testing + Quality + Achievement',
+  st101f: 'Testing + Achievement + Quality',
+  // ST102 — Fear-Based Problem / SKU as Solution / Validation
+  st102a: 'Fear Based Problem + SKU as Solution + Validation',
+  st102b: 'Fear Based Problem + Validation + SKU as Solution',
+  st102c: 'SKU as Solution + Fear Based Problem + Validation',
+  st102d: 'SKU as Solution + Validation + Fear Based Problem',
+  st102e: 'Validation + Fear Based Problem + SKU as Solution',
+  st102f: 'Validation + SKU as Solution + Fear Based Problem',
+  // ST103 — Desire / Fast Results / Quality
+  st103a: 'Desire + Fast Results + Quality',
+  st103b: 'Desire + Quality + Fast Results',
+  st103c: 'Fast Results + Desire + Quality',
+  st103d: 'Fast Results + Quality + Desire',
+  st103e: 'Quality + Desire + Fast Results',
+  st103f: 'Quality + Fast Results + Desire',
+  // ST104 — Before/After / Testimonial / Testing
+  st104a: 'Before/After + Testimonial + Testing',
+  st104b: 'Before/After + Testing + Testimonial',
+  st104c: 'Testimonial + Before/After + Testing',
+  st104d: 'Testimonial + Testing + Before/After',
+  st104e: 'Testing + Before/After + Testimonial',
+  st104f: 'Testing + Testimonial + Before/After',
+  // ST105 — Relevance / Validation / Trust
+  st105a: 'Relevance + Validation + Trust',
+  st105b: 'Relevance + Trust + Validation',
+  st105c: 'Validation + Relevance + Trust',
+  st105d: 'Validation + Trust + Relevance',
+  st105e: 'Trust + Relevance + Validation',
+  st105f: 'Trust + Validation + Relevance',
+  // ST106 — Ingredient Story / Benefits / Quality
+  st106a: 'Ingredient Story + Benefits + Quality',
+  st106b: 'Ingredient Story + Quality + Benefits',
+  st106c: 'Benefits + Ingredient Story + Quality',
+  st106d: 'Benefits + Quality + Ingredient Story',
+  st106e: 'Quality + Ingredient Story + Benefits',
+  st106f: 'Quality + Benefits + Ingredient Story',
+  // ST107 — Manufacturing/R&D / Quality / Achievements
+  st107a: 'Manufacturing/R&D + Quality + Achievements',
+  st107b: 'Manufacturing/R&D + Achievements + Quality',
+  st107c: 'Quality + Manufacturing/R&D + Achievements',
+  st107d: 'Quality + Achievements + Manufacturing/R&D',
+  st107e: 'Achievements + Manufacturing/R&D + Quality',
+  st107f: 'Achievements + Quality + Manufacturing/R&D',
+  // ST108 — Offer / Deal
+  st108a: 'Offer / Deal',
+  // ST109 — Competitor Comparison / Achievements / Trust
+  st109a: 'Competitor Comparison + Achievements + Trust',
+  st109b: 'Competitor Comparison + Trust + Achievements',
+  st109c: 'Achievements + Competitor Comparison + Trust',
+  st109d: 'Achievements + Trust + Competitor Comparison',
+  st109e: 'Trust + Competitor Comparison + Achievements',
+  st109f: 'Trust + Achievements + Competitor Comparison',
+  // ST110-112 — singletons
+  st110a: 'Celebrity / Social Proof',
+  st111a: 'Daily Routine',
+  st112a: 'Launch Purpose + BTS + Usage',
 };
 function sentimentDisplay(code) {
   if (!code) return '(unset)';

@@ -114,15 +114,30 @@ def match_product_from_name(text: str, keyword_index: list) -> str | None:
 # in case nomenclature drifts.
 NTN_PATTERN = re.compile(r'(?<![A-Za-z0-9])(NTN_?(\d{2,5}))(?![A-Za-z0-9])', re.IGNORECASE)
 
-# Sentiment: _st1_, _st12_, etc. Anchored to underscores to avoid matching
-# things like "static" (which has 'st' but not as a code).
-SENTIMENT_PATTERN = re.compile(r'(?<![A-Za-z0-9])(st(\d{1,3}))(?![A-Za-z0-9])', re.IGNORECASE)
+# Sentiment: _st1_, _st12_, _st101a_, _st102f_, etc. Anchored to
+# underscores to avoid matching things like "static" (which has 'st' but
+# not as a code). Captures optional A-F letter suffix for ST10X family
+# (permutation indicator — Quality+Achievement+Testing has 6 orderings).
+SENTIMENT_PATTERN = re.compile(
+    r'(?<![A-Za-z0-9])(st(\d{1,3})([a-f])?)(?![A-Za-z0-9])',
+    re.IGNORECASE,
+)
 
 # Only these sentiment codes are considered valid. Anything outside this
-# set (e.g. _st9_, _st15_) is treated as unset — keeps the Sentiments page
-# limited to the operator's defined taxonomy. Update SENTIMENT_SEED in
-# seed_lookups.py if you add a new code here.
-ALLOWED_SENTIMENTS = {'st1', 'st2', 'st3', 'st4'}
+# set (e.g. _st9_, _st113a_) is treated as unset — keeps the Sentiments
+# page limited to the operator's defined taxonomy. Single source of
+# truth lives in seed_lookups.SENTIMENT_SEED; we mirror just the codes
+# here so classify_ads doesn't pull in gspread / sqlite at import time.
+ALLOWED_SENTIMENTS = (
+    # Legacy 4
+    {'st1', 'st2', 'st3', 'st4'} |
+    # ST101-107, 109 — six A-F permutations each
+    {f'st{n}{s}'
+     for n in (101, 102, 103, 104, 105, 106, 107, 109)
+     for s in 'abcdef'} |
+    # ST108, 110, 111, 112 — single A
+    {'st108a', 'st110a', 'st111a', 'st112a'}
+)
 
 # Creative type — order matters, first match wins. Each rule is a list of
 # keywords. A keyword matches when it appears as a token (preceded/followed
@@ -157,14 +172,16 @@ def extract_ntn_code(text: str) -> str | None:
 
 
 def extract_sentiment(text: str) -> str | None:
-    """Returns 'st1' / 'st2' / 'st3' / 'st4' (lowercased) or None.
-    Codes outside ALLOWED_SENTIMENTS are ignored — the dashboard's
-    Sentiments page only tracks the operator's defined taxonomy."""
+    """Returns a sentiment code like 'st1' / 'st101a' / 'st108a'
+    (lowercased) or None. Codes outside ALLOWED_SENTIMENTS are
+    ignored — the dashboard's Sentiments page only tracks the
+    operator's defined taxonomy."""
     if not text: return None
     m = SENTIMENT_PATTERN.search(text)
     if not m: return None
     digits = m.group(2)
-    code = f'st{digits}'
+    suffix = (m.group(3) or '').lower()
+    code = f'st{digits}{suffix}'
     return code if code in ALLOWED_SENTIMENTS else None
 
 

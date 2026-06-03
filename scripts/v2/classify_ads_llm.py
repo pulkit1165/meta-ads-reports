@@ -33,26 +33,54 @@ ANTHROPIC_KEY = os.getenv('ANTHROPIC_API_KEY')
 GRAPH = 'https://graph.facebook.com/v19.0'
 IST = ZoneInfo('Asia/Kolkata')
 
-# Keep in sync with ALLOWED_SENTIMENTS in classify_ads.py and SENTIMENT_SEED
-# in seed_lookups.py. If a 5th code is added, extend in three places.
-SENTIMENT_DEFS = [
-    ('st1', 'Style/Design + Quality + Crystal Energy',
-     'Ads emphasizing aesthetics, design, craft quality. Common cues: '
-     '"design", "premium look", "stylish", "elegant", crystal product '
-     'imagery with focus on appearance.'),
-    ('st2', 'Unisex Products + Quality + Crystal Energy',
-     'Ads positioning the product as for-everyone / unisex / both men and '
-     'women. Common cues: "unisex", "for him and her", "for everyone", '
-     '"any gender". Crystal energy as a benefit.'),
-    ('st3', 'OG Gold Price Fear',
-     'Ads using gold price increases or fear-of-missing-out around gold '
-     'value as the hook. Common cues: "gold price rising", "before prices '
-     'go up", "limited gold deal", "OG gold", price-anxiety framing.'),
-    ('st4', 'Animal Storyline + Crystal Energy + Quality',
-     'Ads featuring an animal as the storyline — horse, owl, peacock, '
-     'cheetah, elephant, butterfly, lion, tiger, deer, etc. — combined '
-     'with crystal energy and quality framing.'),
-]
+# Keep in sync with SENTIMENT_SEED in seed_lookups.py and ALLOWED_SENTIMENTS
+# in classify_ads.py. 4 legacy codes + 52 storyline-framework codes.
+# Single source of truth: seed_lookups.SENTIMENT_SEED — we pull from there
+# at import so adding a code in one place suffices.
+import sys as _sys
+from pathlib import Path as _Path
+_sys.path.insert(0, str(_Path(__file__).resolve().parent))
+from seed_lookups import SENTIMENT_SEED  # noqa: E402
+
+# Short per-code descriptions to help the LLM disambiguate. Anything not
+# listed falls back to just the label from SENTIMENT_SEED.
+_SENTIMENT_DESCRIPTIONS = {
+    'st1': 'Crystal product. Emphasizes aesthetics / design / craft quality. "Design", "premium look", "stylish", "elegant".',
+    'st2': 'Crystal product positioned as unisex / for everyone. "Unisex", "for him and her", "any gender".',
+    'st3': 'Gold price increases or fear-of-missing-out around gold value as the hook. "Gold price rising", "before prices go up", "OG gold".',
+    'st4': 'Paras (founder/face) appears in the storyline alongside crystal energy + quality framing.',
+    'st108a': 'Pure offer / deal hook — discount, free gift, limited time.',
+    'st110a': 'Celebrity endorsement or strong social proof (followers, awards) as the lead.',
+    'st111a': 'Daily routine / habit / lifestyle integration framing.',
+    'st112a': 'New launch — purpose + behind-the-scenes + usage demo.',
+}
+# Family-level descriptions for ST101-107, ST109 (permutations differ only
+# by ordering, so the LLM picks the variant that matches what the ad opens
+# with → builds to → closes with).
+_FAMILY_DESCRIPTIONS = {
+    'st101': 'Quality, Achievement (awards/sales), and Testing (lab/cert) in some order.',
+    'st102': 'Fear-Based Problem, SKU as Solution, Validation in some order.',
+    'st103': 'Desire, Fast Results (timeframe promised), Quality in some order.',
+    'st104': 'Before/After transformation, Testimonial, Testing in some order.',
+    'st105': 'Relevance (specific persona), Validation, Trust in some order.',
+    'st106': 'Ingredient Story, Benefits, Quality in some order.',
+    'st107': 'Manufacturing/R&D, Quality, Achievements in some order.',
+    'st109': 'Competitor Comparison, Achievements, Trust in some order.',
+}
+
+SENTIMENT_DEFS = []
+for code, label in SENTIMENT_SEED:
+    desc = _SENTIMENT_DESCRIPTIONS.get(code)
+    if not desc:
+        # ST10X family — give the family hint + the specific ordering
+        fam_key = code[:5]  # 'st101', 'st102', etc.
+        fam_hint = _FAMILY_DESCRIPTIONS.get(fam_key, '')
+        desc = (
+            f'Theme: {label}. ' + (fam_hint + ' ' if fam_hint else '') +
+            'Pick this letter variant when the ad presents the elements in '
+            'exactly this order (open → middle → close).'
+        )
+    SENTIMENT_DEFS.append((code, label, desc))
 
 SYSTEM_PROMPT = """You classify ad creatives into one of 4 sentiment codes,
 or return null if none of the 4 fit. Output JSON only.
@@ -87,7 +115,7 @@ OUTPUT_SCHEMA = {
                 'properties': {
                     'ad_id':     {'type': 'string'},
                     'sentiment': {'type': ['string', 'null'],
-                                  'enum': ['st1', 'st2', 'st3', 'st4', None]},
+                                  'enum': [code for code, _ in SENTIMENT_SEED] + [None]},
                 },
                 'required': ['ad_id', 'sentiment'],
                 'additionalProperties': False,
@@ -188,7 +216,7 @@ def classify_batch(client, batch):
         sent = item.get('sentiment')
         if not aid:
             continue
-        if sent in ('st1', 'st2', 'st3', 'st4'):
+        if sent in {c for c, _ in SENTIMENT_SEED}:
             out[str(aid)] = sent
         else:
             out[str(aid)] = None
@@ -250,7 +278,9 @@ def main():
         time.sleep(0.15)  # gentle on Meta rate limits
     print(f"   fetched creative for {len(ads)}/{len(rows)}")
 
-    counts = {'st1': 0, 'st2': 0, 'st3': 0, 'st4': 0, 'null': 0, 'missing': 0}
+    counts = {code: 0 for code, _ in SENTIMENT_SEED}
+    counts['null'] = 0
+    counts['missing'] = 0
     total_batches = (len(ads) + BATCH_SIZE - 1) // BATCH_SIZE
 
     for bi in range(0, len(ads), BATCH_SIZE):
@@ -291,12 +321,12 @@ def main():
 
     print()
     print(f"Classification done — {datetime.now(IST).isoformat()}")
-    print(f"  st1 (Style/Design):       {counts['st1']}")
-    print(f"  st2 (Unisex):             {counts['st2']}")
-    print(f"  st3 (Gold Price Fear):    {counts['st3']}")
-    print(f"  st4 (Animal Storyline):   {counts['st4']}")
-    print(f"  null (didn't fit any):    {counts['null']}")
-    print(f"  missing (no LLM result):  {counts['missing']}")
+    # Print non-zero buckets only — 56 codes is a lot of noise otherwise.
+    for code, label in SENTIMENT_SEED:
+        if counts.get(code, 0):
+            print(f"  {code:8s} {label[:40]:40s} {counts[code]}")
+    print(f"  {'null':8s} {'(no fit)':40s} {counts['null']}")
+    print(f"  {'missing':8s} {'(no LLM result)':40s} {counts['missing']}")
     if args.dry_run:
         print("  (dry-run — DB not updated)")
 
