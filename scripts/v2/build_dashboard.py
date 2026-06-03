@@ -172,6 +172,11 @@ def fetch_active_campaign_budgets(conn, since: str, until: str):
     return out
 
 
+# How many days of newly-started campaigns the "Aaj ki Nayi Ads" card keeps
+# browsable in its date dropdown.
+DAYS_NEW_ADS = 7
+
+
 def _accounts_from_env_file():
     """[(portal, act_id)] from config/accounts.env (committed, not secret)."""
     path = REPO_ROOT / 'config' / 'accounts.env'
@@ -191,15 +196,16 @@ def _accounts_from_env_file():
     return out
 
 
-def _live_today_campaigns(today):
-    """Today's ACTIVE campaigns straight from Meta — matches Ads Manager exactly.
+def _live_active_campaigns():
+    """ALL currently-ACTIVE campaigns straight from Meta — matches Ads Manager.
 
     The DB's effective_status goes stale (paused/ended campaigns linger as
-    ACTIVE, and duplicates pile up), which over-counted the pushed-budget total.
-    Pulling the live list fixes that. Returns rows shaped exactly like the DB
-    query — (cid, portal, name, daily, lifetime, start_time, stop_time), budgets
-    already in ₹ — or None if there's no token / nothing came back (caller then
-    falls back to the DB so the card never goes blank).
+    ACTIVE, and duplicates pile up), which over-counted the budget. The live
+    list fixes that. No date filter here — the caller picks the most-recent
+    start date (so the card always shows the latest batch, never blank between
+    midnight and tonight's push). Returns rows shaped like the DB query:
+    (cid, portal, name, daily, lifetime, start_time, stop_time), budgets in ₹,
+    or None if there's no token / nothing came back (caller falls back to DB).
     """
     import time as _t
     if not os.getenv('META_ACCESS_TOKEN'):
@@ -224,8 +230,6 @@ def _live_today_campaigns(today):
             continue                                  # error for this account
         got_any = True
         for c in data:
-            if (c.get('start_time') or '')[:10] != today:
-                continue
             rows.append((
                 c.get('id'), portal, c.get('name') or '',
                 float(c.get('daily_budget') or 0) / 100,
@@ -264,38 +268,39 @@ def fetch_new_today(conn):
     camp or two.
     """
     today = datetime.now(IST).strftime('%Y-%m-%d')
+    window_start = (datetime.now(IST).date() - timedelta(days=DAYS_NEW_ADS)).isoformat()
+
     # Prefer the LIVE Meta list (matches Ads Manager — the DB's ACTIVE status
     # goes stale and over-counts). Fall back to the DB if there's no token.
-    rows = _live_today_campaigns(today)
-    if rows is None:
-        rows = conn.execute('''
+    all_rows = _live_active_campaigns()
+    if all_rows is None:
+        all_rows = conn.execute('''
             SELECT campaign_id, portal, name,
                    COALESCE(daily_budget, 0)    AS daily,
                    COALESCE(lifetime_budget, 0) AS lifetime,
                    start_time, stop_time
             FROM meta_campaigns
-            WHERE substr(start_time, 1, 10) = ?
-              AND effective_status = 'ACTIVE'
-        ''', (today,)).fetchall()
+            WHERE effective_status = 'ACTIVE'
+        ''').fetchall()
 
-    # Today's ACTUAL spend per campaign (vs the configured daily budget above),
-    # summed from the ad-day grid. Accrues through the day as ingest runs.
-    today_spend = {}
-    for cid, sp in conn.execute(
-        'SELECT campaign_id, COALESCE(SUM(spend), 0) FROM meta_ads_daily '
-        'WHERE date = ? AND campaign_id IS NOT NULL GROUP BY campaign_id',
-        (today,),
+    # Actual spend per (campaign, date) over the window — so each ad shows the
+    # spend on the date it launched (consistent with the date being viewed).
+    spend_map = {}
+    for cid, dt, sp in conn.execute(
+        'SELECT campaign_id, date, COALESCE(SUM(spend), 0) FROM meta_ads_daily '
+        'WHERE date >= ? AND campaign_id IS NOT NULL GROUP BY campaign_id, date',
+        (window_start,),
     ).fetchall():
-        today_spend[cid] = float(sp or 0)
+        spend_map[(cid, dt)] = float(sp or 0)
 
+    # Build one row per campaign that STARTED within the last DAYS_NEW_ADS days,
+    # tagged with its start date. The client groups these into a date dropdown so
+    # every day's batch is browsable date-wise (nothing is lost at midnight).
     out = []
-    for cid, portal, name, daily, lifetime, start_time, stop_time in rows:
-        # Pushed budget shown as a PER-DAY figure so the total matches what Meta
-        # actually spends per day. Daily budgets are per-day already; a lifetime
-        # budget is the whole campaign's total over its schedule, so divide it by
-        # the scheduled days to get the effective daily push (e.g. ₹2,20,000 over
-        # 21 days = ₹10,476/day). Summing lifetime lump sums otherwise inflated
-        # the total ~20x. All of today's active ads are counted.
+    for cid, portal, name, daily, lifetime, start_time, stop_time in all_rows:
+        sdate = (start_time or '')[:10]
+        if not sdate or sdate < window_start or sdate > today:
+            continue
         nm = name or ''
         d, l = float(daily or 0), float(lifetime or 0)
         bnote = ''
@@ -314,22 +319,31 @@ def fetch_new_today(conn):
             'campaign_id': cid,
             'portal': portal or '',
             'name': nm,
+            'date': sdate,
             'budget_note': bnote,
             'category': derive_category_v2(nm),
             'product': derive_product_and_category(nm)[0],
             'budget_val': bval,
             'budget_type': btype,
-            'spent_today': round(today_spend.get(cid, 0)),
+            'spent_today': round(spend_map.get((cid, sdate), 0)),
         })
 
     # Per-ad success estimate (historical spend-weighted ROAS of the product).
     _annotate_scale_estimate(conn, out)
 
-    # Clickable Facebook video link per campaign (best-effort, token-gated).
-    _annotate_video_links(out)
+    # Browsable dates (desc) + default to the most recent that has any ads.
+    dates = sorted({c['date'] for c in out}, reverse=True)
+    default_date = dates[0] if dates else today
 
-    out.sort(key=lambda r: (r['category'], -r['spent_today']))
-    return {'date': today, 'camps': out}
+    # Video links are the only per-camp API cost — fetch them just for the
+    # default (most-recent) date's ads to keep the build fast. Older dates are
+    # historical; their ▶ links resolve lazily isn't possible on a static build,
+    # so they simply show the name.
+    _annotate_video_links([c for c in out if c['date'] == default_date])
+
+    out.sort(key=lambda r: (r['date'], r['category'], -r['spent_today']))
+    return {'dates': dates, 'default_date': default_date, 'today': today,
+            'camps': out}
 
 
 def _annotate_budget_change(conn, today, camps):
@@ -1074,8 +1088,12 @@ tr:hover td { background:#fafbff; }
            daily budget. Independent of the date/portal filters above; resets
            at IST midnight on each hourly rebuild. -->
       <div class="card">
-        <h3>🌙 Aaj ki Nayi Ads — Category-wise Budget <span class="meta" id="newtoday-meta"></span></h3>
-        <p class="page-intro" style="margin:0 0 10px">Jo campaigns aaj (12 AM IST se) live hui — category &amp; product wise, aaj ke <strong>actual spend</strong> ke saath. Roz apne aap refresh hoti hai.</p>
+        <h3>🌙 Nayi Ads — Category-wise (date-wise) <span class="meta" id="newtoday-meta"></span></h3>
+        <p class="page-intro" style="margin:0 0 8px">Kisi bhi din ki nayi ads chuno — category &amp; product wise, <strong>pushed budget</strong> (per-day) aur us din ka <strong>actual spend</strong>. Live Meta se, Ads Manager jaisa.</p>
+        <div style="margin:0 0 12px">
+          <label for="newtoday-date" style="font-size:11px;font-weight:700;color:#0d2145">📅 Date:&nbsp;</label>
+          <select id="newtoday-date" style="padding:4px 9px;border:1px solid #dde3f0;border-radius:6px;font-size:12px;font-weight:600"></select>
+        </div>
         <div class="kpi-strip" id="newtoday-kpis" style="margin-bottom:12px"></div>
         <table id="tbl-newtoday-rollup" style="margin-bottom:14px">
           <thead><tr><th>Category</th><th>Camps</th><th>Pushed (₹/day)</th><th>Spent Today (₹)</th><th>Share %</th></tr></thead>
@@ -2619,16 +2637,30 @@ function renderHeatmapPage(rows) {
 // Reads PAYLOAD.new_today (precomputed server-side, independent of filters),
 // so it's rendered once on load rather than from the filtered ad-day rows.
 function renderNewToday() {
-  const data = PAYLOAD.new_today || { date: '', camps: [] };
-  const camps = data.camps || [];
+  const data = PAYLOAD.new_today || { dates: [], default_date: '', today: '', camps: [] };
+  const dates = (data.dates && data.dates.length) ? data.dates : [data.today].filter(Boolean);
+  const sel = document.getElementById('newtoday-date');
+  if (sel && !sel.dataset.filled) {
+    sel.innerHTML = dates.map(d =>
+      `<option value="${d}">${d === data.today ? d + ' (today)' : d}</option>`).join('');
+    sel.value = data.default_date || dates[0] || '';
+    sel.dataset.filled = '1';
+    sel.addEventListener('change', () => renderNewTodayFor(sel.value));
+  }
+  renderNewTodayFor(sel ? sel.value : (data.default_date || ''));
+}
+
+// Render the new-ads card for one selected date.
+function renderNewTodayFor(date) {
+  const data = PAYLOAD.new_today || { camps: [], today: '' };
+  const camps = (data.camps || []).filter(c => c.date === date);
   const totalSpent  = camps.reduce((s, c) => s + (c.spent_today || 0), 0);
-  // Total pushed = sum of per-day budgets (lifetime already converted to /day,
-  // so these are comparable). ad-set-budget camps contribute 0 (unknown).
   const totalPushed = camps.reduce((s, c) => s + (c.budget_val || 0), 0);
 
   const meta = document.getElementById('newtoday-meta');
   if (meta) meta.textContent =
-    `${data.date} · ${camps.length} nayi ads · ${fmt.inr(totalPushed)}/day pushed · ${fmt.inr(totalSpent)} spent today`;
+    `${date}${date === data.today ? ' (today)' : ''} · ${camps.length} nayi ads · ` +
+    `${fmt.inr(totalPushed)}/day pushed · ${fmt.inr(totalSpent)} spent`;
 
   // Group by category
   const byCat = {};
@@ -2641,9 +2673,9 @@ function renderNewToday() {
   // KPI cards
   const kpis = document.getElementById('newtoday-kpis');
   if (kpis) kpis.innerHTML =
-    `<div class="kpi-card"><div class="kpi-lbl">Total Nayi Ads</div><div class="kpi-val">${camps.length}</div><div class="kpi-sub">aaj ${data.date}</div></div>` +
+    `<div class="kpi-card"><div class="kpi-lbl">Nayi Ads</div><div class="kpi-val">${camps.length}</div><div class="kpi-sub">${date}</div></div>` +
     `<div class="kpi-card"><div class="kpi-lbl">Total Pushed Budget /day</div><div class="kpi-val">${fmt.inr(totalPushed)}</div><div class="kpi-sub">${catEntries.length} categories</div></div>` +
-    `<div class="kpi-card"><div class="kpi-lbl">Spent Today (actual)</div><div class="kpi-val">${fmt.inr(totalSpent)}</div><div class="kpi-sub">${totalPushed ? Math.round(totalSpent / totalPushed * 100) : 0}% of pushed</div></div>`;
+    `<div class="kpi-card"><div class="kpi-lbl">Spent (that day)</div><div class="kpi-val">${fmt.inr(totalSpent)}</div><div class="kpi-sub">${totalPushed ? Math.round(totalSpent / totalPushed * 100) : 0}% of pushed</div></div>`;
 
   // Rollup table
   const rollup = document.querySelector('#tbl-newtoday-rollup tbody');
@@ -2653,10 +2685,10 @@ function renderNewToday() {
           `<tr><td><strong>${cat}</strong></td><td>${v.n}</td><td>${fmt.inr(v.pushed)}</td><td>${fmt.inr(v.spent)}</td><td>${totalPushed ? (v.pushed / totalPushed * 100).toFixed(1) : '0.0'}%</td></tr>`
         ).join('') +
         `<tr style="background:#f8faff;font-weight:800"><td>TOTAL</td><td>${camps.length}</td><td>${fmt.inr(totalPushed)}</td><td>${fmt.inr(totalSpent)}</td><td>100.0%</td></tr>`
-      : '<tr><td colspan="5" class="empty">Aaj abhi tak koi nayi ad live nahi hui.</td></tr>';
+      : '<tr><td colspan="5" class="empty">Is din koi nayi ad nahi.</td></tr>';
   }
 
-  // Detail table (sorted server-side: category, then spent desc)
+  // Detail table
   const detail = document.querySelector('#tbl-newtoday-detail tbody');
   if (detail) {
     detail.innerHTML = camps.length
@@ -2669,9 +2701,6 @@ function renderNewToday() {
       : '<tr><td colspan="7" class="empty">—</td></tr>';
   }
 
-  // Stacked horizontal bar: per-category daily budget, split by success
-  // estimate so it's obvious at a glance where tonight's budget is going and
-  // how much of it lands on likely-success vs likely-fail ads.
   renderNewTodayChart(camps, catEntries);
 }
 
