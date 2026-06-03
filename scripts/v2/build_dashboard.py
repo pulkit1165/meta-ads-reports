@@ -1068,7 +1068,8 @@ tr:hover td { background:#fafbff; }
         <h3>Sentiment Detail</h3>
         <table id="tbl-sentiment">
           <thead><tr>
-            <th data-col="sentiment" data-type="str">Sentiment</th>
+            <th data-col="sentiment_code" data-type="str">Code</th>
+            <th data-col="sentiment_name" data-type="str">Name</th>
             <th data-col="creative_type" data-type="str">Creative Type</th>
             <th data-col="active_ads" data-type="num">Ads</th>
             <th data-col="spend" data-type="num">Spend</th>
@@ -2609,12 +2610,18 @@ function renderSentimentsPage(rows) {
   const pctSpend = totalSpend ? (100 * classifiedSpend / totalSpend) : 0;
 
   // ── Group rows by (sentiment_code, creative_type) for the detail table.
+  // Track code and name separately — the operator wants two columns
+  // ("Code" + "Name") instead of one combined "st1 — Style/Design…" cell.
   const groupMap = new Map();
   for (const a of adAgg.values()) {
-    const sentDisplay = sentimentDisplay(a.sentiment_code);
-    const key = sentDisplay + '||' + a.creative_type;
+    const code = a.sentiment_code || '(unset)';
+    const name = a.sentiment_code
+      ? (SENTIMENT_LABELS[a.sentiment_code.toLowerCase()] || '')
+      : '';
+    const key = code + '||' + a.creative_type;
     if (!groupMap.has(key)) groupMap.set(key, {
-      sentiment: sentDisplay,
+      sentiment_code: code,
+      sentiment_name: name,
       sentiment_raw: a.sentiment_code,  // for sorting / styling
       creative_type: a.creative_type,
       active_ads: 0, spend: 0, revenue: 0,
@@ -2663,12 +2670,16 @@ function renderSentimentsPage(rows) {
   document.querySelector('#tbl-sentiment tbody').innerHTML = sorted.map(s => {
     const isUnset = !s.sentiment_raw;
     const cellStyle = isUnset ? 'color:#9ca3af;font-style:italic' : '';
+    const nameCell = s.sentiment_name
+      ? s.sentiment_name
+      : (isUnset ? '<span class="subtle">—</span>' : '<span class="subtle">(unmapped)</span>');
     return `<tr style="${isUnset ? 'background:#fafafa' : ''}">` +
-      `<td style="${cellStyle}"><strong>${s.sentiment}</strong></td>` +
+      `<td style="${cellStyle}"><strong>${s.sentiment_code}</strong></td>` +
+      `<td style="${cellStyle}">${nameCell}</td>` +
       `<td>${s.creative_type}</td>` +
       `<td>${fmt.num(s.active_ads)}</td><td>${fmt.inr(s.spend)}</td>` +
       `<td>${fmt.inr(s.revenue)}</td><td>${fmt.roas(s.roas)}</td></tr>`;
-  }).join('') || '<tr><td colspan="6" class="empty">No data.</td></tr>';
+  }).join('') || '<tr><td colspan="7" class="empty">No data.</td></tr>';
 }
 
 function renderHeatmapPage(rows) {
