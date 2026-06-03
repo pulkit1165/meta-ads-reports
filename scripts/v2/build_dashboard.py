@@ -219,7 +219,9 @@ def _live_active_campaigns():
             d = meta_get(
                 f"{GRAPH_API}/{aid}/campaigns",
                 {'fields': 'id,name,daily_budget,lifetime_budget,'
-                           'start_time,stop_time',
+                           'start_time,stop_time,'
+                           'adsets.limit(50){effective_status,daily_budget,'
+                           'lifetime_budget}',
                  'effective_status': '["ACTIVE"]', 'limit': 500},
                 max_retries=2,
             )
@@ -230,11 +232,20 @@ def _live_active_campaigns():
             continue                                  # error for this account
         got_any = True
         for c in data:
+            db = float(c.get('daily_budget') or 0) / 100
+            lb = float(c.get('lifetime_budget') or 0) / 100
+            # CBO off → budget lives on the ad sets. Sum the ACTIVE ad-sets'
+            # budgets so "pushed" isn't ₹0 (which made spend look > pushed).
+            if db == 0 and lb == 0:
+                adsets = ((c.get('adsets') or {}).get('data')) or []
+                db = sum(float(a.get('daily_budget') or 0) / 100
+                         for a in adsets if a.get('effective_status') == 'ACTIVE')
+                if db == 0:
+                    lb = sum(float(a.get('lifetime_budget') or 0) / 100
+                             for a in adsets if a.get('effective_status') == 'ACTIVE')
             rows.append((
                 c.get('id'), portal, c.get('name') or '',
-                float(c.get('daily_budget') or 0) / 100,
-                float(c.get('lifetime_budget') or 0) / 100,
-                c.get('start_time'), c.get('stop_time'),
+                db, lb, c.get('start_time'), c.get('stop_time'),
             ))
         _t.sleep(0.2)
     return rows if got_any else None
@@ -333,14 +344,13 @@ def fetch_new_today(conn):
     # Per-ad success estimate (historical spend-weighted ROAS of the product).
     _annotate_scale_estimate(conn, out)
 
-    # Browsable dates (desc) + default to the most recent that has any ads.
-    dates = sorted({c['date'] for c in out}, reverse=True)
-    default_date = dates[0] if dates else today
+    # Default to TODAY's ads (operator wants today's push front-and-centre);
+    # the dropdown always offers today + any other recent days to browse.
+    dates = sorted({c['date'] for c in out} | {today}, reverse=True)
+    default_date = today
 
     # Video links are the only per-camp API cost — fetch them just for the
-    # default (most-recent) date's ads to keep the build fast. Older dates are
-    # historical; their ▶ links resolve lazily isn't possible on a static build,
-    # so they simply show the name.
+    # default date's ads to keep the build fast.
     _annotate_video_links([c for c in out if c['date'] == default_date])
 
     out.sort(key=lambda r: (r['date'], r['category'], -r['spent_today']))
