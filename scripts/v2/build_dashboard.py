@@ -172,6 +172,70 @@ def fetch_active_campaign_budgets(conn, since: str, until: str):
     return out
 
 
+def _accounts_from_env_file():
+    """[(portal, act_id)] from config/accounts.env (committed, not secret)."""
+    path = REPO_ROOT / 'config' / 'accounts.env'
+    out = []
+    if not path.is_file():
+        return out
+    for line in path.read_text(encoding='utf-8').splitlines():
+        line = line.strip()
+        if not line or line.startswith('#') or '=' not in line:
+            continue
+        label, aid = (x.strip() for x in line.split('=', 1))
+        portal = ('SML' if label.startswith('SML_') else
+                  'SM'  if label.startswith('SM_')  else
+                  'NBP' if label.startswith('NBP_') else None)
+        if portal and aid.startswith('act_'):
+            out.append((portal, aid))
+    return out
+
+
+def _live_today_campaigns(today):
+    """Today's ACTIVE campaigns straight from Meta — matches Ads Manager exactly.
+
+    The DB's effective_status goes stale (paused/ended campaigns linger as
+    ACTIVE, and duplicates pile up), which over-counted the pushed-budget total.
+    Pulling the live list fixes that. Returns rows shaped exactly like the DB
+    query — (cid, portal, name, daily, lifetime, start_time, stop_time), budgets
+    already in ₹ — or None if there's no token / nothing came back (caller then
+    falls back to the DB so the card never goes blank).
+    """
+    import time as _t
+    if not os.getenv('META_ACCESS_TOKEN'):
+        return None
+    accts = _accounts_from_env_file()
+    if not accts:
+        return None
+    rows, got_any = [], False
+    for portal, aid in accts:
+        try:
+            d = meta_get(
+                f"{GRAPH_API}/{aid}/campaigns",
+                {'fields': 'id,name,daily_budget,lifetime_budget,'
+                           'start_time,stop_time',
+                 'effective_status': '["ACTIVE"]', 'limit': 500},
+                max_retries=2,
+            )
+        except (MetaRateLimitError, Exception):  # noqa: BLE001
+            continue
+        data = (d or {}).get('data')
+        if data is None:
+            continue                                  # error for this account
+        got_any = True
+        for c in data:
+            if (c.get('start_time') or '')[:10] != today:
+                continue
+            rows.append((
+                c.get('id'), portal, c.get('name') or '',
+                float(c.get('daily_budget') or 0) / 100,
+                float(c.get('lifetime_budget') or 0) / 100,
+                c.get('start_time'), c.get('stop_time'),
+            ))
+        _t.sleep(0.2)
+    return rows if got_any else None
+
+
 def _schedule_days(start_time, stop_time):
     """Whole days between a campaign's start and stop ISO timestamps (min 1),
     or 0 if either is missing/unparseable. Used to turn a lifetime budget into
@@ -200,15 +264,19 @@ def fetch_new_today(conn):
     camp or two.
     """
     today = datetime.now(IST).strftime('%Y-%m-%d')
-    rows = conn.execute('''
-        SELECT campaign_id, portal, name,
-               COALESCE(daily_budget, 0)    AS daily,
-               COALESCE(lifetime_budget, 0) AS lifetime,
-               start_time, stop_time
-        FROM meta_campaigns
-        WHERE substr(start_time, 1, 10) = ?
-          AND effective_status = 'ACTIVE'
-    ''', (today,)).fetchall()
+    # Prefer the LIVE Meta list (matches Ads Manager — the DB's ACTIVE status
+    # goes stale and over-counts). Fall back to the DB if there's no token.
+    rows = _live_today_campaigns(today)
+    if rows is None:
+        rows = conn.execute('''
+            SELECT campaign_id, portal, name,
+                   COALESCE(daily_budget, 0)    AS daily,
+                   COALESCE(lifetime_budget, 0) AS lifetime,
+                   start_time, stop_time
+            FROM meta_campaigns
+            WHERE substr(start_time, 1, 10) = ?
+              AND effective_status = 'ACTIVE'
+        ''', (today,)).fetchall()
 
     # Today's ACTUAL spend per campaign (vs the configured daily budget above),
     # summed from the ad-day grid. Accrues through the day as ingest runs.
