@@ -37,6 +37,12 @@ runs:
             git worktree add -f "$WT" "origin/$BRANCH"
             # Copy everything except .git into state dir (preserving dotfiles)
             rsync -a --exclude='.git' "$WT/" "$STATE_DIR/"
+            # The DB is stored gzipped on the branch (keeps the committed blob
+            # well under GitHub's 100 MB hard limit). Decompress so scripts see
+            # the plain state/ntn.db. Tolerate a legacy uncompressed db too.
+            if [ -f "$STATE_DIR/ntn.db.gz" ]; then
+              gunzip -f "$STATE_DIR/ntn.db.gz" && echo "  ✅ decompressed ntn.db"
+            fi
             echo "  ✅ restored $(find "$STATE_DIR" -type f ! -name '.gitkeep' | wc -l | tr -d ' ') state file(s) from branch"
           else
             echo "  ℹ️  no state branch yet — starting fresh"
@@ -63,6 +69,13 @@ runs:
 
           # Sync state into worktree (mirror — delete files removed from state)
           rsync -a --delete --exclude='.git' "$STATE_DIR/" "$WT/"
+
+          # Compress the SQLite DB before committing. The uncompressed db hit
+          # ~100 MB (GitHub's hard push limit) which broke every save; gzip
+          # drops it to ~1/3. Scripts never see the .gz (restore decompresses).
+          if [ -f "$WT/ntn.db" ]; then
+            gzip -f "$WT/ntn.db"   # → ntn.db.gz
+          fi
 
           # Absolute path to the live state dir — used to re-overlay on retry.
           STATE_ABS="$(cd "$STATE_DIR" && pwd)"
@@ -91,6 +104,7 @@ runs:
             git fetch origin "$BRANCH"
             git reset --hard "origin/$BRANCH"
             rsync -a --delete --exclude='.git' "$STATE_ABS/" ./
+            if [ -f ntn.db ]; then gzip -f ntn.db; fi   # keep the blob compressed
             git add -A
             if git diff --staged --quiet; then
               echo "  ℹ️  remote already matches our state"
