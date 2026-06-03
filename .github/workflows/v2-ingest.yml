@@ -157,6 +157,10 @@ jobs:
             Cache-Control: public, max-age=60, s-maxage=60, must-revalidate
           EOF
 
+      - name: Add password gate (auth worker)
+        if: ${{ success() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.prepare_landing.outputs.should_deploy == 'true' }}
+        run: mkdir -p out && cp pages/_worker.js out/_worker.js
+
       - name: Deploy to Cloudflare Pages
         if: ${{ success() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.prepare_landing.outputs.should_deploy == 'true' }}
         uses: cloudflare/wrangler-action@v3

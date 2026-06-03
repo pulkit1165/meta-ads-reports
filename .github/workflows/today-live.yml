@@ -173,6 +173,10 @@ jobs:
       # concurrency cancel), prepare_landing emits should_deploy=false and we
       # skip — Cloudflare keeps serving the previous good deployment instead
       # of being clobbered with today_live as the homepage.
+      - name: Add password gate (auth worker)
+        if: ${{ always() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.prepare_landing.outputs.should_deploy == 'true' }}
+        run: mkdir -p out && cp pages/_worker.js out/_worker.js
+
       - name: Deploy to Cloudflare Pages
         if: ${{ always() && vars.CLOUDFLARE_PAGES_PROJECT != '' && steps.prepare_landing.outputs.should_deploy == 'true' }}
         uses: cloudflare/wrangler-action@v3
