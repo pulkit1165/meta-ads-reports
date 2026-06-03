@@ -283,15 +283,16 @@ def fetch_new_today(conn):
             WHERE effective_status = 'ACTIVE'
         ''').fetchall()
 
-    # Actual spend per (campaign, date) over the window — so each ad shows the
-    # spend on the date it launched (consistent with the date being viewed).
+    # TOTAL actual spend per campaign since the window start — i.e. how much
+    # each ad has spent so far (launch → now). Using the launch-DATE spend alone
+    # showed ₹0 for ads that started one day but only began spending the next.
     spend_map = {}
-    for cid, dt, sp in conn.execute(
-        'SELECT campaign_id, date, COALESCE(SUM(spend), 0) FROM meta_ads_daily '
-        'WHERE date >= ? AND campaign_id IS NOT NULL GROUP BY campaign_id, date',
+    for cid, sp in conn.execute(
+        'SELECT campaign_id, COALESCE(SUM(spend), 0) FROM meta_ads_daily '
+        'WHERE date >= ? AND campaign_id IS NOT NULL GROUP BY campaign_id',
         (window_start,),
     ).fetchall():
-        spend_map[(cid, dt)] = float(sp or 0)
+        spend_map[cid] = float(sp or 0)
 
     # Build one row per campaign that STARTED within the last DAYS_NEW_ADS days,
     # tagged with its start date. The client groups these into a date dropdown so
@@ -325,7 +326,7 @@ def fetch_new_today(conn):
             'product': derive_product_and_category(nm)[0],
             'budget_val': bval,
             'budget_type': btype,
-            'spent_today': round(spend_map.get((cid, sdate), 0)),
+            'spent_today': round(spend_map.get(cid, 0)),
         })
 
     # Per-ad success estimate (historical spend-weighted ROAS of the product).
@@ -1096,14 +1097,14 @@ tr:hover td { background:#fafbff; }
         </div>
         <div class="kpi-strip" id="newtoday-kpis" style="margin-bottom:12px"></div>
         <table id="tbl-newtoday-rollup" style="margin-bottom:14px">
-          <thead><tr><th>Category</th><th>Camps</th><th>Pushed (₹/day)</th><th>Spent Today (₹)</th><th>Share %</th></tr></thead>
+          <thead><tr><th>Category</th><th>Camps</th><th>Pushed (₹/day)</th><th>Spent so far (₹)</th><th>Share %</th></tr></thead>
           <tbody></tbody>
         </table>
         <details>
           <summary style="cursor:pointer;font-weight:700;font-size:12px;color:#1a3d7c;margin:4px 0 10px">▼ Har ad ka detail (category → product → campaign)</summary>
           <div style="overflow-x:auto">
             <table id="tbl-newtoday-detail">
-              <thead><tr><th>Category</th><th>Product</th><th>Campaign (Ad)</th><th>Portal</th><th title="The budget the operator set on the campaign. /day = daily budget, total = lifetime budget for the whole campaign. ad-set = budget is set on the ad sets (not at campaign level).">Pushed Budget</th><th>Spent Today (₹)</th><th title="Will this new ad likely succeed? Based on the spend-weighted lifetime ROAS of past ads of this product/category (≥1.35x = success, 1.10–1.35x = 50-50, <1.10x = fail). A historical base-rate, not a guarantee.">Success Estimate ⓘ</th></tr></thead>
+              <thead><tr><th>Category</th><th>Product</th><th>Campaign (Ad)</th><th>Portal</th><th title="The budget the operator set on the campaign. /day = daily budget, total = lifetime budget for the whole campaign. ad-set = budget is set on the ad sets (not at campaign level).">Pushed Budget</th><th>Spent so far (₹)</th><th title="Will this new ad likely succeed? Based on the spend-weighted lifetime ROAS of past ads of this product/category (≥1.35x = success, 1.10–1.35x = 50-50, <1.10x = fail). A historical base-rate, not a guarantee.">Success Estimate ⓘ</th></tr></thead>
               <tbody></tbody>
             </table>
           </div>
@@ -2675,7 +2676,7 @@ function renderNewTodayFor(date) {
   if (kpis) kpis.innerHTML =
     `<div class="kpi-card"><div class="kpi-lbl">Nayi Ads</div><div class="kpi-val">${camps.length}</div><div class="kpi-sub">${date}</div></div>` +
     `<div class="kpi-card"><div class="kpi-lbl">Total Pushed Budget /day</div><div class="kpi-val">${fmt.inr(totalPushed)}</div><div class="kpi-sub">${catEntries.length} categories</div></div>` +
-    `<div class="kpi-card"><div class="kpi-lbl">Spent (that day)</div><div class="kpi-val">${fmt.inr(totalSpent)}</div><div class="kpi-sub">${totalPushed ? Math.round(totalSpent / totalPushed * 100) : 0}% of pushed</div></div>`;
+    `<div class="kpi-card"><div class="kpi-lbl">Spent so far</div><div class="kpi-val">${fmt.inr(totalSpent)}</div><div class="kpi-sub">${totalPushed ? Math.round(totalSpent / totalPushed * 100) : 0}% of pushed</div></div>`;
 
   // Rollup table
   const rollup = document.querySelector('#tbl-newtoday-rollup tbody');
