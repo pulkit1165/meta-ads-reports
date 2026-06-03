@@ -64,6 +64,9 @@ runs:
           # Sync state into worktree (mirror — delete files removed from state)
           rsync -a --delete --exclude='.git' "$STATE_DIR/" "$WT/"
 
+          # Absolute path to the live state dir — used to re-overlay on retry.
+          STATE_ABS="$(cd "$STATE_DIR" && pwd)"
+
           cd "$WT"
           git add -A
           if git diff --staged --quiet; then
@@ -73,18 +76,27 @@ runs:
 
           git commit -m "state: $(date -u +%FT%TZ) [${GITHUB_WORKFLOW:-manual}]"
 
-          # Retry on push race (another workflow pushed between our fetch and push)
+          # Push with retry. The state branch holds a BINARY snapshot (ntn.db)
+          # that several workflows push to, so a rebase-merge hits an
+          # unresolvable binary conflict — that was the failing step. Instead,
+          # on a push race adopt the remote tip and re-overlay OUR snapshot on
+          # top (latest writer wins — correct for a snapshot, and every run
+          # re-ingests recent days so nothing is actually lost).
           for attempt in 1 2 3 4 5; do
             if git push origin "HEAD:$BRANCH"; then
               echo "  ✅ state pushed to branch"
               exit 0
             fi
-            echo "  ⚠️  push race, retry $attempt/5"
+            echo "  ⚠️  push race, retry $attempt/5 — overlaying our snapshot on latest"
             git fetch origin "$BRANCH"
-            if ! git rebase "origin/$BRANCH"; then
-              git rebase --abort || true
-              break
+            git reset --hard "origin/$BRANCH"
+            rsync -a --delete --exclude='.git' "$STATE_ABS/" ./
+            git add -A
+            if git diff --staged --quiet; then
+              echo "  ℹ️  remote already matches our state"
+              exit 0
             fi
+            git commit -m "state: $(date -u +%FT%TZ) [${GITHUB_WORKFLOW:-manual}] overlay"
           done
           echo "  ❌ state push failed after retries" >&2
           exit 1
