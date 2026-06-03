@@ -344,10 +344,12 @@ def fetch_new_today(conn):
     # Per-ad success estimate (historical spend-weighted ROAS of the product).
     _annotate_scale_estimate(conn, out)
 
-    # Default to TODAY's ads (operator wants today's push front-and-centre);
-    # the dropdown always offers today + any other recent days to browse.
-    dates = sorted({c['date'] for c in out} | {today}, reverse=True)
-    default_date = today
+    # Default to the most recent day that HAS ads (so the card is useful, not
+    # blank, when nothing's been pushed today yet). Today is still always in the
+    # dropdown, and becomes the default automatically once tonight's push lands.
+    dates_with_ads = sorted({c['date'] for c in out}, reverse=True)
+    dates = sorted(set(dates_with_ads) | {today}, reverse=True)
+    default_date = dates_with_ads[0] if dates_with_ads else today
 
     # Video links are the only per-camp API cost — fetch them just for the
     # default date's ads to keep the build fast.
