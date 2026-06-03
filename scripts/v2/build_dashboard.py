@@ -344,12 +344,11 @@ def fetch_new_today(conn):
     # Per-ad success estimate (historical spend-weighted ROAS of the product).
     _annotate_scale_estimate(conn, out)
 
-    # Default to the most recent day that HAS ads (so the card is useful, not
-    # blank, when nothing's been pushed today yet). Today is still always in the
-    # dropdown, and becomes the default automatically once tonight's push lands.
-    dates_with_ads = sorted({c['date'] for c in out}, reverse=True)
-    dates = sorted(set(dates_with_ads) | {today}, reverse=True)
-    default_date = dates_with_ads[0] if dates_with_ads else today
+    # Default to TODAY (the operator thinks in calendar days — showing
+    # yesterday's batch as "latest" is confusing). Today is empty until tonight's
+    # push, then fills automatically. Other days stay browsable in the dropdown.
+    dates = sorted({c['date'] for c in out} | {today}, reverse=True)
+    default_date = today
 
     # Video links are the only per-camp API cost — fetch them just for the
     # default date's ads to keep the build fast.
@@ -2773,7 +2772,7 @@ function renderNewTodayFor(date) {
           `<tr><td><strong>${cat}</strong></td><td>${v.n}</td><td>${fmt.inr(v.pushed)}</td><td>${fmt.inr(v.spent)}</td><td>${totalPushed ? (v.pushed / totalPushed * 100).toFixed(1) : '0.0'}%</td></tr>`
         ).join('') +
         `<tr style="background:#f8faff;font-weight:800"><td>TOTAL</td><td>${camps.length}</td><td>${fmt.inr(totalPushed)}</td><td>${fmt.inr(totalSpent)}</td><td>100.0%</td></tr>`
-      : '<tr><td colspan="5" class="empty">Is din koi nayi ad nahi.</td></tr>';
+      : `<tr><td colspan="5" class="empty">${date === data.today ? 'Aaj abhi tak koi nayi ad push nahi hui — raat ko push karte hi yahan aa jayegi.' : 'Is din koi nayi ad nahi.'}</td></tr>`;
   }
 
   // Detail table
