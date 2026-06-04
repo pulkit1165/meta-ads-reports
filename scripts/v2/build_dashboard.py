@@ -658,6 +658,60 @@ def fetch_active_snapshot(conn):
     return {'time': latest, 'by_portal': by_portal, 'by_account': by_account}
 
 
+def fetch_active_snapshot_daily(conn, days_back: int = 30):
+    """Return active-status snapshots aggregated per IST date — the LAST
+    snapshot of each day. Used by the dashboard to plot a 30-day history
+    of active camps/ads, so the operator can see launches/pauses as a trend.
+
+    Shape:
+      [
+        {'date': '2026-06-04',
+         'time': '2026-06-04T22:30:00+05:30',
+         'total':     {'active_camps': N, 'active_ads': M},
+         'by_portal': {'SM': {...}, 'SML': {...}, 'NBP': {...}}},
+        ...sorted oldest -> newest
+      ]
+
+    Empty list if the snapshot table doesn't exist yet.
+    """
+    has_table = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name='meta_active_snapshot'"
+    ).fetchone()
+    if not has_table:
+        return []
+
+    # For each IST date, find the LAST snapshot_time and use it as the
+    # canonical "end-of-day active state". Limit to last `days_back` days.
+    rows = conn.execute('''
+        WITH per_day AS (
+          SELECT date(substr(snapshot_time, 1, 10)) AS d,
+                 MAX(snapshot_time) AS last_t
+          FROM meta_active_snapshot
+          WHERE snapshot_time >= date('now', ?)
+          GROUP BY d
+        )
+        SELECT p.d, p.last_t, s.portal,
+               SUM(s.active_camps) AS camps,
+               SUM(s.active_ads)   AS ads
+        FROM per_day p
+        JOIN meta_active_snapshot s ON s.snapshot_time = p.last_t
+        GROUP BY p.d, p.last_t, s.portal
+        ORDER BY p.d ASC, s.portal ASC
+    ''', (f'-{days_back} days',)).fetchall()
+
+    by_date = {}
+    for d, last_t, portal, camps, ads in rows:
+        bucket = by_date.setdefault(d, {'date': d, 'time': last_t,
+                                        'total': {'active_camps': 0, 'active_ads': 0},
+                                        'by_portal': {}})
+        bucket['by_portal'][portal] = {'active_camps': int(camps or 0),
+                                       'active_ads':   int(ads or 0)}
+        bucket['total']['active_camps'] += int(camps or 0)
+        bucket['total']['active_ads']   += int(ads or 0)
+    return sorted(by_date.values(), key=lambda x: x['date'])
+
+
 def fetch_freshness(conn):
     out = {}
     for r in conn.execute('''
@@ -898,6 +952,20 @@ tr:hover td { background:#fafbff; }
            they're ad-mechanics, not attribution. -->
       <div id="range-pill" style="display:inline-block;background:#1a3d7c;color:#fff;font-size:13px;font-weight:700;padding:6px 14px;border-radius:18px;margin-bottom:12px"></div>
       <div class="kpi-strip" id="kpi-strip-shopify"></div>
+
+      <div class="card">
+        <h3>📡 Active Ads & Camps · Daily Trend <span class="meta">last snapshot of each day · live Meta API counts (= Ads Manager)</span></h3>
+        <table id="tbl-active-daily" class="sortable">
+          <thead><tr>
+            <th>Date</th>
+            <th>SM Camps</th><th>SM Ads</th>
+            <th>SML Camps</th><th>SML Ads</th>
+            <th>NBP Camps</th><th>NBP Ads</th>
+            <th>Total Camps</th><th>Total Ads</th>
+          </tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
 
       <div class="card">
         <h3>📈 Spend & ROAS by Day <span class="meta">spend bars + ROAS line · spend-weighted, current filter</span></h3>
@@ -1903,6 +1971,32 @@ function renderOverview(rows, prevRows) {
     `<div class="kpi-card${c.cls ? ' kpi-' + c.cls : ''}"><div class="kpi-lbl">${c.l}</div>` +
     `<div class="kpi-val">${c.v}</div><div class="kpi-sub">${c.s}</div></div>`
   ).join('');
+
+  // Daily active-status trend (uses payload.active_snapshot_daily — one
+  // row per day with the LAST snapshot of that day, broken down by portal)
+  const dailySnap = PAYLOAD.active_snapshot_daily || [];
+  const tbody = document.querySelector('#tbl-active-daily tbody');
+  if (tbody) {
+    if (!dailySnap.length) {
+      tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;color:#888;padding:12px">No snapshot history yet — first daily row will appear after the next ingest run.</td></tr>`;
+    } else {
+      // Show newest first
+      const sorted = [...dailySnap].reverse();
+      tbody.innerHTML = sorted.map(d => {
+        const sm  = d.by_portal.SM  || {active_camps:0, active_ads:0};
+        const sml = d.by_portal.SML || {active_camps:0, active_ads:0};
+        const nbp = d.by_portal.NBP || {active_camps:0, active_ads:0};
+        return `<tr>
+          <td><strong>${d.date}</strong></td>
+          <td>${fmt.num(sm.active_camps)}</td><td>${fmt.num(sm.active_ads)}</td>
+          <td>${fmt.num(sml.active_camps)}</td><td>${fmt.num(sml.active_ads)}</td>
+          <td>${fmt.num(nbp.active_camps)}</td><td>${fmt.num(nbp.active_ads)}</td>
+          <td><strong>${fmt.num(d.total.active_camps)}</strong></td>
+          <td><strong>${fmt.num(d.total.active_ads)}</strong></td>
+        </tr>`;
+      }).join('');
+    }
+  }
 
   // Mini charts
   if (document.getElementById('page-overview').classList.contains('active')) {
@@ -3352,6 +3446,7 @@ def main():
     campaigns = fetch_active_campaign_budgets(conn, since, until)
     new_today = fetch_new_today(conn)
     active_snapshot = fetch_active_snapshot(conn)
+    active_snapshot_daily = fetch_active_snapshot_daily(conn, days_back=30)
 
     payload = {
         'since': since,
@@ -3362,6 +3457,7 @@ def main():
         'campaigns': campaigns,             # campaign_id -> {name, daily_budget, status, portal}
         'new_today': new_today,             # {date, camps[]} — campaigns started today, category-wise
         'active_snapshot': active_snapshot, # live effective_status=ACTIVE counts straight from Meta API
+        'active_snapshot_daily': active_snapshot_daily, # last-snapshot-of-day trend (last 30 days)
         'dimensions': dimensions,
         'freshness': freshness,
         'updated_at': now_iso(),
