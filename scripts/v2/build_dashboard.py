@@ -1708,16 +1708,15 @@ function aggregate(rows, groupKey) {
       atc:0, lpv:0,
     });
     const a = map.get(k);
-    // "Active Ads" matches Meta's definition — only count ads whose
-    // effective_status is currently ACTIVE. An ad that spent in the window
-    // but has since been paused/deleted is NOT counted here, even though
-    // its spend/revenue/orders still roll into the totals below. This is
-    // what makes the dashboard's 270 match Meta UI's 248 instead of
-    // counting "ads with spend in window" (the prior definition).
-    if (r.effective_status === 'ACTIVE') {
-      a.active_ads.add(r.ad_id);
-      if (r.campaign_id) a.active_camps.add(r.campaign_id);
-    }
+    // "Active Ads" = ads that had spend in the selected date window.
+    // Window-aware (Today vs 3D vs 7D will give different counts as the
+    // window expands). Effective_status is a snapshot of *now*, not a
+    // per-day record — using it here would make Active Ads invariant
+    // across windows, which is exactly the problem the operator hit
+    // (3D showed the same count as Today). Spend-row presence is the
+    // only signal we have that's actually date-stamped.
+    a.active_ads.add(r.ad_id);
+    if (r.campaign_id) a.active_camps.add(r.campaign_id);
     a.spend       += r.spend       || 0;
     a.revenue     += r.revenue     || 0;
     a.purchases   += r.purchases   || 0;
