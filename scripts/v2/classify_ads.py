@@ -129,8 +129,10 @@ SENTIMENT_PATTERN = re.compile(
 # truth lives in seed_lookups.SENTIMENT_SEED; we mirror just the codes
 # here so classify_ads doesn't pull in gspread / sqlite at import time.
 ALLOWED_SENTIMENTS = (
-    # Legacy 4
-    {'st1', 'st2', 'st3', 'st4'} |
+    # ST1, ST2, ST4 — six A-F permutations each; ST3 — two (a/b).
+    # (Split from the legacy un-lettered st1..st4 per sentiments.xlsx, 06-04.)
+    {f'st{n}{s}' for n in (1, 2, 4) for s in 'abcdef'} |
+    {'st3a', 'st3b'} |
     # ST101-107, 109 — six A-F permutations each
     {f'st{n}{s}'
      for n in (101, 102, 103, 104, 105, 106, 107, 109)
@@ -181,6 +183,11 @@ def extract_sentiment(text: str) -> str | None:
     if not m: return None
     digits = m.group(2)
     suffix = (m.group(3) or '').lower()
+    # The storyline codes st1..st4 were split into A-F variants (06-04). A
+    # bare 'st1' in a name has no ordering letter, so default it to the
+    # canonical 'a' variant rather than dropping it.
+    if not suffix and digits in ('1', '2', '3', '4'):
+        suffix = 'a'
     code = f'st{digits}{suffix}'
     return code if code in ALLOWED_SENTIMENTS else None
 

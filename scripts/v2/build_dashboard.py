@@ -2611,11 +2611,30 @@ function renderCreativesPage(rows) {
 // code AND the name together: "st1 — Style/Design + Quality + Crystal
 // Energy". Keep in sync with SENTIMENT_SEED in seed_lookups.py.
 const SENTIMENT_LABELS = {
-  // Legacy 4 — crystal/jewellery storyline framings
-  st1:    'Style/Design + Quality + Crystal Energy',
-  st2:    'Unisex Product + Quality + Crystal Energy',
-  st3:    'OG Gold Price Fear',
-  st4:    'Paras Storyline + Crystal Energy + Quality',
+  // ST1 — Style / Design / Quality / Crystal Energy (6 permutations)
+  st1a: 'Style + Design + Quality + Crystal Energy',
+  st1b: 'Style + Crystal Energy + Design + Quality',
+  st1c: 'Crystal Energy + Style + Design + Quality',
+  st1d: 'Design + Quality + Style + Crystal Energy',
+  st1e: 'Quality + Design + Style + Crystal Energy',
+  st1f: 'Crystal Energy + Quality + Design + Style',
+  // ST2 — Unisex Product / Quality / Crystal Energy (6 permutations)
+  st2a: 'Unisex Product + Quality + Crystal Energy',
+  st2b: 'Unisex Product + Crystal Energy + Quality',
+  st2c: 'Quality + Unisex Product + Crystal Energy',
+  st2d: 'Quality + Crystal Energy + Unisex Product',
+  st2e: 'Crystal Energy + Unisex Product + Quality',
+  st2f: 'Crystal Energy + Quality + Unisex Product',
+  // ST3 — OG Gold Price Fear / Quality (2 orderings)
+  st3a: 'OG Gold Price Fear + Quality',
+  st3b: 'Quality + OG Gold Price Fear',
+  // ST4 — Animal Storyline / Crystal Energy / Quality (6 permutations)
+  st4a: 'Animal Storyline + Crystal Energy + Quality',
+  st4b: 'Animal Storyline + Quality + Crystal Energy',
+  st4c: 'Crystal Energy + Animal Storyline + Quality',
+  st4d: 'Crystal Energy + Quality + Animal Storyline',
+  st4e: 'Quality + Animal Storyline + Crystal Energy',
+  st4f: 'Quality + Crystal Energy + Animal Storyline',
   // ST101 — Quality / Achievement / Testing
   st101a: 'Quality + Achievement + Testing',
   st101b: 'Quality + Testing + Achievement',

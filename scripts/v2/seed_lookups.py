@@ -74,11 +74,30 @@ NTN_SEED = [
 # get ignored by classify_ads → render as (unset) on the Sentiments
 # page.
 SENTIMENT_SEED = [
-    # Legacy 4 — crystal/jewellery storyline framings
-    ('st1',    'Style/Design + Quality + Crystal Energy'),
-    ('st2',    'Unisex Product + Quality + Crystal Energy'),
-    ('st3',    'OG Gold Price Fear'),
-    ('st4',    'Paras Storyline + Crystal Energy + Quality'),
+    # ST1 — Style / Design / Quality / Crystal Energy (6 permutations)
+    ('st1a', 'Style + Design + Quality + Crystal Energy'),
+    ('st1b', 'Style + Crystal Energy + Design + Quality'),
+    ('st1c', 'Crystal Energy + Style + Design + Quality'),
+    ('st1d', 'Design + Quality + Style + Crystal Energy'),
+    ('st1e', 'Quality + Design + Style + Crystal Energy'),
+    ('st1f', 'Crystal Energy + Quality + Design + Style'),
+    # ST2 — Unisex Product / Quality / Crystal Energy (6 permutations)
+    ('st2a', 'Unisex Product + Quality + Crystal Energy'),
+    ('st2b', 'Unisex Product + Crystal Energy + Quality'),
+    ('st2c', 'Quality + Unisex Product + Crystal Energy'),
+    ('st2d', 'Quality + Crystal Energy + Unisex Product'),
+    ('st2e', 'Crystal Energy + Unisex Product + Quality'),
+    ('st2f', 'Crystal Energy + Quality + Unisex Product'),
+    # ST3 — OG Gold Price Fear / Quality (2 orderings)
+    ('st3a', 'OG Gold Price Fear + Quality'),
+    ('st3b', 'Quality + OG Gold Price Fear'),
+    # ST4 — Animal Storyline / Crystal Energy / Quality (6 permutations)
+    ('st4a', 'Animal Storyline + Crystal Energy + Quality'),
+    ('st4b', 'Animal Storyline + Quality + Crystal Energy'),
+    ('st4c', 'Crystal Energy + Animal Storyline + Quality'),
+    ('st4d', 'Crystal Energy + Quality + Animal Storyline'),
+    ('st4e', 'Quality + Animal Storyline + Crystal Energy'),
+    ('st4f', 'Quality + Crystal Energy + Animal Storyline'),
     # ST101 — Quality / Achievement / Testing
     ('st101a', 'Quality + Achievement + Testing'),
     ('st101b', 'Quality + Testing + Achievement'),
@@ -177,6 +196,21 @@ def seed(conn):
             (code, seed_label, ts, ts)
         )
         n_sent += 1
+
+    # One-time, idempotent migration: the legacy un-lettered storyline
+    # codes (st1..st4) were split into A-F permutation variants (operator's
+    # sentiments.xlsx, 06-04). Map each old base tag to its 'a' (canonical
+    # first-ordering) variant so existing tagged ads land in the new
+    # taxonomy instead of being blanked out below. After this runs once
+    # there are no base codes left, so it matches 0 rows on re-runs.
+    n_migrated = 0
+    for base in ('st1', 'st2', 'st3', 'st4'):
+        n_migrated += conn.execute(
+            'UPDATE meta_ads_meta SET sentiment = ? WHERE sentiment = ?',
+            (base + 'a', base),
+        ).rowcount
+    if n_migrated:
+        print(f"🔁 Migrated {n_migrated} ads from legacy st1..st4 → st#a")
 
     # Drop any sentiment codes outside the current taxonomy. These were
     # seeded as empty placeholders (st5..st20) in earlier versions and
