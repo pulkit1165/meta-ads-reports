@@ -1,0 +1,59 @@
+name: Category-Wise Budget (daily, 12 PM IST)
+
+# Fires once a day at 06:30 UTC = 12:00 IST. Pulls every currently-ACTIVE
+# campaign across all 3 portals live from Meta, classifies each by NTN category
+# (derive_category_v2), rolls up the effective per-day budget, and overwrites
+# the operator's "CATEGORY WISE BUDGET" sheet (1aZXYLPP…).
+# See scripts/v2/category_budget_sheet.py.
+#
+# Note: GHA cron is best-effort — a delayed firing can land 10–30 min late under
+# heavy queue load. Fine for a daily operator-facing snapshot.
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: category-budget-daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TZ: Asia/Kolkata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Load ad account IDs
+        run: grep -E '^[A-Z][A-Z0-9_]*=' config/accounts.env >> "$GITHUB_ENV"
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
+      - name: Build + push Category-Wise Budget to the sheet
+        run: python3 scripts/v2/category_budget_sheet.py
