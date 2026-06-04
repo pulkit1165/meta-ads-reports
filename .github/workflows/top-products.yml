@@ -1,0 +1,58 @@
+name: Top-Products Performance (daily, 12 PM IST)
+
+# Fires once a day at 06:30 UTC = 12:00 IST. Pulls month-to-date Shopify orders
+# from all 3 stores, counts unique orders per product, and writes the top 10
+# products (with per-portal columns) to a new `Products YYYY-MM-DD` tab in the
+# operator's sheet (18shZsLz…, same sheet as the top-states & age-group reports).
+# See scripts/v2/top_products_sheet.py.
+
+on:
+  schedule:
+    - cron: "30 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: top-products-daily
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      SHOPIFY_STORE_URL:        ${{ secrets.SHOPIFY_STORE_URL }}
+      SHOPIFY_ACCESS_TOKEN:     ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+      SHOPIFY_STORE_URL_SML:    ${{ secrets.SHOPIFY_STORE_URL_SML }}
+      SHOPIFY_ACCESS_TOKEN_SML: ${{ secrets.SHOPIFY_ACCESS_TOKEN_SML }}
+      SHOPIFY_STORE_URL_NBP:    ${{ secrets.SHOPIFY_STORE_URL_NBP }}
+      SHOPIFY_ACCESS_TOKEN_NBP: ${{ secrets.SHOPIFY_ACCESS_TOKEN_NBP }}
+      TZ: Asia/Kolkata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
+      - name: Build + push Top-Products Performance to the sheet
+        run: python3 scripts/v2/top_products_sheet.py
