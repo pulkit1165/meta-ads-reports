@@ -174,22 +174,75 @@ def extract_ntn_code(text: str) -> str | None:
 
 
 def extract_sentiment(text: str) -> str | None:
-    """Returns a sentiment code like 'st1' / 'st101a' / 'st108a'
-    (lowercased) or None. Codes outside ALLOWED_SENTIMENTS are
-    ignored — the dashboard's Sentiments page only tracks the
-    operator's defined taxonomy."""
+    """Returns a sentiment code like 'st1a' / 'st101a' / 'st108a'
+    (lowercased) or None.
+
+    Two-pass matcher:
+      1. Explicit code tag in the name (`_st101a_`, `_st1_`, etc.).
+      2. Fallback: theme-keyword match on the ad name. Each sentiment
+         family has a few signature themes (e.g. ST101 → quality /
+         achievement / testing). If at least 2 of a family's themes
+         appear in the name, classify to that family's canonical 'A'
+         variant. Lets ads named with the theme words instead of the
+         code (e.g. 'style_design_quality_crystal_loose') still get
+         picked up.
+
+    Codes outside ALLOWED_SENTIMENTS are ignored — the dashboard's
+    Sentiments page only tracks the operator's defined taxonomy."""
     if not text: return None
+
+    # Pass 1: explicit code tag
     m = SENTIMENT_PATTERN.search(text)
-    if not m: return None
-    digits = m.group(2)
-    suffix = (m.group(3) or '').lower()
-    # The storyline codes st1..st4 were split into A-F variants (06-04). A
-    # bare 'st1' in a name has no ordering letter, so default it to the
-    # canonical 'a' variant rather than dropping it.
-    if not suffix and digits in ('1', '2', '3', '4'):
-        suffix = 'a'
-    code = f'st{digits}{suffix}'
-    return code if code in ALLOWED_SENTIMENTS else None
+    if m:
+        digits = m.group(2)
+        suffix = (m.group(3) or '').lower()
+        # Storyline codes st1..st4 were split into A-F variants (06-04).
+        # Bare 'st1' has no ordering letter → default to canonical 'a'.
+        if not suffix and digits in ('1', '2', '3', '4'):
+            suffix = 'a'
+        code = f'st{digits}{suffix}'
+        if code in ALLOWED_SENTIMENTS:
+            return code
+
+    # Pass 2: theme-keyword match (operator names ads with theme words,
+    # not the st<n> code). Family → list of theme tokens. Order is
+    # significant only inside an A-F family for variant disambiguation,
+    # but here we just need ≥2 themes present to pick the family's 'A'
+    # variant. Tokens use _has_token (underscore-boundary), so 'crystal'
+    # matches '_crystal_' but not 'crystalize'.
+    t = (text or '').lower()
+    SENTIMENT_THEMES = [
+        # (family_letter_code, [theme_tokens])
+        ('st1a',   ['style', 'design', 'crystal']),         # Style+Design+Quality+Crystal Energy
+        ('st2a',   ['unisex', 'crystal']),                  # Unisex+Quality+Crystal Energy (unisex unique enough)
+        ('st3a',   ['og_gold', 'gold_price', 'price_fear']),# OG Gold Price Fear
+        ('st4a',   ['animal', 'horse', 'owl', 'peacock', 'cheetah', 'elephant', 'butterfly']),  # Animal Storyline
+        ('st101a', ['achievement', 'testing', 'tested', 'certified']),
+        ('st102a', ['fear', 'problem', 'solution', 'validation']),
+        ('st103a', ['desire', 'fast_results', 'fast', 'results']),
+        ('st104a', ['before', 'after', 'before_after', 'testimonial']),
+        ('st105a', ['relevance', 'validation', 'trust']),
+        ('st106a', ['ingredient', 'benefits']),
+        ('st107a', ['manufacturing', 'rnd', 'lab', 'r_d']),
+        ('st108a', ['offer', 'deal', 'discount', 'sale']),
+        ('st109a', ['competitor', 'comparison', 'vs_other']),
+        ('st110a', ['celebrity', 'social_proof', 'celeb']),
+        ('st111a', ['daily_routine', 'routine', 'morning']),
+        ('st112a', ['launch', 'bts', 'behind_scenes', 'usage']),
+    ]
+    best_code = None
+    best_hits = 0
+    for code, themes in SENTIMENT_THEMES:
+        if code not in ALLOWED_SENTIMENTS:
+            continue
+        hits = sum(1 for kw in themes if _has_token(t, kw))
+        # ≥2 themes for compound families; ≥1 for distinctive singletons
+        threshold = 1 if code in ('st108a', 'st110a', 'st111a', 'st112a',
+                                   'st3a') else 2
+        if hits >= threshold and hits > best_hits:
+            best_code = code
+            best_hits = hits
+    return best_code
 
 
 def _match_creative_type(text: str) -> str | None:
