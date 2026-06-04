@@ -39,8 +39,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from product_catalogue import derive_category_v2  # noqa: E402
 
 # Operator's "CATEGORY WISE BUDGET" sheet — service account has Editor access.
+# One tab per day (tab name = YYYY-MM-DD, IST), so the sheet keeps daily history.
 SHEET_ID = "1aZXYLPPqi7LgukH6ixmmy5WnbFz8xLKcwZpdXYwthGY"
-TAB = "Sheet1"
 
 
 # ── budget math ─────────────────────────────────────────────────────────────
@@ -133,10 +133,15 @@ def open_sheet():
 
 def write_sheet(by_cat, total_camps):
     sh = open_sheet()
-    try:
-        ws = sh.worksheet(TAB)
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=TAB, rows=50, cols=4)
+    title = datetime.now(IST).strftime("%Y-%m-%d")
+    titles = {w.title: w for w in sh.worksheets()}
+    if title in titles:
+        ws = titles[title]                       # re-run same day → refresh it
+    elif "Sheet1" in titles:
+        ws = titles["Sheet1"]                    # reuse the default tab once
+        ws.update_title(title)
+    else:
+        ws = sh.add_worksheet(title=title, rows=50, cols=4)
 
     grand = sum(v["budget"] for v in by_cat.values())
     rows_sorted = sorted(by_cat.items(), key=lambda kv: -kv[1]["budget"])
@@ -209,7 +214,7 @@ def write_sheet(by_cat, total_camps):
                            "startIndex": 0, "endIndex": 4}}},
     ]
     sh.batch_update({"requests": fmt})
-    return grand
+    return grand, title
 
 
 def main():
@@ -218,11 +223,11 @@ def main():
     by_cat, total_camps = collect()
     if not by_cat:
         sys.exit("No active campaigns with budget found — not writing sheet.")
-    grand = write_sheet(by_cat, total_camps)
+    grand, title = write_sheet(by_cat, total_camps)
     print()
     print(f"  {total_camps} active campaigns  |  ₹{int(grand):,}/day total  "
           f"|  {len(by_cat)} categories")
-    print(f"  Written to sheet {SHEET_ID} (tab {TAB})")
+    print(f"  Written to sheet {SHEET_ID} (tab {title})")
 
 
 if __name__ == "__main__":
