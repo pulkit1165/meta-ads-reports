@@ -1,6 +1,6 @@
-name: Home Decor (daily, 12 PM IST)
+name: Home Decor (daily, 12 AM IST)
 
-# Fires once a day at 06:30 UTC = 12:00 IST. Pulls every currently-ACTIVE
+# Fires once a day at 18:30 UTC = 00:00 IST (midnight). Pulls every currently-ACTIVE
 # campaign across all 3 portals live from Meta, keeps only home-decor items
 # (derive_category_v2 == 'Crystal Home Decor': frames / miniatures / plates /
 # clocks / idols / geodes — excludes bracelets/keyrings), and writes yesterday's
@@ -13,7 +13,7 @@ name: Home Decor (daily, 12 PM IST)
 
 on:
   schedule:
-    - cron: "30 6 * * *"
+    - cron: "30 18 * * *"
   workflow_dispatch:
 
 concurrency:
