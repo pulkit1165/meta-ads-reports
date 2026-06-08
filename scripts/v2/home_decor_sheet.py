@@ -17,7 +17,7 @@ Window: "kal" = yesterday (IST), single day, 7d_click attribution (matches the
 rest of the pipeline). History: one new tab per day, named by the DATA date
 (yesterday, YYYY-MM-DD), so the workbook keeps a daily history.
 
-Run by .github/workflows/home-decor.yml on the 18:30 UTC = 00:00 IST (midnight) cron. Needs
+Run by .github/workflows/home-decor.yml on the 06:30 UTC = 12:00 IST cron. Needs
 META_ACCESS_TOKEN (env) and GOOGLE_SERVICE_ACCOUNT_FILE (service account JSON).
 The service account antriksh-bot@antriksh-meta-reports.iam.gserviceaccount.com
 must have Editor access on the sheet (operator shares it manually once).
