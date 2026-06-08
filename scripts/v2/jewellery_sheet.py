@@ -17,7 +17,7 @@ and writes yesterday's numbers to the operator's "jewellery" sheet:
 
 Window: "kal" = yesterday (IST). One new tab per day (DATA date, YYYY-MM-DD).
 
-Run by .github/workflows/jewellery.yml on the 06:30 UTC = 12:00 IST cron. Needs
+Run by .github/workflows/jewellery.yml on the 01:30 UTC = 07:00 IST cron. Needs
 META_ACCESS_TOKEN + GOOGLE_SERVICE_ACCOUNT_FILE. The service account
 antriksh-bot@antriksh-meta-reports.iam.gserviceaccount.com must have Editor
 access on the sheet (operator shares it manually once).

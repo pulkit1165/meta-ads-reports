@@ -1,6 +1,6 @@
-name: Jewellery (daily, 12 PM IST)
+name: Jewellery (daily, 7 AM IST)
 
-# Fires once a day at 06:30 UTC = 12:00 IST. Pulls every currently-ACTIVE
+# Fires once a day at 01:30 UTC = 07:00 IST. Pulls every currently-ACTIVE
 # campaign across all 3 portals live from Meta, keeps only '24K Jewellery'
 # (derive_category_v2), and writes yesterday's budget / spend / ROAS — per
 # campaign + a top/worst creatives block — to the operator's "jewellery" sheet
@@ -12,7 +12,7 @@ name: Jewellery (daily, 12 PM IST)
 
 on:
   schedule:
-    - cron: "30 6 * * *"
+    - cron: "30 1 * * *"
   workflow_dispatch:
 
 concurrency:
