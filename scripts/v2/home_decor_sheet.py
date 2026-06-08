@@ -25,6 +25,7 @@ must have Editor access on the sheet (operator shares it manually once).
 Usage:
   python3 scripts/v2/home_decor_sheet.py
 """
+import json
 import os
 import re
 import sys
@@ -37,7 +38,7 @@ import gspread
 from google.oauth2.service_account import Credentials
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _utils import GRAPH_API, IST, PORTAL_ACCOUNTS, meta_get, MetaRateLimitError  # noqa: E402
+from _utils import GRAPH_API, IST, PORTAL_ACCOUNTS, meta_get, meta_paginate, MetaRateLimitError  # noqa: E402
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from product_catalogue import derive_category_v2  # noqa: E402
@@ -73,6 +74,10 @@ HOME_DECOR_PRODUCTS = [
     "Rose Quartz Crystal", "Sleek Crystal", "Pyrite Products", "Crystal Mix",
     "Crystal Products",
 ]
+
+# Min yesterday spend (₹) for an ad to qualify for the top/worst-creative ranking
+# — keeps a ₹40-spend fluke off the leaderboard.
+MIN_CREATIVE_SPEND = 500
 
 
 def excluded(name):
@@ -226,6 +231,47 @@ def collect():
     return by_product, yday
 
 
+def fetch_creatives(cid_to_product, yday):
+    """Ad-level perf for the home-decor campaigns on `yday`.
+
+    Returns a list of {ad_id, name, product, spend, roas} for ads that spent >0,
+    pulled per account (level=ad) and filtered to our home-decor campaign ids.
+    """
+    cids = set(cid_to_product)
+    out = []
+    for portal, accts in PORTAL_ACCOUNTS.items():
+        for env_var, friendly in accts:
+            if env_var in EXCLUDE_ACCOUNTS:
+                continue
+            aid = os.environ.get(env_var)
+            if not aid:
+                continue
+            rows = meta_paginate(f"{GRAPH_API}/{aid}/insights", {
+                "level": "ad",
+                "fields": "ad_id,ad_name,campaign_id,spend,purchase_roas",
+                "time_range": json.dumps({"since": yday, "until": yday}),
+                "filtering": json.dumps([{"field": "spend",
+                                          "operator": "GREATER_THAN", "value": "0"}]),
+                "limit": 500,
+            })
+            for r in rows:
+                if r.get("campaign_id") not in cids:
+                    continue
+                try:
+                    spend = float(r.get("spend") or 0)
+                except (TypeError, ValueError):
+                    spend = 0.0
+                out.append({
+                    "ad_id": r.get("ad_id"),
+                    "name": r.get("ad_name") or "(unnamed)",
+                    "product": cid_to_product.get(r.get("campaign_id"), "?"),
+                    "spend": spend,
+                    "roas": _extract_roas(r.get("purchase_roas")),
+                })
+            time.sleep(0.3)
+    return out
+
+
 def _verdict(roas):
     if roas >= 1.5:
         return "⭐ Scale"
@@ -249,7 +295,7 @@ def open_sheet():
     return gspread.authorize(creds).open_by_key(SHEET_ID)
 
 
-def write_sheet(by_product, yday):
+def write_sheet(by_product, yday, creatives):
     sh = open_sheet()
     title = yday  # tab name = the DATA date (yesterday), keeps daily history
     titles = {w.title: w for w in sh.worksheets()}
@@ -302,6 +348,42 @@ def write_sheet(by_product, yday):
         values.append([i, product, ncamps, round(budget), round(spend), roas, verdict])
     values.append(["", "── TOTAL ──", tot_camps, round(tot_budget), round(tot_spend),
                    tot_roas, ""])
+    total_row = len(values)  # 1-based row of the product total
+
+    # ── Creatives: top 3 / worst 3 by ROAS (min spend) ──
+    ranked = sorted([c for c in creatives if c["spend"] >= MIN_CREATIVE_SPEND],
+                    key=lambda c: c["roas"], reverse=True)
+    top = ranked[:3]
+    top_ids = {c["ad_id"] for c in top}
+    worst = [c for c in reversed(ranked) if c["ad_id"] not in top_ids][:3]
+
+    def creative_rows(picks):
+        if not picks:
+            return [["", "(no ads with spend ≥ ₹%d)" % MIN_CREATIVE_SPEND, "", "", ""]]
+        return [[i, c["name"][:60], c["product"], round(c["spend"]), c["roas"]]
+                for i, c in enumerate(picks, 1)]
+
+    chdr = ["Rank", "Ad / Creative", "Product", "Spend (₹)", "ROAS"]
+    top_disp = creative_rows(top)
+    worst_disp = creative_rows(worst)
+
+    values.append([])
+    top_title_row = len(values) + 1
+    values.append([f"🏆 TOP 3 CREATIVES  (by ROAS, spend ≥ ₹{MIN_CREATIVE_SPEND}, {yday_label})"])
+    top_hdr_row = len(values) + 1
+    values.append(chdr)
+    top_first = len(values) + 1
+    values.extend(top_disp)
+    top_last = len(values)
+
+    values.append([])
+    worst_title_row = len(values) + 1
+    values.append([f"🔻 WORST 3 CREATIVES  (by ROAS, spend ≥ ₹{MIN_CREATIVE_SPEND}, {yday_label})"])
+    worst_hdr_row = len(values) + 1
+    values.append(chdr)
+    worst_first = len(values) + 1
+    values.extend(worst_disp)
+    worst_last = len(values)
 
     ws.clear()
     ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
@@ -312,9 +394,13 @@ def write_sheet(by_product, yday):
     kpi_val = 5
     tbl_hdr = 7          # 1-based row of product-table header
     tbl_first = tbl_hdr + 1
-    total_row = len(values)
+    # total_row already captured above (product total). Do NOT recompute here.
     blue = {"red": 0.12, "green": 0.22, "blue": 0.39}
     lightblue = {"red": 0.85, "green": 0.88, "blue": 0.95}
+    green = {"red": 0.13, "green": 0.55, "blue": 0.13}
+    lightgreen = {"red": 0.85, "green": 0.94, "blue": 0.85}
+    red = {"red": 0.70, "green": 0.13, "blue": 0.13}
+    lightred = {"red": 0.98, "green": 0.88, "blue": 0.88}
 
     def cell_fmt(r0, r1, c0, c1, body, fields):
         return {"repeatCell": {
@@ -357,6 +443,26 @@ def write_sheet(by_product, yday):
         cell_fmt(total_row - 1, total_row, 0, 7,
                  {"backgroundColor": lightblue, "textFormat": {"bold": True}},
                  "userEnteredFormat(backgroundColor,textFormat)"),
+        # ── TOP creatives: title + header (green), rows (light green) ──
+        cell_fmt(top_title_row - 1, top_hdr_row, 0, 5,
+                 {"backgroundColor": green,
+                  "textFormat": {"bold": True,
+                                 "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
+                 "userEnteredFormat(backgroundColor,textFormat)"),
+        cell_fmt(top_first - 1, top_last, 0, 5,
+                 {"backgroundColor": lightgreen}, "userEnteredFormat.backgroundColor"),
+        cell_fmt(top_first - 1, top_last, 3, 4, money, "userEnteredFormat.numberFormat"),
+        cell_fmt(top_first - 1, top_last, 4, 5, roasf, "userEnteredFormat.numberFormat"),
+        # ── WORST creatives: title + header (red), rows (light red) ──
+        cell_fmt(worst_title_row - 1, worst_hdr_row, 0, 5,
+                 {"backgroundColor": red,
+                  "textFormat": {"bold": True,
+                                 "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
+                 "userEnteredFormat(backgroundColor,textFormat)"),
+        cell_fmt(worst_first - 1, worst_last, 0, 5,
+                 {"backgroundColor": lightred}, "userEnteredFormat.backgroundColor"),
+        cell_fmt(worst_first - 1, worst_last, 3, 4, money, "userEnteredFormat.numberFormat"),
+        cell_fmt(worst_first - 1, worst_last, 4, 5, roasf, "userEnteredFormat.numberFormat"),
         {"updateSheetProperties": {
             "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": tbl_hdr}},
             "fields": "gridProperties.frozenRowCount"}},
@@ -373,7 +479,12 @@ def main():
     by_product, yday = collect()
     if not by_product:
         sys.exit("No active home-decor campaigns with budget found — not writing sheet.")
-    title, n, budget, spend, roas = write_sheet(by_product, yday)
+    cid_to_product = {c["cid"]: prod
+                      for prod, camps in by_product.items() for c in camps}
+    print(f"Fetching ad-level creatives for {len(cid_to_product)} home-decor camps...")
+    creatives = fetch_creatives(cid_to_product, yday)
+    print(f"  {len(creatives)} home-decor ads with spend on {yday}")
+    title, n, budget, spend, roas = write_sheet(by_product, yday, creatives)
     print()
     print(f"  {n} home-decor camps  |  ₹{int(budget):,}/day budget  |  "
           f"₹{int(spend):,} spend ({yday})  |  {roas}x ROAS")
