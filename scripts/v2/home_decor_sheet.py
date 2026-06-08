@@ -47,6 +47,9 @@ from product_catalogue import derive_category_v2  # noqa: E402
 # product-level category == 'Crystal' on top of the v2 'Crystal Home Decor' tag.
 from active_budget_by_product import classify_corrected  # noqa: E402
 
+# Shopify daily store sales (gross / net / #orders) — fail-safe, never raises.
+from shopify_daily_sales import store_sales  # noqa: E402
+
 # Operator's "home decor" sheet — service account must have Editor access.
 SHEET_ID = "1X0FDfiS5ZflJykVZcsFgieI0qHrWC4OOuO3jMBfB6K0"
 
@@ -296,7 +299,7 @@ def open_sheet():
     return gspread.authorize(creds).open_by_key(SHEET_ID)
 
 
-def write_sheet(by_product, yday, creatives):
+def write_sheet(by_product, yday, creatives, sales=None):
     sh = open_sheet()
     title = yday  # tab name = the DATA date (yesterday), keeps daily history
     titles = {w.title: w for w in sh.worksheets()}
@@ -386,6 +389,27 @@ def write_sheet(by_product, yday, creatives):
                 red_rows.append(r)
     cr_last = len(values)
 
+    # ── Store sales (Shopify, yesterday) — all portals ──
+    values.append([])
+    ss_title_row = len(values) + 1
+    values.append([f"💰 STORE SALES ({yday_label}) — gross / net / #orders, all portals "
+                   f"(Gross = total paid; Net = after discounts)"])
+    ss_hdr_row = len(values) + 1
+    values.append(["Portal", "Orders", "Gross Sales (₹)", "Net Sales (₹)"])
+    ss_first = len(values) + 1
+    if sales:
+        for p in ["SM", "SML", "NBP"]:
+            d = sales.get(p)
+            if d is None:
+                values.append([p, "—", "—", "—"])
+            else:
+                values.append([p, d["orders"], round(d["gross"]), round(d["net"])])
+        t = sales["TOTAL"]
+        values.append(["TOTAL", t["orders"], round(t["gross"]), round(t["net"])])
+    else:
+        values.append(["(Shopify sales unavailable — check store creds)", "", "", ""])
+    ss_last = len(values)
+
     ws.clear()
     ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
 
@@ -463,6 +487,17 @@ def write_sheet(by_product, yday, creatives):
         fmt.append(cell_fmt(r - 1, r, 0, 5,
                             {"backgroundColor": lightred, "textFormat": {"bold": True}},
                             "userEnteredFormat(backgroundColor,textFormat)"))
+    # Store-sales block: title+header (dark), money cols, bold total
+    fmt.append(cell_fmt(ss_title_row - 1, ss_hdr_row, 0, 4,
+                        {"backgroundColor": blue,
+                         "textFormat": {"bold": True,
+                                        "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
+                        "userEnteredFormat(backgroundColor,textFormat)"))
+    fmt.append(cell_fmt(ss_first - 1, ss_last, 2, 4, money, "userEnteredFormat.numberFormat"))
+    if sales:
+        fmt.append(cell_fmt(ss_last - 1, ss_last, 0, 4,
+                            {"backgroundColor": lightblue, "textFormat": {"bold": True}},
+                            "userEnteredFormat(backgroundColor,textFormat)"))
     fmt += [
         {"updateSheetProperties": {
             "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": tbl_hdr}},
@@ -485,7 +520,13 @@ def main():
     print(f"Fetching ad-level creatives for {len(cid_to_product)} home-decor camps...")
     creatives = fetch_creatives(cid_to_product, yday)
     print(f"  {len(creatives)} home-decor ads with spend on {yday}")
-    title, n, budget, spend, roas = write_sheet(by_product, yday, creatives)
+    try:
+        sales = store_sales(yday)
+    except Exception as e:  # noqa: BLE001 — never let sales break the report
+        print(f"  Shopify sales fetch failed: {e}", file=sys.stderr)
+        sales = None
+    print(f"  store sales: {'ok' if sales else 'unavailable'}")
+    title, n, budget, spend, roas = write_sheet(by_product, yday, creatives, sales)
     print()
     print(f"  {n} home-decor camps  |  ₹{int(budget):,}/day budget  |  "
           f"₹{int(spend):,} spend ({yday})  |  {roas}x ROAS")
