@@ -267,6 +267,7 @@ def fetch_creatives(cid_to_product, yday):
                     "product": cid_to_product.get(r.get("campaign_id"), "?"),
                     "spend": spend,
                     "roas": _extract_roas(r.get("purchase_roas")),
+                    "acct": aid,
                 })
             time.sleep(0.3)
     return out
@@ -370,7 +371,15 @@ def write_sheet(by_product, yday, creatives):
     else:
         for i, c in enumerate(ads, 1):
             r = len(values) + 1
-            values.append([i, c["name"][:60], c["product"], round(c["spend"]), c["roas"]])
+            acct_num = (c.get("acct") or "").replace("act_", "")
+            nm = c["name"][:60]
+            if acct_num and c.get("ad_id"):
+                url = (f"https://business.facebook.com/adsmanager/manage/ads?"
+                       f"act={acct_num}&selected_ad_ids={c['ad_id']}")
+                name_cell = '=HYPERLINK("%s","%s")' % (url, nm.replace('"', '""'))
+            else:
+                name_cell = nm
+            values.append([i, name_cell, c["product"], round(c["spend"]), c["roas"]])
             if c["ad_id"] in top_ids:
                 green_rows.append(r)
             elif c["ad_id"] in worst_ids:
