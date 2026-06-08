@@ -271,6 +271,7 @@ def fetch_creatives(cid_to_product, yday):
                     "spend": spend,
                     "roas": _extract_roas(r.get("purchase_roas")),
                     "acct": aid,
+                    "camp_id": r.get("campaign_id") or "",
                 })
             time.sleep(0.3)
     return out
@@ -391,7 +392,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
     top_ids = {c["ad_id"] for c in qual[:3]}
     worst_ids = {c["ad_id"] for c in sorted(qual, key=lambda c: c["roas"])[:3]} - top_ids
 
-    chdr = ["Rank", "Ad / Creative", "Product", "Spend (₹)", "ROAS"]
+    chdr = ["Rank", "Ad / Creative", "Product", "Spend (₹)", "ROAS", "Camp ID"]
     values.append([])
     cr_title_row = len(values) + 1
     values.append([f"🎬 CREATIVES PERFORMANCE — all {len(ads)} ads (spend>0), sorted by ROAS  ·  "
@@ -401,7 +402,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
     cr_first = len(values) + 1
     green_rows, red_rows = [], []
     if not ads:
-        values.append(["", "(no ads with spend on this day)", "", "", ""])
+        values.append(["", "(no ads with spend on this day)", "", "", "", ""])
     else:
         for i, c in enumerate(ads, 1):
             r = len(values) + 1
@@ -413,7 +414,8 @@ def write_sheet(by_product, yday, creatives, sales=None):
                 name_cell = '=HYPERLINK("%s","%s")' % (url, nm.replace('"', '""'))
             else:
                 name_cell = nm
-            values.append([i, name_cell, c["product"], round(c["spend"]), c["roas"]])
+            camp_cell = '="%s"' % c.get("camp_id", "")  # text → keeps full 18-digit id
+            values.append([i, name_cell, c["product"], round(c["spend"]), c["roas"], camp_cell])
             if c["ad_id"] in top_ids:
                 green_rows.append(r)
             elif c["ad_id"] in worst_ids:
@@ -502,7 +504,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
                  {"backgroundColor": lightblue, "textFormat": {"bold": True}},
                  "userEnteredFormat(backgroundColor,textFormat)"),
         # ── Creatives section: title + header (dark blue) ──
-        cell_fmt(cr_title_row - 1, cr_hdr_row, 0, 5,
+        cell_fmt(cr_title_row - 1, cr_hdr_row, 0, 6,
                  {"backgroundColor": blue,
                   "textFormat": {"bold": True,
                                  "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
@@ -513,11 +515,11 @@ def write_sheet(by_product, yday, creatives, sales=None):
     ]
     # Highlight the top-3 (green) and worst-3 (red) creative rows wherever they fall
     for r in green_rows:
-        fmt.append(cell_fmt(r - 1, r, 0, 5,
+        fmt.append(cell_fmt(r - 1, r, 0, 6,
                             {"backgroundColor": lightgreen, "textFormat": {"bold": True}},
                             "userEnteredFormat(backgroundColor,textFormat)"))
     for r in red_rows:
-        fmt.append(cell_fmt(r - 1, r, 0, 5,
+        fmt.append(cell_fmt(r - 1, r, 0, 6,
                             {"backgroundColor": lightred, "textFormat": {"bold": True}},
                             "userEnteredFormat(backgroundColor,textFormat)"))
     # Store-sales block: title+header (dark), money cols (Gross/Net/Ad Spend),
