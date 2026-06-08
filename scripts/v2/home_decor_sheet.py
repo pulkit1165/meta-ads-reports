@@ -350,40 +350,32 @@ def write_sheet(by_product, yday, creatives):
                    tot_roas, ""])
     total_row = len(values)  # 1-based row of the product total
 
-    # ── Creatives: top 3 / worst 3 by ROAS (min spend) ──
-    ranked = sorted([c for c in creatives if c["spend"] >= MIN_CREATIVE_SPEND],
-                    key=lambda c: c["roas"], reverse=True)
-    top = ranked[:3]
-    top_ids = {c["ad_id"] for c in top}
-    worst = [c for c in reversed(ranked) if c["ad_id"] not in top_ids][:3]
-
-    def creative_rows(picks):
-        if not picks:
-            return [["", "(no ads with spend ≥ ₹%d)" % MIN_CREATIVE_SPEND, "", "", ""]]
-        return [[i, c["name"][:60], c["product"], round(c["spend"]), c["roas"]]
-                for i, c in enumerate(picks, 1)]
+    # ── Creatives: ALL ads (spend>0), sorted by ROAS; highlight top/worst 3 ──
+    ads = sorted(creatives, key=lambda c: c["roas"], reverse=True)
+    qual = [c for c in ads if c["spend"] >= MIN_CREATIVE_SPEND]
+    top_ids = {c["ad_id"] for c in qual[:3]}
+    worst_ids = {c["ad_id"] for c in sorted(qual, key=lambda c: c["roas"])[:3]} - top_ids
 
     chdr = ["Rank", "Ad / Creative", "Product", "Spend (₹)", "ROAS"]
-    top_disp = creative_rows(top)
-    worst_disp = creative_rows(worst)
-
     values.append([])
-    top_title_row = len(values) + 1
-    values.append([f"🏆 TOP 3 CREATIVES  (by ROAS, spend ≥ ₹{MIN_CREATIVE_SPEND}, {yday_label})"])
-    top_hdr_row = len(values) + 1
+    cr_title_row = len(values) + 1
+    values.append([f"🎬 CREATIVES PERFORMANCE — all {len(ads)} ads (spend>0), sorted by ROAS  ·  "
+                   f"🏆 top 3 green · 🔻 worst 3 red (spend ≥ ₹{MIN_CREATIVE_SPEND})  ·  {yday_label}"])
+    cr_hdr_row = len(values) + 1
     values.append(chdr)
-    top_first = len(values) + 1
-    values.extend(top_disp)
-    top_last = len(values)
-
-    values.append([])
-    worst_title_row = len(values) + 1
-    values.append([f"🔻 WORST 3 CREATIVES  (by ROAS, spend ≥ ₹{MIN_CREATIVE_SPEND}, {yday_label})"])
-    worst_hdr_row = len(values) + 1
-    values.append(chdr)
-    worst_first = len(values) + 1
-    values.extend(worst_disp)
-    worst_last = len(values)
+    cr_first = len(values) + 1
+    green_rows, red_rows = [], []
+    if not ads:
+        values.append(["", "(no ads with spend on this day)", "", "", ""])
+    else:
+        for i, c in enumerate(ads, 1):
+            r = len(values) + 1
+            values.append([i, c["name"][:60], c["product"], round(c["spend"]), c["roas"]])
+            if c["ad_id"] in top_ids:
+                green_rows.append(r)
+            elif c["ad_id"] in worst_ids:
+                red_rows.append(r)
+    cr_last = len(values)
 
     ws.clear()
     ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
@@ -443,26 +435,26 @@ def write_sheet(by_product, yday, creatives):
         cell_fmt(total_row - 1, total_row, 0, 7,
                  {"backgroundColor": lightblue, "textFormat": {"bold": True}},
                  "userEnteredFormat(backgroundColor,textFormat)"),
-        # ── TOP creatives: title + header (green), rows (light green) ──
-        cell_fmt(top_title_row - 1, top_hdr_row, 0, 5,
-                 {"backgroundColor": green,
+        # ── Creatives section: title + header (dark blue) ──
+        cell_fmt(cr_title_row - 1, cr_hdr_row, 0, 5,
+                 {"backgroundColor": blue,
                   "textFormat": {"bold": True,
                                  "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
                  "userEnteredFormat(backgroundColor,textFormat)"),
-        cell_fmt(top_first - 1, top_last, 0, 5,
-                 {"backgroundColor": lightgreen}, "userEnteredFormat.backgroundColor"),
-        cell_fmt(top_first - 1, top_last, 3, 4, money, "userEnteredFormat.numberFormat"),
-        cell_fmt(top_first - 1, top_last, 4, 5, roasf, "userEnteredFormat.numberFormat"),
-        # ── WORST creatives: title + header (red), rows (light red) ──
-        cell_fmt(worst_title_row - 1, worst_hdr_row, 0, 5,
-                 {"backgroundColor": red,
-                  "textFormat": {"bold": True,
-                                 "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
-                 "userEnteredFormat(backgroundColor,textFormat)"),
-        cell_fmt(worst_first - 1, worst_last, 0, 5,
-                 {"backgroundColor": lightred}, "userEnteredFormat.backgroundColor"),
-        cell_fmt(worst_first - 1, worst_last, 3, 4, money, "userEnteredFormat.numberFormat"),
-        cell_fmt(worst_first - 1, worst_last, 4, 5, roasf, "userEnteredFormat.numberFormat"),
+        # Spend (col D) + ROAS (col E) number formats over all ad rows
+        cell_fmt(cr_first - 1, cr_last, 3, 4, money, "userEnteredFormat.numberFormat"),
+        cell_fmt(cr_first - 1, cr_last, 4, 5, roasf, "userEnteredFormat.numberFormat"),
+    ]
+    # Highlight the top-3 (green) and worst-3 (red) creative rows wherever they fall
+    for r in green_rows:
+        fmt.append(cell_fmt(r - 1, r, 0, 5,
+                            {"backgroundColor": lightgreen, "textFormat": {"bold": True}},
+                            "userEnteredFormat(backgroundColor,textFormat)"))
+    for r in red_rows:
+        fmt.append(cell_fmt(r - 1, r, 0, 5,
+                            {"backgroundColor": lightred, "textFormat": {"bold": True}},
+                            "userEnteredFormat(backgroundColor,textFormat)"))
+    fmt += [
         {"updateSheetProperties": {
             "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": tbl_hdr}},
             "fields": "gridProperties.frozenRowCount"}},
