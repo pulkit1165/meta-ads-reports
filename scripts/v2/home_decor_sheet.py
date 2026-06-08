@@ -59,6 +59,21 @@ HOME_DECOR_CATEGORY = "Crystal Home Decor"
 # the rollup. Drop this entry to include it.
 EXCLUDE_ACCOUNTS = {"SM_CREDIT_LINE_06"}
 
+# Canonical home-decor product list (decor items from product_catalogue's Crystal
+# rules, excluding body-worn accessories — bracelets / sutras). Every product here
+# is always shown, even with no active camp yesterday (renders as 0 / "💤 Off"), so
+# the operator sees the full home-decor range each day. Any live product not listed
+# is appended automatically.
+HOME_DECOR_PRODUCTS = [
+    "Peacock Frame", "Crystal Frame", "7 Horses / Richie Rich",
+    "Sunflower Selenite Plate", "Selenite Products", "Selenite Coaster",
+    "Crystal Coaster", "Crystal Clock", "Crystal Hourglass",
+    "Money Bowl with Geode", "Crystal Miniature Series", "Crystal Deer Plate",
+    "Crystal Owl", "Hanuman Crystal", "Ganesha Crystal", "Money Magnet Crystal",
+    "Rose Quartz Crystal", "Sleek Crystal", "Pyrite Products", "Crystal Mix",
+    "Crystal Products",
+]
+
 
 def excluded(name):
     """Mirror the operator's category reports: drop BID-tagged and bau_/meta_test_ camps."""
@@ -246,15 +261,21 @@ def write_sheet(by_product, yday):
     else:
         ws = sh.add_worksheet(title=title, rows=80, cols=7)
 
-    # Roll up per product, sorted by budget desc
+    # Roll up per product. Seed with the full canonical list so inactive products
+    # still show (as 0), then add any live product not already listed.
+    order = {p: i for i, p in enumerate(HOME_DECOR_PRODUCTS)}
+    products = list(HOME_DECOR_PRODUCTS) + [
+        p for p in by_product if p not in order]
     prod_rows = []
-    for product, camps in by_product.items():
+    for product in products:
+        camps = by_product.get(product, [])
         budget = sum(c["budget"] for c in camps)
         spend = sum(c["spend"] for c in camps)
         rev = sum(c["spend"] * c["roas"] for c in camps)
         roas = round(rev / spend, 2) if spend else 0.0
         prod_rows.append((product, len(camps), budget, spend, roas))
-    prod_rows.sort(key=lambda r: -r[2])
+    # Active (has budget) first by budget desc; inactive (0) after, in list order.
+    prod_rows.sort(key=lambda r: (-r[2], -r[3], order.get(r[0], 999)))
 
     tot_camps = sum(r[1] for r in prod_rows)
     tot_budget = sum(r[2] for r in prod_rows)
@@ -277,7 +298,8 @@ def write_sheet(by_product, yday):
     # Product table
     values.append(["#", "Product", "#Camps", "Budget (₹/day)", "Spend (₹)", "ROAS", "Verdict"])
     for i, (product, ncamps, budget, spend, roas) in enumerate(prod_rows, 1):
-        values.append([i, product, ncamps, round(budget), round(spend), roas, _verdict(roas)])
+        verdict = _verdict(roas) if ncamps else "💤 Off"
+        values.append([i, product, ncamps, round(budget), round(spend), roas, verdict])
     values.append(["", "── TOTAL ──", tot_camps, round(tot_budget), round(tot_spend),
                    tot_roas, ""])
 
