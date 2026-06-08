@@ -482,12 +482,14 @@ def write_sheet(by_product, yday, creatives, sales=None):
     kpi_hdr = 4          # 1-based row of KPI header
     kpi_val = 5
     # tbl_hdr, tbl_first, ss_*, cr_*, total_row all captured during building above.
-    blue = {"red": 0.12, "green": 0.22, "blue": 0.39}
-    lightblue = {"red": 0.85, "green": 0.88, "blue": 0.95}
+    # Toned-down palette: plain grey headings only (no bright fills). The light
+    # green/red on top-3/worst-3 creative rows is kept — it's a requested signal.
+    blue = {"red": 0.91, "green": 0.91, "blue": 0.91}        # header grey
+    lightblue = {"red": 0.96, "green": 0.96, "blue": 0.96}   # subtle row grey
     green = {"red": 0.13, "green": 0.55, "blue": 0.13}
-    lightgreen = {"red": 0.85, "green": 0.94, "blue": 0.85}
+    lightgreen = {"red": 0.86, "green": 0.94, "blue": 0.86}
     red = {"red": 0.70, "green": 0.13, "blue": 0.13}
-    lightred = {"red": 0.98, "green": 0.88, "blue": 0.88}
+    lightred = {"red": 0.98, "green": 0.89, "blue": 0.89}
 
     def cell_fmt(r0, r1, c0, c1, body, fields):
         return {"repeatCell": {
@@ -503,7 +505,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
         cell_fmt(0, 1, 0, 7,
                  {"backgroundColor": blue,
                   "textFormat": {"bold": True, "fontSize": 13,
-                                 "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
+                                 "foregroundColor": {"red": 0, "green": 0, "blue": 0}}},
                  "userEnteredFormat(backgroundColor,textFormat)"),
         # KPI header + values
         cell_fmt(kpi_hdr - 1, kpi_hdr, 0, 4,
@@ -520,7 +522,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
         cell_fmt(tbl_hdr - 1, tbl_hdr, 0, 7,
                  {"backgroundColor": blue,
                   "textFormat": {"bold": True,
-                                 "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
+                                 "foregroundColor": {"red": 0, "green": 0, "blue": 0}}},
                  "userEnteredFormat(backgroundColor,textFormat)"),
         # Budget + Spend money cols (D,E) for table rows incl total
         cell_fmt(tbl_first - 1, total_row, 3, 5, money, "userEnteredFormat.numberFormat"),
@@ -534,7 +536,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
         cell_fmt(cr_title_row - 1, cr_hdr_row, 0, 6,
                  {"backgroundColor": blue,
                   "textFormat": {"bold": True,
-                                 "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
+                                 "foregroundColor": {"red": 0, "green": 0, "blue": 0}}},
                  "userEnteredFormat(backgroundColor,textFormat)"),
         # Spend (col D) + ROAS (col E) number formats over all ad rows
         cell_fmt(cr_first - 1, cr_last, 3, 4, money, "userEnteredFormat.numberFormat"),
@@ -553,7 +555,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
     fmt.append(cell_fmt(ss_title_row - 1, ss_hdr_row, 0, 6,
                         {"backgroundColor": blue,
                          "textFormat": {"bold": True,
-                                        "foregroundColor": {"red": 1, "green": 1, "blue": 1}}},
+                                        "foregroundColor": {"red": 0, "green": 0, "blue": 0}}},
                         "userEnteredFormat(backgroundColor,textFormat)"))
     fmt.append(cell_fmt(ss_first - 1, ss_last, 2, 5, money, "userEnteredFormat.numberFormat"))
     fmt.append(cell_fmt(ss_first - 1, ss_last, 5, 6, roasf, "userEnteredFormat.numberFormat"))

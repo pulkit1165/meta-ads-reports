@@ -225,11 +225,12 @@ def write_sheet(by_product, yday, creatives):
     kpi_hdr, kpi_val = 4, 5
     tbl_hdr = 7
     tbl_first = tbl_hdr + 1
-    purple = {"red": 0.20, "green": 0.13, "blue": 0.35}
-    lightpurple = {"red": 0.90, "green": 0.86, "blue": 0.95}
-    lightgreen = {"red": 0.85, "green": 0.94, "blue": 0.85}
-    lightred = {"red": 0.98, "green": 0.88, "blue": 0.88}
-    white = {"red": 1, "green": 1, "blue": 1}
+    # Toned-down palette: plain grey headings only (kept green/red on top/worst).
+    purple = {"red": 0.91, "green": 0.91, "blue": 0.91}        # header grey
+    lightpurple = {"red": 0.96, "green": 0.96, "blue": 0.96}   # subtle row grey
+    lightgreen = {"red": 0.86, "green": 0.94, "blue": 0.86}
+    lightred = {"red": 0.98, "green": 0.89, "blue": 0.89}
+    white = {"red": 0, "green": 0, "blue": 0}                   # header text (black)
 
     def cell_fmt(r0, r1, c0, c1, body, fields):
         return {"repeatCell": {
