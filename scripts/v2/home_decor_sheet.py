@@ -377,8 +377,33 @@ def write_sheet(by_product, yday, creatives, sales=None):
     values.append(["Total Budget (₹/day)", "Spend (yesterday ₹)", "Campaigns Running", "ROAS"])
     values.append([round(tot_budget), round(tot_spend), tot_camps, tot_roas])
     values.append([])
+    # ── Store sales (Shopify, yesterday) — placed up top, all portals ──
+    ss_title_row = len(values) + 1
+    values.append([f"💰 STORE SALES ({yday_label}) — all portals  ·  Gross = total paid · "
+                   f"Net = after discounts · ROAS = Gross ÷ ad spend (store-wide)"])
+    ss_hdr_row = len(values) + 1
+    values.append(["Portal", "Orders", "Gross Sales (₹)", "Net Sales (₹)", "Ad Spend (₹)", "ROAS"])
+    ss_first = len(values) + 1
+    if sales:
+        for p in ["SM", "SML", "NBP"]:
+            d = sales.get(p)
+            if d is None:
+                values.append([p, "—", "—", "—", "—", "—"])
+            else:
+                values.append([p, d["orders"], round(d["gross"]), round(d["net"]),
+                               round(d.get("spend", 0)), d.get("roas", 0.0)])
+        t = sales["TOTAL"]
+        values.append(["TOTAL", t["orders"], round(t["gross"]), round(t["net"]),
+                       round(t.get("spend", 0)), t.get("roas", 0.0)])
+    else:
+        values.append(["(Shopify sales unavailable — runs on GitHub Actions)", "", "", "", "", ""])
+    ss_last = len(values)
+
+    values.append([])
     # Product table
+    tbl_hdr = len(values) + 1
     values.append(["#", "Product", "#Camps", "Budget (₹/day)", "Spend (₹)", "ROAS", "Verdict"])
+    tbl_first = len(values) + 1
     for i, (product, ncamps, budget, spend, roas) in enumerate(prod_rows, 1):
         verdict = _verdict(roas) if ncamps else "💤 Off"
         values.append([i, product, ncamps, round(budget), round(spend), roas, verdict])
@@ -422,29 +447,6 @@ def write_sheet(by_product, yday, creatives, sales=None):
                 red_rows.append(r)
     cr_last = len(values)
 
-    # ── Store sales (Shopify, yesterday) — all portals ──
-    values.append([])
-    ss_title_row = len(values) + 1
-    values.append([f"💰 STORE SALES ({yday_label}) — all portals  ·  Gross = total paid · "
-                   f"Net = after discounts · ROAS = Gross ÷ ad spend (store-wide)"])
-    ss_hdr_row = len(values) + 1
-    values.append(["Portal", "Orders", "Gross Sales (₹)", "Net Sales (₹)", "Ad Spend (₹)", "ROAS"])
-    ss_first = len(values) + 1
-    if sales:
-        for p in ["SM", "SML", "NBP"]:
-            d = sales.get(p)
-            if d is None:
-                values.append([p, "—", "—", "—", "—", "—"])
-            else:
-                values.append([p, d["orders"], round(d["gross"]), round(d["net"]),
-                               round(d.get("spend", 0)), d.get("roas", 0.0)])
-        t = sales["TOTAL"]
-        values.append(["TOTAL", t["orders"], round(t["gross"]), round(t["net"]),
-                       round(t.get("spend", 0)), t.get("roas", 0.0)])
-    else:
-        values.append(["(Shopify sales unavailable — check store creds)", "", "", "", "", ""])
-    ss_last = len(values)
-
     ws.clear()
     ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
 
@@ -452,9 +454,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
     sid = ws.id
     kpi_hdr = 4          # 1-based row of KPI header
     kpi_val = 5
-    tbl_hdr = 7          # 1-based row of product-table header
-    tbl_first = tbl_hdr + 1
-    # total_row already captured above (product total). Do NOT recompute here.
+    # tbl_hdr, tbl_first, ss_*, cr_*, total_row all captured during building above.
     blue = {"red": 0.12, "green": 0.22, "blue": 0.39}
     lightblue = {"red": 0.85, "green": 0.88, "blue": 0.95}
     green = {"red": 0.13, "green": 0.55, "blue": 0.13}
@@ -537,7 +537,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
                             "userEnteredFormat(backgroundColor,textFormat)"))
     fmt += [
         {"updateSheetProperties": {
-            "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": tbl_hdr}},
+            "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": kpi_val}},
             "fields": "gridProperties.frozenRowCount"}},
         {"autoResizeDimensions": {
             "dimensions": {"sheetId": sid, "dimension": "COLUMNS",
