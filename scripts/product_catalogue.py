@@ -299,7 +299,12 @@ def derive_category_v2(campaign_or_ad_name):
             'eyebrow', 'brow_grow', 'eye_care',
             # additions (Skin-only fix, 9 Jun 2026):
             'neck_bright', 'neckbright',
-            '24k_gold',
+            # Only 24K Gold SERUM is Skin. Bare '24k_gold' was too broad —
+            # a future 24K gold jewellery ad (e.g. `paras_24k_gold_reel`
+            # without _serum) would have wrongly landed in Skin. Now only
+            # explicit serum variants match; bare 24k_gold ads fall to Other,
+            # which is the safe default.
+            'gold_serum', 'gold_face_serum', 'goldserum', '24kgold_serum',
             'sun_mousse', 'sunmousse',
             'glass_skin', 'glassskin', 'cleanser',
             'd_tan', 'dtan',
