@@ -74,18 +74,39 @@ def _load_storyline_markers():
 
 
 def _is_storyline(c, markers):
+    """Match storyline markers against the ad NAME + creative TITLE + DESCRIPTION
+    (c['copy']), or exact ad/campaign IDs."""
     if not markers:
         return False
-    name = (c.get("name") or "").lower()
+    hay = ((c.get("name") or "") + " " + (c.get("copy") or "")).lower()
     aid = str(c.get("ad_id") or "")
     cid = str(c.get("camp_id") or "")
     for m in markers:
         if m.isdigit():
             if m == aid or m == cid:
                 return True
-        elif m and m in name:
+        elif m and m in hay:
             return True
     return False
+
+
+def fetch_creative_text(ad_ids):
+    """{ad_id: 'title body' lowercased} from each ad's creative (title + body)."""
+    out = {}
+    for i in range(0, len(ad_ids), 50):
+        batch = [a for a in ad_ids[i:i + 50] if a]
+        if not batch:
+            continue
+        try:
+            d = meta_get(f"{GRAPH_API}/", {"ids": ",".join(batch),
+                                           "fields": "creative{title,body}"})
+        except Exception:  # noqa: BLE001
+            d = {}
+        for aid, obj in (d or {}).items():
+            cr = (obj or {}).get("creative") or {} if isinstance(obj, dict) else {}
+            out[aid] = ((cr.get("title") or "") + " " + (cr.get("body") or "")).lower()
+        time.sleep(0.3)
+    return out
 
 
 # ── data collection ───────────────────────────────────────────────────────────
@@ -276,6 +297,10 @@ def write_sheet(by_product, yday, creatives, sales=None):
     # ── Paras creatives (separated, at the bottom) ──
     markers = _load_storyline_markers()
     paras = paras_ads
+    if markers:  # only pull creative title/description when we actually need to match
+        copy_map = fetch_creative_text([c.get("ad_id") for c in paras])
+        for c in paras:
+            c["copy"] = copy_map.get(c.get("ad_id"), "")
     values.append([])
     pr_title_row = len(values) + 1
     values.append([f"🙋 PARAS CREATIVES ({len(paras)} ads) — {yday_label}, sorted by ROAS"
