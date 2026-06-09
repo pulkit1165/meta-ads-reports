@@ -88,9 +88,42 @@ def build_payload(conn, days):
     }
 
 
-def render(payload):
+HD_PRESETS = ['today', 'yesterday', 'last_7d', 'last_30d']
+
+
+def build_homedecor(presets=HD_PRESETS):
+    """Rich Home-Decor payload per preset, fetched live from Meta at build time
+    (campaigns -> ad sets -> creatives, product + website rollups, creative
+    report). Embedded into the page so the browser makes zero API calls, exactly
+    like the main payload. Degrades to {} when META_ACCESS_TOKEN is absent or a
+    preset errors, so it never breaks the main build."""
+    import os
+    out = {}
+    if not os.getenv('META_ACCESS_TOKEN'):
+        print("  home-decor: META_ACCESS_TOKEN not set — embedding empty payload",
+              file=sys.stderr)
+        return out
+    try:
+        import home_decor_dashboard_data as hdd
+    except Exception as e:  # noqa: BLE001
+        print(f"  home-decor: import failed ({e}) — embedding empty", file=sys.stderr)
+        return out
+    for p in presets:
+        try:
+            out[p] = hdd.build(p)
+            ov = out[p].get('overview', {})
+            print(f"  home-decor[{p}]: {ov.get('campaigns', 0)} camps, "
+                  f"Rs {ov.get('budget', 0):,}/day", file=sys.stderr)
+        except Exception as e:  # noqa: BLE001
+            print(f"  home-decor[{p}] failed: {e}", file=sys.stderr)
+    return out
+
+
+def render(payload, homedecor=None):
     data = json.dumps(payload, separators=(',', ':'))
-    return HTML.replace('/*__PAYLOAD__*/', data)
+    hd = json.dumps(homedecor or {}, separators=(',', ':'), ensure_ascii=False)
+    return (HTML.replace('/*__PAYLOAD__*/', data)
+                .replace('/*__HOMEDECOR__*/', hd))
 
 
 def main():
@@ -104,9 +137,11 @@ def main():
     payload = build_payload(conn, args.days)
     conn.close()
 
+    homedecor = build_homedecor()
+
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render(payload))
+    out.write_text(render(payload, homedecor))
     kb = out.stat().st_size / 1024
     print(f"wrote {out}  ({kb:.0f} KB)  "
           f"{len(payload['adDays'])} ad-days, {len(payload['shop'])} shop-days, "
@@ -325,12 +360,28 @@ HTML = r"""<!doctype html>
           </div>
         </section>
       </div><!-- /view-category -->
+
+      <!-- HOME DECOR (rich module: live from Meta, embedded at build) -->
+      <div id="view-homedecor" style="display:none">
+        <section class="section">
+          <h2 style="margin-bottom:6px">&#128302; Crystal Home Decor <span class="muted" id="hdScope" style="text-transform:none;letter-spacing:0;font-size:13px"></span></h2>
+          <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-bottom:6px">
+            <div class="seg" id="hdTabs"></div>
+            <div class="spacer"></div>
+            <span class="muted" style="font-size:12px">Range</span>
+            <div class="seg" id="hdPresetSeg"></div>
+          </div>
+          <div class="muted" id="hdFetched" style="font-size:12px;margin-bottom:8px"></div>
+        </section>
+        <div id="hdBody"></div>
+      </div><!-- /view-homedecor -->
     </div>
   </div>
 </div>
 
 <script>
 const PAYLOAD = /*__PAYLOAD__*/;
+const HOMEDECOR = /*__HOMEDECOR__*/;
 const fmtINR = n => { n=Math.round(n||0);
   if(Math.abs(n)>=1e7) return '₹'+(n/1e7).toFixed(2)+'Cr';
   if(Math.abs(n)>=1e5) return '₹'+(n/1e5).toFixed(2)+'L';
@@ -456,8 +507,93 @@ function renderCategory(){
   document.querySelector('#catCreativeTable tbody').innerHTML=h||'<tr><td colspan="6" class="muted">No spend in this range.</td></tr>';
 }
 
+// ===================== HOME DECOR MODULE (embedded Meta payload) =====================
+let HDPRESET='yesterday', HDTAB='overview';
+const HD_PRESET_LABELS={today:'Today',yesterday:'Yesterday',last_7d:'Last 7D',last_30d:'Last 30D'};
+const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['creative','Creative Report']];
+function hdEsc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function rg(r){r=r||0;return '<span class="rg '+roasClass(r)+'">'+r.toFixed(2)+'×</span>';}
+function hdAgo(ts){let s=Math.floor(Date.now()/1000-ts);if(s<0)s=0;if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
+function hdPick(){return (HOMEDECOR&&(HOMEDECOR[HDPRESET]||HOMEDECOR.yesterday||HOMEDECOR[Object.keys(HOMEDECOR)[0]]))||null;}
+function hdKpi(l,v,sub,tag){return '<div class="kpi"><div class="lbl">'+l+(tag?' <span class="tag">'+tag+'</span>':'')+'</div><div class="val">'+v+'</div><div class="sub">'+(sub||'')+'</div></div>';}
+function hdCard(ad){
+  return '<div style="width:120px;font-size:10px" class="muted">'+
+    '<div style="width:120px;height:120px;background:var(--bg2,#f0f2f7);border:1px solid var(--line,#e6e9f2);border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center">'+
+    (ad.thumbnail?'<img src="'+ad.thumbnail+'" loading="lazy" referrerpolicy="no-referrer" style="max-width:100%;max-height:100%">':'<span>no preview</span>')+'</div>'+
+    '<div style="margin-top:4px;display:flex;justify-content:space-between;align-items:center"><span class="chip">'+hdEsc(ad.type||'—')+'</span>'+rg(ad.roas)+'</div>'+
+    '<div style="margin-top:3px;color:var(--ink,#1f2937);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+hdEsc(ad.name)+'">'+hdEsc(ad.name)+'</div>'+
+    '<div style="margin-top:2px">'+fmtINR(ad.spend)+' &middot; '+fmtNum(ad.purchases)+' ord</div></div>';
+}
+function hdFmtCard(l,o){o=o||{};return '<div class="card" style="box-shadow:none;border-radius:10px"><div class="lbl muted" style="font-size:12px;font-weight:600">'+l+'</div><div style="font-size:20px;font-weight:750;margin:4px 0">'+fmtNum(o.count||0)+' ads</div><div style="font-size:12px" class="muted">'+fmtINR(o.spend||0)+' &middot; '+rg(o.roas)+'</div></div>';}
+function hdOverview(d){
+  const o=d.overview||{};
+  let h='<section class="section"><div class="kpis" style="grid-template-columns:repeat(4,1fr)">';
+  h+=hdKpi('Running Budget',fmtINR(o.budget),'effective ₹/day');
+  h+=hdKpi('Spend',fmtINR(o.spend),(d.since||'')+' → '+(d.until||''),'META');
+  h+=hdKpi('ROAS',rg(o.roas),'pixel revenue / spend','PIXEL');
+  h+=hdKpi('Orders',fmtNum(o.orders),fmtINR(o.revenue)+' revenue','PIXEL');
+  h+='</div></section>';
+  h+='<section class="section"><div class="card"><h3>Website-wise overview</h3><table><thead><tr><th>Website</th><th>Budget/day</th><th>Spend</th><th>ROAS</th><th>Orders</th><th>Campaigns</th></tr></thead><tbody>';
+  (d.websites||[]).forEach(w=>{h+='<tr><td><span class="chip">'+hdEsc(w.name)+'</span></td><td>'+fmtINR(w.budget)+'</td><td>'+fmtINR(w.spend)+'</td><td>'+rg(w.roas)+'</td><td>'+fmtNum(w.orders)+'</td><td>'+fmtNum(w.campaigns)+'</td></tr>';});
+  h+='</tbody></table></div></section>';
+  h+='<section class="section"><div class="card"><h3>Products snapshot</h3><table><thead><tr><th>Product</th><th>Budget/day</th><th>Spend</th><th>ROAS</th><th>Orders</th><th>Campaigns</th></tr></thead><tbody>';
+  (d.products||[]).forEach(p=>{h+='<tr><td><b>'+hdEsc(p.product)+'</b></td><td>'+fmtINR(p.budget)+'</td><td>'+fmtINR(p.spend)+'</td><td>'+rg(p.roas)+'</td><td>'+fmtNum(p.orders)+'</td><td>'+fmtNum(p.campaigns)+'</td></tr>';});
+  h+='</tbody></table></div></section>';
+  return h;
+}
+function hdBudget(d){
+  let h='<section class="section"><div class="card"><h3>Product-wise budget allocation</h3><table><thead><tr><th>Product</th><th>Budget/day</th><th>Share</th><th>Spend</th><th>ROAS</th><th>Orders</th><th>Camps</th><th>Ad sets</th></tr></thead><tbody>';
+  (d.products||[]).forEach(p=>{h+='<tr><td><b>'+hdEsc(p.product)+'</b></td><td>'+fmtINR(p.budget)+'</td>'+
+    '<td><div style="display:flex;align-items:center;gap:8px;min-width:130px"><div style="flex:1;height:7px;background:var(--line,#e6e9f2);border-radius:4px;overflow:hidden"><div style="width:'+(p.budget_share||0)+'%;height:100%;background:#6366f1"></div></div><span class="muted" style="font-size:11px">'+(p.budget_share||0)+'%</span></div></td>'+
+    '<td>'+fmtINR(p.spend)+'</td><td>'+rg(p.roas)+'</td><td>'+fmtNum(p.orders)+'</td><td>'+fmtNum(p.campaigns)+'</td><td>'+fmtNum(p.adsets)+'</td></tr>';});
+  h+='</tbody></table></div></section>';
+  return h;
+}
+function hdCampaigns(d){
+  const cs=d.campaigns||[];
+  let h='<section class="section"><div class="card"><h3>Campaigns ('+cs.length+')</h3><div class="csub">click a campaign &rarr; ad sets &rarr; creatives</div>';
+  cs.forEach(c=>{
+    h+='<details style="border-bottom:1px solid var(--line,#e6e9f2);padding:7px 0"><summary style="cursor:pointer"><b>'+hdEsc(c.name)+'</b> <span class="muted" style="font-family:monospace;font-size:11px">'+c.id+'</span><br><span class="muted" style="font-size:12px">'+c.adset_count+' ad sets &middot; '+fmtINR(c.budget)+'/day &middot; '+fmtINR(c.spend)+' spend &middot; '+rg(c.roas)+' &middot; '+fmtNum(c.orders)+' orders</span></summary><div style="padding:8px 0 4px 14px">';
+    (c.adsets||[]).forEach(a=>{
+      h+='<details style="margin:4px 0"><summary style="cursor:pointer">'+hdEsc(a.name)+' <span class="muted" style="font-family:monospace;font-size:11px">'+a.id+'</span> &middot; '+rg(a.roas)+' &middot; '+fmtNum(a.purchases)+' purch &middot; '+fmtINR(a.spend)+' &middot; '+(a.ads||[]).length+' creatives</summary><div style="display:flex;gap:10px;flex-wrap:wrap;padding:10px 0 6px">'+((a.ads||[]).map(hdCard).join('')||'<span class="muted">no ads</span>')+'</div></details>';
+    });
+    h+='</div></details>';
+  });
+  h+='</div></section>';
+  return h;
+}
+function hdCreative(d){
+  const cr=d.creative_report||{};
+  const grid=items=>'<div style="display:flex;gap:10px;flex-wrap:wrap">'+((items||[]).map(hdCard).join('')||'<span class="muted">none above &#8377;'+(cr.min_spend||0)+' spend</span>')+'</div>';
+  let h='<section class="section"><div class="card"><h3>Format performance</h3><div class="grid4" style="margin-top:10px">';
+  h+=hdFmtCard('Paras Videos',cr.paras)+hdFmtCard('Motion',(cr.motion_still||{}).Motion)+hdFmtCard('Still / Static',(cr.motion_still||{}).Static)+hdFmtCard('UGC',cr.ugc);
+  h+='</div></div></section>';
+  h+='<section class="section"><div class="card"><h3>&#127942; Winning creatives</h3>'+grid(cr.winning)+'</div></section>';
+  h+='<section class="section"><div class="card"><h3>&#128201; Losing creatives</h3>'+grid(cr.losing)+'</div></section>';
+  h+='<section class="section"><div class="card"><h3>&#128640; Creative requirement for future scaling</h3><table><thead><tr><th>Product</th><th>ROAS</th><th>Spend</th><th>Ads</th><th>Missing formats</th><th>Recommendation</th></tr></thead><tbody>';
+  (cr.scaling||[]).forEach(s=>{h+='<tr><td><b>'+hdEsc(s.product)+'</b></td><td>'+rg(s.roas)+'</td><td>'+fmtINR(s.spend)+'</td><td>'+fmtNum(s.ad_count)+'</td><td class="muted">'+hdEsc((s.missing||[]).join(', ')||'—')+'</td><td style="font-size:12px">'+hdEsc(s.recommendation)+'</td></tr>';});
+  h+='</tbody></table></div></section>';
+  return h;
+}
+function hdRender(){
+  document.getElementById('hdTabs').innerHTML=HD_TABS.map(t=>'<button data-t="'+t[0]+'"'+(t[0]===HDTAB?' class="on"':'')+'>'+t[1]+'</button>').join('');
+  [...document.querySelectorAll('#hdTabs button')].forEach(b=>b.onclick=()=>{HDTAB=b.dataset.t;hdRender();});
+  const presets=Object.keys(HD_PRESET_LABELS).filter(p=>HOMEDECOR&&HOMEDECOR[p]);
+  document.getElementById('hdPresetSeg').innerHTML=(presets.length?presets:['yesterday']).map(p=>'<button data-p="'+p+'"'+(p===HDPRESET?' class="on"':'')+'>'+HD_PRESET_LABELS[p]+'</button>').join('');
+  [...document.querySelectorAll('#hdPresetSeg button')].forEach(b=>b.onclick=()=>{HDPRESET=b.dataset.p;hdRender();});
+  const d=hdPick(), body=document.getElementById('hdBody'), fp=document.getElementById('hdFetched');
+  if(!d){ document.getElementById('hdScope').textContent=''; fp.textContent='';
+    body.innerHTML='<section class="section"><div class="card"><div class="muted">Home-Decor data is not embedded in this build (no Meta token at build time). It will populate on the next scheduled build.</div></div></section>'; return; }
+  document.getElementById('hdScope').textContent='('+(d.since||'')+' → '+(d.until||'')+')';
+  fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b>'+(d.fetched_ts?' ('+hdAgo(d.fetched_ts)+')':'');
+  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : hdCreative(d);
+}
+setInterval(()=>{ if(STATE.view==='homedecor'){ const d=hdPick(), fp=document.getElementById('hdFetched'); if(d&&d.fetched_ts&&fp) fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b> ('+hdAgo(d.fetched_ts)+')'; } }, 60000);
+// ===================== /HOME DECOR MODULE =====================
+
 function renderAll(){
-  if(STATE.view==='category'){ renderCategory(); }
+  if(STATE.view==='homedecor'){ hdRender(); }
+  else if(STATE.view==='category'){ renderCategory(); }
   else { renderHero(); renderPrepaid(); renderCat(); renderCreative(); }
 }
 
@@ -465,11 +601,14 @@ function showView(view){
   STATE.view=view;
   document.getElementById('view-home').style.display = view==='home'?'':'none';
   document.getElementById('view-category').style.display = view==='category'?'':'none';
+  document.getElementById('view-homedecor').style.display = view==='homedecor'?'':'none';
   const crumb=document.querySelector('.crumb');
-  crumb.innerHTML = view==='category'
+  crumb.innerHTML = view==='homedecor'
+    ? 'Crystal Home Decor<small>category module &middot; live from Meta (embedded)</small>'
+    : view==='category'
     ? (CAT_LABELS[STATE.cat]||STATE.cat)+'<small>category deep-dive &middot; spend real, orders/ROAS pixel</small>'
     : 'Home<small>Live sales, ROAS &amp; breakdowns</small>';
-  if(view==='category') window.scrollTo({top:0});
+  if(view==='category'||view==='homedecor') window.scrollTo({top:0});
   renderAll();
 }
 
@@ -500,7 +639,8 @@ cdTo.onchange=()=>setRange(STATE.from,cdTo.value);
 // sidebar: Home items scroll; category items open a deep-dive view
 document.querySelectorAll('.item').forEach(it=>it.onclick=()=>{
   document.querySelectorAll('.item').forEach(x=>x.classList.remove('active'));it.classList.add('active');
-  if(it.dataset.cat){ STATE.cat=it.dataset.cat; showView('category'); }
+  if(it.dataset.cat){ STATE.cat=it.dataset.cat;
+    showView(it.dataset.cat==='Crystal Home Decor' ? 'homedecor' : 'category'); }
   else { showView('home'); const t=document.getElementById(it.dataset.go); if(t) t.scrollIntoView({behavior:'smooth',block:'start'}); }
 });
 
