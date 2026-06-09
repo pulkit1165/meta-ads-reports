@@ -529,7 +529,9 @@ HTML = r"""<!doctype html>
           <div class="spacer"></div>
           <span class="muted" style="font-size:12px">Range</span>
           <div class="seg" id="hdPresetSeg"></div>
+          <button id="hdRefreshBtn" onclick="hdRefresh()" title="Pull fresh data from Meta + Shopify and redeploy (~10 min)" style="background:#6366f1;color:#fff;border:none;border-radius:7px;padding:7px 12px;font-size:12px;font-weight:600;cursor:pointer">&#8635; Refresh data</button>
         </div>
+        <div id="hdRefreshMsg" style="font-size:12px;margin:0 0 4px"></div>
         <div class="muted" id="hdFetched" style="font-size:12px;margin-bottom:8px"></div>
       </section>
       <div id="hdBody"></div>
@@ -872,19 +874,49 @@ function hdCloseModal(ev){
 function hdFmtCard(l,o){o=o||{};return '<div class="card" style="box-shadow:none;border-radius:10px"><div class="lbl muted" style="font-size:12px;font-weight:600">'+l+'</div><div style="font-size:20px;font-weight:750;margin:4px 0">'+fmtNum(o.count||0)+' ads</div><div style="font-size:12px" class="muted">'+fmtINR(o.spend||0)+' &middot; '+rg(o.roas)+'</div></div>';}
 function hdOverview(d){
   const o=d.overview||{};
-  let h='<section class="section"><div class="kpis" style="grid-template-columns:repeat(4,1fr)">';
+  const net=(o.revenue||0)-(o.spend||0);
+  let h='<section class="section"><div class="kpis" style="grid-template-columns:repeat(5,1fr)">';
   h+=hdKpi('Running Budget',fmtINR(o.budget),'effective ₹/day');
   h+=hdKpi('Spend',fmtINR(o.spend),(d.since||'')+' → '+(d.until||''),'META');
-  h+=hdKpi('ROAS',rg(o.roas),'pixel revenue / spend','PIXEL');
+  h+=hdKpi('Revenue',fmtINR(o.revenue),'vs '+fmtINR(o.spend)+' spend &middot; '+(net>=0?'+':'')+fmtINR(net)+' net','PIXEL');
+  h+=hdKpi('ROAS',rg(o.roas),'revenue / spend','PIXEL');
   h+=hdKpi('Orders',fmtNum(o.orders),fmtINR(o.revenue)+' revenue','PIXEL');
   h+='</div></section>';
-  h+='<section class="section"><div class="card"><h3>Website-wise overview</h3><table><thead><tr><th>Website</th><th>Budget/day</th><th>Spend</th><th>ROAS</th><th>Orders</th><th>Campaigns</th></tr></thead><tbody>';
-  (d.websites||[]).forEach(w=>{h+='<tr><td><span class="chip">'+hdEsc(w.name)+'</span></td><td>'+fmtINR(w.budget)+'</td><td>'+fmtINR(w.spend)+'</td><td>'+rg(w.roas)+'</td><td>'+fmtNum(w.orders)+'</td><td>'+fmtNum(w.campaigns)+'</td></tr>';});
+  h+=hdPrepaid(d);
+  h+='<section class="section"><div class="card"><h3>Website-wise overview</h3><table><thead><tr><th>Website</th><th>Budget/day</th><th>Spend</th><th>Revenue</th><th>ROAS</th><th>Orders</th><th>Campaigns</th></tr></thead><tbody>';
+  (d.websites||[]).forEach(w=>{h+='<tr><td><span class="chip">'+hdEsc(w.name)+'</span></td><td>'+fmtINR(w.budget)+'</td><td>'+fmtINR(w.spend)+'</td><td>'+fmtINR(w.revenue)+'</td><td>'+rg(w.roas)+'</td><td>'+fmtNum(w.orders)+'</td><td>'+fmtNum(w.campaigns)+'</td></tr>';});
   h+='</tbody></table></div></section>';
-  h+='<section class="section"><div class="card"><h3>Products snapshot</h3><table><thead><tr><th>Product</th><th>Budget/day</th><th>Spend</th><th>ROAS</th><th>Orders</th><th>Campaigns</th></tr></thead><tbody>';
-  (d.products||[]).forEach(p=>{h+='<tr><td><b>'+hdEsc(p.product)+'</b></td><td>'+fmtINR(p.budget)+'</td><td>'+fmtINR(p.spend)+'</td><td>'+rg(p.roas)+'</td><td>'+fmtNum(p.orders)+'</td><td>'+fmtNum(p.campaigns)+'</td></tr>';});
+  h+='<section class="section"><div class="card"><h3>Products snapshot</h3><table><thead><tr><th>Product</th><th>Budget/day</th><th>Spend</th><th>Revenue</th><th>ROAS</th><th>Orders</th><th>Campaigns</th></tr></thead><tbody>';
+  (d.products||[]).forEach(p=>{h+='<tr><td><b>'+hdEsc(p.product)+'</b></td><td>'+fmtINR(p.budget)+'</td><td>'+fmtINR(p.spend)+'</td><td>'+fmtINR(p.revenue)+'</td><td>'+rg(p.roas)+'</td><td>'+fmtNum(p.orders)+'</td><td>'+fmtNum(p.campaigns)+'</td></tr>';});
   h+='</tbody></table></div></section>';
   return h;
+}
+function hdPrepaid(d){
+  const portals=(d.websites||[]).filter(w=>w.campaigns>0).map(w=>w.portal);
+  const names=(d.websites||[]).filter(w=>w.campaigns>0).map(w=>w.name).join(', ')||'—';
+  let o=0,pp=0,cod=0;
+  const shop=(typeof PAYLOAD!=='undefined' && PAYLOAD.shop)?PAYLOAD.shop:[];
+  shop.forEach(r=>{ if(portals.indexOf(r.p)>-1 && r.d>=(d.since||'') && r.d<=(d.until||'')){ o+=(r.o||0); pp+=(r.pp||0); cod+=(r.cod!=null?r.cod:((r.o||0)-(r.pp||0))); } });
+  const pct=x=> o>0?(100*x/o).toFixed(1)+'%':'—';
+  let h='<section class="section"><div class="card"><h3>Payment split &mdash; Prepaid vs COD</h3>'+
+    '<div class="csub">Shopify store orders for '+hdEsc(names)+' &middot; '+(d.since||'')+' → '+(d.until||'')+' &middot; store-level (Shopify orders are not split by category)</div>'+
+    '<div class="kpis" style="grid-template-columns:repeat(3,1fr);margin-top:8px">';
+  h+=hdKpi('Store orders',fmtNum(o),'Shopify','SHOPIFY');
+  h+=hdKpi('Prepaid',fmtNum(pp)+' <span class="muted" style="font-size:13px">('+pct(pp)+')</span>','paid online');
+  h+=hdKpi('COD',fmtNum(cod)+' <span class="muted" style="font-size:13px">('+pct(cod)+')</span>','cash on delivery');
+  h+='</div></div></section>';
+  return h;
+}
+async function hdRefresh(){
+  const b=document.getElementById('hdRefreshBtn'), msg=document.getElementById('hdRefreshMsg');
+  const old=b.innerHTML; b.disabled=true; b.innerHTML='Refreshing…';
+  try{
+    const r=await fetch('/api/refresh',{method:'POST'});
+    const j=await r.json().catch(()=>({}));
+    if(r.ok && j.ok){ msg.style.color='#1a9d52'; msg.textContent='✓ Refresh started — fresh data deploys in ~10 min. Reload the page after that.'; }
+    else { msg.style.color='#d4434a'; msg.textContent='Refresh unavailable'+(j.error?' ('+j.error+')':' (HTTP '+r.status+')')+' — admin must set GH_DISPATCH_TOKEN in Vercel env.'; }
+  }catch(e){ msg.style.color='#d4434a'; msg.textContent='Refresh failed: '+e.message; }
+  b.disabled=false; b.innerHTML=old;
 }
 function hdBudget(d){
   let h='<section class="section"><div class="card"><h3>Product-wise budget allocation</h3><table><thead><tr><th>Product</th><th>Budget/day</th><th>Share</th><th>Spend</th><th>ROAS</th><th>Orders</th><th>Camps</th><th>Ad sets</th></tr></thead><tbody>';
