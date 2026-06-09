@@ -203,8 +203,13 @@ def write_sheet(by_product, yday, creatives, sales=None):
                    tot_roas, ""])
     total_row = len(values)
 
-    # ── Creatives: ALL ads (spend>0), sorted by ROAS; highlight top/worst 3 ──
-    ads = sorted(creatives, key=lambda c: c["roas"], reverse=True)
+    # ── Creatives: ads excluding Paras (Paras gets its own block below) ──
+    def _is_paras(c):
+        return "paras" in (c["name"] or "").lower()
+    paras_ads = sorted([c for c in creatives if _is_paras(c)],
+                       key=lambda c: c["roas"], reverse=True)
+    ads = sorted([c for c in creatives if not _is_paras(c)],
+                 key=lambda c: c["roas"], reverse=True)
     qual = [c for c in ads if c["spend"] >= hd.MIN_CREATIVE_SPEND]
     top_ids = {c["ad_id"] for c in qual[:3]}
     worst_ids = {c["ad_id"] for c in sorted(qual, key=lambda c: c["roas"])[:3]} - top_ids
@@ -212,7 +217,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
     chdr = ["Rank", "Ad / Creative", "Product", "Spend (₹)", "ROAS", "Camp ID"]
     values.append([])
     cr_title_row = len(values) + 1
-    values.append([f"🎬 CREATIVES PERFORMANCE — all {len(ads)} ads (spend>0), sorted by ROAS  ·  "
+    values.append([f"🎬 CREATIVES PERFORMANCE — {len(ads)} ads (excl Paras), sorted by ROAS  ·  "
                    f"🏆 top 3 green · 🔻 worst 3 red (spend ≥ ₹{hd.MIN_CREATIVE_SPEND})  ·  {yday_label}"])
     cr_hdr_row = len(values) + 1
     values.append(chdr)
@@ -240,7 +245,7 @@ def write_sheet(by_product, yday, creatives, sales=None):
     cr_last = len(values)
 
     # ── Paras creatives (separated, at the bottom) ──
-    paras = [c for c in ads if "paras" in (c["name"] or "").lower()]
+    paras = paras_ads
     values.append([])
     pr_title_row = len(values) + 1
     values.append([f"🙋 PARAS CREATIVES ({len(paras)} ads) — {yday_label}, sorted by ROAS"])
