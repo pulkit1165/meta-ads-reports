@@ -816,7 +816,7 @@ function setTitles(){
 let HDPRESET='yesterday', HDTAB='overview';
 const roasClass = roiClass;
 const HD_PRESET_LABELS={today:'Today',yesterday:'Yesterday',last_7d:'Last 7D',last_30d:'Last 30D'};
-const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability']];
+const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability'],['closed','Closed Budget']];
 function hdEsc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function rg(r){r=r||0;return '<span class="rg '+roasClass(r)+'">'+r.toFixed(2)+'×</span>';}
 function hdAgo(ts){let s=Math.floor(Date.now()/1000-ts);if(s<0)s=0;if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
@@ -859,7 +859,7 @@ function hdCampaigns(d){
   const cs=d.campaigns||[];
   let h='<section class="section"><div class="card"><h3>Campaigns ('+cs.length+')</h3><div class="csub">click a campaign &rarr; ad sets &rarr; creatives</div>';
   cs.forEach(c=>{
-    h+='<details style="border-bottom:1px solid var(--line,#e6e9f2);padding:7px 0"><summary style="cursor:pointer"><b>'+hdEsc(c.name)+'</b> <span class="muted" style="font-family:monospace;font-size:11px">'+c.id+'</span><br><span class="muted" style="font-size:12px">'+c.adset_count+' ad sets &middot; '+fmtINR(c.budget)+'/day &middot; '+fmtINR(c.spend)+' spend &middot; '+rg(c.roas)+' &middot; '+fmtNum(c.orders)+' orders</span></summary><div style="padding:8px 0 4px 14px">';
+    h+='<details style="border-bottom:1px solid var(--line,#e6e9f2);padding:7px 0"><summary style="cursor:pointer"><b>'+hdEsc(c.name)+'</b> <span class="muted" style="font-family:monospace;font-size:11px">'+c.id+'</span><br><span class="muted" style="font-size:12px">'+c.adset_count+' ad sets &middot; '+fmtINR(c.budget)+'/day &middot; '+fmtINR(c.spend)+' spend &middot; '+rg(c.roas)+' &middot; '+fmtNum(c.orders)+' orders'+(c.days_running!=null?' &middot; running '+fmtNum(c.days_running)+'d':'')+'</span></summary><div style="padding:8px 0 4px 14px">';
     (c.adsets||[]).forEach(a=>{
       h+='<details style="margin:4px 0"><summary style="cursor:pointer">'+hdEsc(a.name)+' <span class="muted" style="font-family:monospace;font-size:11px">'+a.id+'</span> &middot; '+rg(a.roas)+' &middot; '+fmtNum(a.purchases)+' purch &middot; '+fmtINR(a.spend)+' &middot; '+(a.ads||[]).length+' creatives</summary><div style="display:flex;gap:10px;flex-wrap:wrap;padding:10px 0 6px">'+((a.ads||[]).map(hdCard).join('')||'<span class="muted">no ads</span>')+'</div></details>';
     });
@@ -911,6 +911,24 @@ function hdProfit(d){
   h+='</tbody></table></div></section>';
   return h;
 }
+function hdClosed(d){
+  const cl=(d.closed||[]).slice().sort((a,b)=>(b.closed_on||'').localeCompare(a.closed_on||'')||(b.budget||0)-(a.budget||0));
+  const freed=cl.reduce((s,c)=>s+(c.budget||0),0), spent=cl.reduce((s,c)=>s+(c.spend||0),0);
+  let h='<section class="section"><div class="kpis" style="grid-template-columns:repeat(3,1fr)">';
+  h+=hdKpi('Closed campaigns',fmtNum(cl.length),'paused in '+(d.since||'')+' → '+(d.until||''));
+  h+=hdKpi('Daily budget freed',fmtINR(freed),'sum of their last ₹/day');
+  h+=hdKpi('Spend before closure',fmtINR(spent),'in this window');
+  h+='</div></section>';
+  h+='<section class="section"><div class="card"><h3>Closed budget — campaigns switched off</h3><div class="csub">A campaign closed mid-window drops out of Campaigns and lands here. &ldquo;Closed on&rdquo; = Meta last-modified (closest signal to when it was paused). &ldquo;Age&rdquo; = days from campaign creation to closure.</div><table id="hdClosedTable"><thead><tr><th>Campaign</th><th>Product</th><th>Budget/day</th><th>Closed on</th><th>Age at closure</th><th>Spend</th><th>ROAS</th><th>Orders</th></tr></thead><tbody>';
+  cl.forEach(c=>{h+='<tr><td><b>'+hdEsc(c.name)+'</b> <span class="muted" style="font-family:monospace;font-size:11px">'+hdEsc(c.id)+'</span></td>'+
+    '<td><span class="chip">'+hdEsc(c.product||'—')+'</span></td>'+
+    '<td>'+fmtINR(c.budget)+'</td><td>'+hdEsc(c.closed_on||'—')+'</td>'+
+    '<td>'+(c.age_days!=null?fmtNum(c.age_days)+'d old':'—')+'</td>'+
+    '<td>'+fmtINR(c.spend)+'</td><td>'+rg(c.roas)+'</td><td>'+fmtNum(c.orders)+'</td></tr>';});
+  if(!cl.length) h+='<tr><td colspan="8" class="muted">No campaigns were closed in this window.</td></tr>';
+  h+='</tbody></table></div></section>';
+  return h;
+}
 function hdRender(){
   document.getElementById('hdTabs').innerHTML=HD_TABS.map(t=>'<button data-t="'+t[0]+'"'+(t[0]===HDTAB?' class="on"':'')+'>'+t[1]+'</button>').join('');
   [...document.querySelectorAll('#hdTabs button')].forEach(b=>b.onclick=()=>{HDTAB=b.dataset.t;hdRender();});
@@ -922,7 +940,7 @@ function hdRender(){
     body.innerHTML='<section class="section"><div class="card"><div class="muted">Home-Decor data is not embedded in this build (no Meta token at build time). It will populate on the next scheduled build.</div></div></section>'; return; }
   document.getElementById('hdScope').textContent='('+(d.since||'')+' → '+(d.until||'')+')';
   fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b>'+(d.fetched_ts?' ('+hdAgo(d.fetched_ts)+')':'');
-  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : hdCreative(d);
+  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : HDTAB==='closed'?hdClosed(d) : hdCreative(d);
 }
 setInterval(()=>{ if(STATE.view==='homedecor'){ const d=hdPick(), fp=document.getElementById('hdFetched'); if(d&&d.fetched_ts&&fp) fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b> ('+hdAgo(d.fetched_ts)+')'; } }, 60000);
 // ===================== /HOME DECOR MODULE =====================

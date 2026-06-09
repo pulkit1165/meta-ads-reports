@@ -97,6 +97,50 @@ def _spend(row):
         return 0.0
 
 
+def _parse_meta_time(s):
+    """Parse a Meta time string ('2026-05-01T10:20:30+0530') -> aware datetime."""
+    if not s:
+        return None
+    try:
+        return datetime.strptime(s, "%Y-%m-%dT%H:%M:%S%z")
+    except ValueError:
+        try:
+            return datetime.fromisoformat(s)
+        except ValueError:
+            return None
+
+
+def _days_since(s, ref=None):
+    """Whole days from a Meta time string until ref (default: now IST). >= 0."""
+    dt = _parse_meta_time(s)
+    if dt is None:
+        return None
+    ref = ref or datetime.now(IST)
+    return max(0, (ref.astimezone(IST).date() - dt.astimezone(IST).date()).days)
+
+
+def _days_between(a, b):
+    """Whole days between two Meta time strings (b - a), in IST. >= 0 or None."""
+    da, db = _parse_meta_time(a), _parse_meta_time(b)
+    if da is None or db is None:
+        return None
+    return max(0, (db.astimezone(IST).date() - da.astimezone(IST).date()).days)
+
+
+def _closed_day_budget(c):
+    """Effective ₹/day a now-paused campaign last carried. per_day_budget only
+    counts ACTIVE adsets (always 0 for a paused ABO campaign), so fall back to
+    summing ALL adset daily budgets to recover the budget that was switched off."""
+    b = hd.per_day_budget(c)
+    if b > 0:
+        return b
+    adsets = ((c.get("adsets") or {}).get("data")) or []
+    db = sum(float(a.get("daily_budget") or 0) / 100 for a in adsets)
+    if db > 0:
+        return db
+    return sum(float(a.get("lifetime_budget") or 0) / 100 for a in adsets)
+
+
 def collect_campaigns():
     """[(portal, friendly, campaign_dict)] for active home-decor campaigns."""
     out = []
@@ -111,12 +155,50 @@ def collect_campaigns():
                 d = meta_get(
                     f"{GRAPH_API}/{aid}/campaigns",
                     {"fields": "id,name,daily_budget,lifetime_budget,start_time,stop_time,"
+                               "created_time,"
                                "adsets.limit(100){id,name,effective_status,daily_budget,lifetime_budget}",
                      "effective_status": '["ACTIVE"]', "limit": 500},
                     max_retries=3,
                 )
             except (MetaRateLimitError, Exception) as e:  # noqa: BLE001
                 print(f"  x {friendly}: {e}", file=sys.stderr)
+                continue
+            for c in (d or {}).get("data") or []:
+                name = c.get("name") or ""
+                if hd.excluded(name):
+                    continue
+                if derive_category_v2(name) != hd.HOME_DECOR_CATEGORY:
+                    continue
+                _, corr_cat = hd.classify_corrected(name)
+                if corr_cat != "Crystal":
+                    continue
+                out.append((portal, friendly, c))
+            time.sleep(0.2)
+    return out
+
+
+def collect_closed_campaigns():
+    """[(portal, friendly, campaign_dict)] for PAUSED home-decor campaigns, so the
+    dashboard can show budget that was switched off (with closure date + age)."""
+    out = []
+    for portal, accts in PORTAL_ACCOUNTS.items():
+        for env_var, friendly in accts:
+            if env_var in REPORT_EXCLUDE_ACCOUNTS:
+                continue
+            aid = os.environ.get(env_var)
+            if not aid:
+                continue
+            try:
+                d = meta_get(
+                    f"{GRAPH_API}/{aid}/campaigns",
+                    {"fields": "id,name,daily_budget,lifetime_budget,start_time,stop_time,"
+                               "created_time,updated_time,effective_status,"
+                               "adsets.limit(100){id,effective_status,daily_budget,lifetime_budget}",
+                     "effective_status": '["PAUSED"]', "limit": 500},
+                    max_retries=3,
+                )
+            except (MetaRateLimitError, Exception) as e:  # noqa: BLE001
+                print(f"  x closed {friendly}: {e}", file=sys.stderr)
                 continue
             for c in (d or {}).get("data") or []:
                 name = c.get("name") or ""
@@ -330,6 +412,8 @@ def build(preset="yesterday", with_creatives=True):
             "budget": round(budget), "adset_count": len(adsets_meta),
             "spend": round(m.get("spend", 0.0)), "roas": round(m.get("roas", 0.0), 2),
             "orders": int(m.get("orders", 0)), "revenue": round(m.get("revenue", 0.0)),
+            "created_time": c.get("created_time"),
+            "days_running": _days_since(c.get("created_time")),
             "adsets": adsets,
         })
         pr = prod_roll[product]
@@ -370,6 +454,40 @@ def build(preset="yesterday", with_creatives=True):
             "roas": round((v.get("revenue", 0.0) / sp), 2) if sp else 0.0,
         })
 
+    # ── Closed budget: home-decor campaigns paused within [since, until] ──
+    # A campaign closed mid-window already drops out of `campaigns` (those are
+    # ACTIVE-only), so it is naturally "shifted" here. "Closed on" uses Meta's
+    # updated_time (the closest available proxy for when it was switched off).
+    closed = []
+    closed_rows = collect_closed_campaigns()
+    in_window = []
+    for portal, friendly, c in closed_rows:
+        upd = _parse_meta_time(c.get("updated_time"))
+        if upd is None:
+            continue
+        d_iso = upd.astimezone(IST).date().isoformat()
+        if since <= d_iso <= until:
+            in_window.append((portal, friendly, c, d_iso))
+    cl_ins = campaign_insights([c["id"] for _, _, c, _ in in_window],
+                               since, until) if in_window else {}
+    for portal, friendly, c, d_iso in in_window:
+        name = c.get("name") or ""
+        product, _ = hd.classify_corrected(name)
+        mi = cl_ins.get(c["id"], {})
+        closed.append({
+            "id": c["id"], "name": name, "product": product,
+            "portal": portal, "account": friendly,
+            "budget": round(_closed_day_budget(c)),
+            "closed_on": d_iso,
+            "created_time": c.get("created_time"),
+            "age_days": _days_between(c.get("created_time"), c.get("updated_time")),
+            "spend": round(mi.get("spend", 0.0)),
+            "roas": round(mi.get("roas", 0.0), 2),
+            "orders": int(mi.get("orders", 0)),
+        })
+    closed.sort(key=lambda x: (x["closed_on"], x["budget"]), reverse=True)
+    closed_budget_total = round(sum(x["budget"] for x in closed))
+
     blended_roas = (tot["revenue"] / tot["spend"]) if tot["spend"] else 0.0
     overview = {
         "budget": round(tot["budget"]), "spend": round(tot["spend"]),
@@ -377,11 +495,13 @@ def build(preset="yesterday", with_creatives=True):
         "roas": round(blended_roas, 2),
         "campaigns": len(campaigns), "adsets": tot["adsets"],
         "products": len(products), "ads": len(all_ads),
+        "closed": len(closed), "closed_budget": closed_budget_total,
     }
     return {"ok": True, "preset": preset, "since": since, "until": until,
             "fetched_at": fetched_at, "fetched_ts": fetched_ts,
             "overview": overview, "websites": websites, "products": products,
-            "campaigns": campaigns, "creative_report": build_creative_report(all_ads)}
+            "campaigns": campaigns, "closed": closed,
+            "creative_report": build_creative_report(all_ads)}
 
 
 def main():
