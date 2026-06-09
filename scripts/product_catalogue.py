@@ -282,13 +282,33 @@ def derive_category_v2(campaign_or_ad_name):
         return 'Perfumes'
 
     # Skin (covers most skincare keywords)
-    if any(kw in n for kw in ['skin', 'am_pm', 'ampm', 'sunkissed', 'sun_kissed', 'goat_milk',
-                              'goatmilk', 'triderma', 'tri_derma', '24k_gold_serum',
-                              'pitglow', 'pit_glow', 'lipbright', 'lip_bright', 'hyaluronic',
-                              'pigmentation', 'vitamin_c', 'ashwabutin', 'glycothione',
-                              'niacinamide', 'time_reversal', 'trifecta', 'undereye',
-                              'under_eye', 'roll_on', 'rollon', 'glutabright', 'botox',
-                              'eyebrow', 'brow_grow', 'eye_care']):
+    # Added 9 Jun 2026: skin products that were previously falling into
+    # Other / Crystal Home Decor / DS because their root keyword wasn't here:
+    #   neck_bright / 24k_gold (bare) / sun_mousse / glass_skin / d_tan /
+    #   bb_spf / anti_acne / peptide / face_serum / cleanser / sunscreen
+    # NOTE: 'booster_kit' is intentionally NOT added — it'd mis-route
+    # `xtremehairboosterkit_*` to Skin (Hair is checked after Skin). The
+    # existing 'am_pm' / 'ampm' keywords already catch AM/PM Booster Kit ads.
+    if any(kw in n for kw in [
+            'skin', 'am_pm', 'ampm', 'sunkissed', 'sun_kissed', 'goat_milk',
+            'goatmilk', 'triderma', 'tri_derma', '24k_gold_serum',
+            'pitglow', 'pit_glow', 'lipbright', 'lip_bright', 'hyaluronic',
+            'pigmentation', 'vitamin_c', 'ashwabutin', 'glycothione',
+            'niacinamide', 'time_reversal', 'trifecta', 'undereye',
+            'under_eye', 'roll_on', 'rollon', 'glutabright', 'botox',
+            'eyebrow', 'brow_grow', 'eye_care',
+            # additions (Skin-only fix, 9 Jun 2026):
+            'neck_bright', 'neckbright',
+            '24k_gold',
+            'sun_mousse', 'sunmousse',
+            'glass_skin', 'glassskin', 'cleanser',
+            'd_tan', 'dtan',
+            'bb_spf', 'bb_cream',
+            'anti_acne', 'antiacne',
+            'peptide',
+            'face_serum', 'face_wash', 'facewash',
+            'moisturizer', 'moisturiser',
+            'sunscreen', 'sun_screen']):
         return 'Skin'
 
     # Hair
