@@ -405,7 +405,7 @@ HTML = r"""<!doctype html>
         <div class="card" style="margin-top:14px">
           <h3 id="ovSplitTitle">Website split</h3>
           <div class="csub">Studd Muffyn (SM) &middot; Nuskhe By Paras (NBP) &middot; Studd Muffyn Life (SML) &mdash; revenue = Shopify ground truth, ROI = revenue / Meta spend</div>
-          <table id="ovSplit"><thead><tr><th>Website</th><th>Revenue</th><th>Orders</th><th>Spend</th><th>ROI</th><th>Profit %</th></tr></thead><tbody></tbody></table>
+          <table id="ovSplit"><thead><tr><th>Website</th><th>Revenue</th><th>Orders</th><th>Spend</th><th>ROI</th></tr></thead><tbody></tbody></table>
         </div>
       </section>
 
@@ -422,7 +422,7 @@ HTML = r"""<!doctype html>
           <table id="catTable"><thead><tr>
             <th data-k="cat">Category</th><th data-k="spend">Spend</th>
             <th data-k="net">Revenue</th><th data-k="units">Units</th>
-            <th data-k="roi">ROI</th><th data-k="profit">Profit %</th><th data-k="profit">Status</th>
+            <th data-k="roi">ROI</th><th data-k="profit">Status</th>
           </tr></thead><tbody></tbody></table>
           <div class="cover" id="coverLine"></div>
         </div>
@@ -581,7 +581,6 @@ function statusOf(roi){const a=STATE.anchors, be=breakevenROI();
   return {k:'exit',label:'EXIT'};}
 const roiClass = r => {const a=STATE.anchors; return r>=a.p20?'g':r>=a.p10?'m':'b';};
 const profClass = p => p>=20?'g':p>=10?'m':'b';
-const fmtPct = x => (x>=0?'':'-')+Math.abs(x).toFixed(1)+'%';
 
 // ---------- filters ----------
 const inPortal=p=>STATE.portal==='ALL'||p===STATE.portal;
@@ -633,14 +632,13 @@ function renderOverview(){
   const cat=curCat(); const wrap=document.getElementById('ovKpis');
   let kp='';
   if(!cat){
-    const A=agg(), days=nDays(), opd=A.orders/days, profit=profitPct(A.roi);
+    const A=agg(), days=nDays(), opd=A.orders/days;
     const goalPct=Math.min(100,100*opd/GOAL);
     kp+=kpi('Revenue','<span class="tag gt">SHOPIFY</span>',fmtINR(A.orderRev),'net order value, non-cancelled');
     kp+=kpi('Orders','<span class="tag gt">SHOPIFY</span>',fmtNum(A.orders),days+' days in range');
     kp+=kpi('Orders / day','',fmtNum(opd),'goal '+fmtNum(GOAL)+'/day<div class="progress"><i style="width:'+goalPct+'%"></i></div>');
     kp+=kpi('Meta spend','<span class="tag">META</span>',fmtINR(A.spend),'real ad spend, all accounts');
     kp+=kpi('Blended ROI','','<span class="rg '+roiClass(A.roi)+'">'+A.roi.toFixed(2)+'×</span>','revenue / spend');
-    kp+=kpi('Profit % (est)','<span class="tag est">DERIVED</span>','<span class="rg '+profClass(profit)+'">'+fmtPct(profit)+'</span>','from ROI anchors');
   } else {
     const r=buildCats().rows.find(x=>x.cat===cat)||{spend:0,net:0,units:0,orders:0,roi:0,profit:0};
     const st=statusOf(r.roi);
@@ -648,16 +646,14 @@ function renderOverview(){
     kp+=kpi('Units sold','',fmtNum(r.units),'in selected range');
     kp+=kpi('Meta spend','<span class="tag">META</span>',fmtINR(r.spend),'spend tagged to this category');
     kp+=kpi('ROI','',' <span class="rg '+roiClass(r.roi)+'">'+r.roi.toFixed(2)+'×</span>','revenue / spend');
-    kp+=kpi('Profit % (est)','<span class="tag est">DERIVED</span>','<span class="rg '+profClass(r.profit)+'">'+fmtPct(r.profit)+'</span>','from ROI anchors');
-    kp+=kpi('Status','','<span class="st '+st.k+'">'+st.label+'</span>','action vs profit goal');
+    kp+=kpi('Status','','<span class="st '+st.k+'">'+st.label+'</span>','action vs ROI goal');
   }
   wrap.innerHTML=kp;
   // website split
-  const isCat=!!cat, head=['Website','Revenue',isCat?'Units':'Orders','Spend','ROI','Profit %'];
+  const isCat=!!cat, head=['Website','Revenue',isCat?'Units':'Orders','Spend','ROI'];
   let h='<thead><tr>'+head.map((c,i)=>'<th'+(i?'':'')+'>'+c+'</th>').join('')+'</tr></thead><tbody>';
   PORTALS.forEach(p=>{const s=portalStats(p,cat); if(s.orderRev===0&&s.spend===0&&s.net===0)return;
-    const pr=profitPct(s.roi);
-    h+='<tr><td><span class="chip">'+p+'</span> '+(WEB[p]||'')+'</td><td>'+fmtINR(s.net)+'</td><td>'+fmtNum(isCat?s.units:s.orders)+'</td><td>'+fmtINR(s.spend)+'</td><td><span class="rg '+roiClass(s.roi)+'">'+s.roi.toFixed(2)+'×</span></td><td><span class="rg '+profClass(pr)+'">'+fmtPct(pr)+'</span></td></tr>';});
+    h+='<tr><td><span class="chip">'+p+'</span> '+(WEB[p]||'')+'</td><td>'+fmtINR(s.net)+'</td><td>'+fmtNum(isCat?s.units:s.orders)+'</td><td>'+fmtINR(s.spend)+'</td><td><span class="rg '+roiClass(s.roi)+'">'+s.roi.toFixed(2)+'×</span></td></tr>';});
   h+='</tbody>';
   document.querySelector('#ovSplit').innerHTML=h;
 }
@@ -679,8 +675,8 @@ function renderCatBudget(){
   document.querySelector('#catTable thead th').textContent=firstCol;
   let h='';
   rows.forEach(r=>{const st=statusOf(r.roi); const nm=cat?('<span class="chip">'+r.key+'</span> '+(WEB[r.key]||'')):('<span class="chip">'+esc(r.key)+'</span>');
-    h+='<tr><td>'+nm+'</td><td>'+fmtINR(r.spend)+'</td><td>'+fmtINR(r.net)+'</td><td>'+fmtNum(r.units)+'</td><td><span class="rg '+roiClass(r.roi)+'">'+r.roi.toFixed(2)+'×</span></td><td><span class="rg '+profClass(r.profit)+'">'+fmtPct(r.profit)+'</span></td><td><span class="st '+st.k+'">'+st.label+'</span></td></tr>';});
-  document.querySelector('#catTable tbody').innerHTML=h||'<tr><td colspan="7" class="muted">No data in range.</td></tr>';
+    h+='<tr><td>'+nm+'</td><td>'+fmtINR(r.spend)+'</td><td>'+fmtINR(r.net)+'</td><td>'+fmtNum(r.units)+'</td><td><span class="rg '+roiClass(r.roi)+'">'+r.roi.toFixed(2)+'×</span></td><td><span class="st '+st.k+'">'+st.label+'</span></td></tr>';});
+  document.querySelector('#catTable tbody').innerHTML=h||'<tr><td colspan="6" class="muted">No data in range.</td></tr>';
   document.getElementById('coverLine').innerHTML='Revenue mapping: <b>'+B.cover.sheet.toFixed(1)+'%</b> from master SKU sheet, <b>'+B.cover.name.toFixed(1)+'%</b> name-matched (estimate), <b>'+B.cover.none.toFixed(1)+'%</b> uncategorized.';
 }
 
@@ -753,7 +749,6 @@ function renderBudgetInHand(){
   document.getElementById('scope6').textContent=' — today '+today+(STATE.portal!=='ALL'?' · '+STATE.portal:'');
   let h='<tbody>'
     +row('Today revenue (Shopify)',fmtINR(todayRev))
-    +row('Profit % (7-day ROI '+roi7.toFixed(2)+'×)','<span class="rg '+profClass(pp)+'">'+fmtPct(pp)+'</span>')
     +row('Today profit (est)','<b>'+fmtINR(todayProfit)+'</b>')
     +row('− Meta dues','-'+fmtINR(meta))
     +row('− Courier dues','-'+fmtINR(courier))
@@ -837,7 +832,7 @@ function setTitles(){
 let HDPRESET='yesterday', HDTAB='overview', HDCAT='Crystal Home Decor';
 const roasClass = roiClass;
 const HD_PRESET_LABELS={today:'Today',yesterday:'Yesterday',last_7d:'Last 7D',last_30d:'Last 30D'};
-const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability'],['closed','Closed Budget']];
+const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['products','All Products'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability'],['closed','Closed Budget']];
 function hdEsc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function rg(r){r=r||0;return '<span class="rg '+roasClass(r)+'">'+r.toFixed(2)+'×</span>';}
 function hdAgo(ts){let s=Math.floor(Date.now()/1000-ts);if(s<0)s=0;if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
@@ -967,18 +962,62 @@ function hdClearance(d){
   h+='</tbody></table></div></section>';
   return h;
 }
+// ---------- All Products (editable class + target budget, saved on device) ----------
+function hdCfgLoad(){try{return JSON.parse(localStorage.getItem('hdAllProducts')||'{}')||{};}catch(e){return {};}}
+function hdCfgSave(c){try{localStorage.setItem('hdAllProducts',JSON.stringify(c));}catch(e){}}
+function hdKey(prod){return HDCAT+'::'+prod;}
+function hdClassLabel(k){return k==='new'?'New':k==='clearance'?'Stock Clearance':'Old';}
+function hdStage(p){const r=p.roas||0,d=p.days_running;
+  if(d!=null&&d<=30) return ['Launch','#2f6bff'];
+  if(r>=2.2) return ['Scale','#0c9b5b'];
+  if(r>=1.8) return ['Maturity','#6b7686'];
+  return ['Downfall','#d23b3b'];}
+function hdDefaultClass(p){const r=p.roas||0,d=p.days_running;
+  if(d!=null&&d<=30) return 'new';
+  if(r<1.8&&(p.spend||0)>0) return 'clearance';
+  return 'old';}
+function hdSetClass(el){const c=hdCfgLoad(),k=el.getAttribute('data-k');(c[k]=c[k]||{}).cls=el.value;hdCfgSave(c);hdRender();}
+function hdSetTarget(el){const c=hdCfgLoad(),k=el.getAttribute('data-k');const v=el.value.trim();
+  c[k]=c[k]||{}; if(v==='')delete c[k].target; else c[k].target=+v||0; hdCfgSave(c);hdRender();}
+function hdAllProducts(d){
+  const cfg=hdCfgLoad();
+  const ps=(d.products||[]).slice().sort((a,b)=>(b.budget||0)-(a.budget||0));
+  const buckets={new:{cnt:0,bud:0,tgt:0},old:{cnt:0,bud:0,tgt:0},clearance:{cnt:0,bud:0,tgt:0}};
+  const rowsData=ps.map(p=>{const k=hdKey(p.product),saved=cfg[k]||{};
+    const cls=saved.cls||hdDefaultClass(p);
+    const tgt=(saved.target!=null)?saved.target:'';
+    const b=buckets[cls]||buckets.old; b.cnt++; b.bud+=(p.budget||0); b.tgt+=(+tgt||0);
+    return {p,cls,tgt,k};});
+  let h='<section class="section"><div class="kpis" style="grid-template-columns:repeat(3,1fr)">';
+  ['new','old','clearance'].forEach(k=>{const b=buckets[k];
+    h+=hdKpi('Target — '+hdClassLabel(k),fmtINR(b.tgt),fmtNum(b.cnt)+' products · now '+fmtINR(b.bud)+'/day');});
+  h+='</div></section>';
+  h+='<section class="section"><div class="card"><h3>All products — stage, class &amp; target budget</h3>'+
+     '<div class="csub">Tag each product New / Old / Stock Clearance and set a target daily budget. Saved on this device. Maturity stage is estimated from age + ROAS.</div>'+
+     '<table><thead><tr><th>Product</th><th>Maturity stage</th><th>Class</th><th>Spend</th><th>Budget/day now</th><th>Target budget/day</th></tr></thead><tbody>';
+  rowsData.forEach(r=>{const p=r.p,st=hdStage(p);
+    const opt=(v,l)=>'<option value="'+v+'"'+(r.cls===v?' selected':'')+'>'+l+'</option>';
+    h+='<tr><td><b>'+hdEsc(p.product)+'</b>'+(p.days_running!=null?' <span class="muted" style="font-size:11px">'+fmtNum(p.days_running)+'d</span>':'')+'</td>'+
+      '<td><span style="color:'+st[1]+';font-weight:600">'+st[0]+'</span></td>'+
+      '<td><select data-k="'+hdEsc(r.k)+'" onchange="hdSetClass(this)" style="font-size:12px;padding:3px 6px;border:1px solid var(--line,#e6e9f2);border-radius:6px;background:var(--card,#fff);color:inherit">'+
+        opt('new','New')+opt('old','Old')+opt('clearance','Stock Clearance')+'</select></td>'+
+      '<td>'+fmtINR(p.spend)+'</td><td>'+fmtINR(p.budget)+'</td>'+
+      '<td><input type="number" min="0" step="100" value="'+(r.tgt===''?'':r.tgt)+'" data-k="'+hdEsc(r.k)+'" onchange="hdSetTarget(this)" placeholder="set" style="width:110px;font-size:12px;padding:4px 6px;border:1px solid var(--line,#e6e9f2);border-radius:6px;background:var(--card,#fff);color:inherit"></td></tr>';});
+  if(!ps.length) h+='<tr><td colspan="6" class="muted">No active products in this category.</td></tr>';
+  h+='</tbody></table></div></section>';
+  return h;
+}
 function hdProfit(d){
-  const ps=(d.products||[]).map(p=>{const profit=(p.revenue||0)-(p.spend||0);return Object.assign({},p,{profit:profit,margin:p.revenue>0?100*profit/p.revenue:0});}).sort((a,b)=>b.profit-a.profit);
+  const ps=(d.products||[]).map(p=>{const profit=(p.revenue||0)-(p.spend||0);return Object.assign({},p,{profit:profit});}).sort((a,b)=>b.profit-a.profit);
   const tRev=ps.reduce((s,p)=>s+(p.revenue||0),0), tSpend=ps.reduce((s,p)=>s+(p.spend||0),0), tProfit=tRev-tSpend;
   const pc=v=>'<span style="color:'+(v>=0?'#1a9d52':'#d4434a')+';font-weight:700">'+fmtINR(v)+'</span>';
-  let h='<section class="section"><div class="kpis" style="grid-template-columns:repeat(4,1fr)">';
+  let h='<section class="section"><div class="kpis" style="grid-template-columns:repeat(3,1fr)">';
   h+=hdKpi('Revenue',fmtINR(tRev),'pixel-attributed','PIXEL');
   h+=hdKpi('Ad Spend',fmtINR(tSpend),'Meta','META');
   h+=hdKpi('Ad Contribution',pc(tProfit),'revenue − ad spend');
-  h+=hdKpi('Margin',(tRev>0?100*tProfit/tRev:0).toFixed(1)+'%','contribution / revenue');
   h+='</div></section>';
-  h+='<section class="section"><div class="card"><h3>Product profitability</h3><div class="csub">Ad contribution = Pixel Revenue &minus; Ad Spend. Excludes COGS / product cost &mdash; add a cost sheet for true net profit.</div><table><thead><tr><th>Product</th><th>Spend</th><th>Revenue</th><th>Ad Contribution</th><th>Margin</th><th>ROAS</th><th>Orders</th></tr></thead><tbody>';
-  ps.forEach(p=>{h+='<tr><td><b>'+hdEsc(p.product)+'</b></td><td>'+fmtINR(p.spend)+'</td><td>'+fmtINR(p.revenue)+'</td><td>'+pc(p.profit)+'</td><td>'+p.margin.toFixed(1)+'%</td><td>'+rg(p.roas)+'</td><td>'+fmtNum(p.orders)+'</td></tr>';});
+  h+='<section class="section"><div class="card"><h3>Product profitability</h3><div class="csub">Ad contribution = Pixel Revenue &minus; Ad Spend. Excludes COGS / product cost &mdash; add a cost sheet for true net profit.</div><table><thead><tr><th>Product</th><th>Spend</th><th>Revenue</th><th>Ad Contribution</th><th>ROAS</th><th>Orders</th></tr></thead><tbody>';
+  ps.forEach(p=>{h+='<tr><td><b>'+hdEsc(p.product)+'</b></td><td>'+fmtINR(p.spend)+'</td><td>'+fmtINR(p.revenue)+'</td><td>'+pc(p.profit)+'</td><td>'+rg(p.roas)+'</td><td>'+fmtNum(p.orders)+'</td></tr>';});
   h+='</tbody></table></div></section>';
   return h;
 }
@@ -1011,7 +1050,7 @@ function hdRender(){
     body.innerHTML='<section class="section"><div class="card"><div class="muted">'+hdEsc(HDCAT)+' data is not embedded in this build (no Meta token at build time). It will populate on the next scheduled build.</div></div></section>'; return; }
   document.getElementById('hdScope').textContent='('+(d.since||'')+' → '+(d.until||'')+')';
   fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b>'+(d.fetched_ts?' ('+hdAgo(d.fetched_ts)+')':'');
-  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : HDTAB==='closed'?hdClosed(d) : hdCreative(d);
+  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='products'?hdAllProducts(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : HDTAB==='closed'?hdClosed(d) : hdCreative(d);
 }
 setInterval(()=>{ if(STATE.view==='homedecor'){ const d=hdPick(), fp=document.getElementById('hdFetched'); if(d&&d.fetched_ts&&fp) fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b> ('+hdAgo(d.fetched_ts)+')'; } }, 60000);
 // ===================== /HOME DECOR MODULE =====================

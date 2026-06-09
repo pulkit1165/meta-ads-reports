@@ -391,7 +391,8 @@ def build(preset="yesterday", category=None, with_creatives=True):
     campaigns = []
     all_ads = []
     prod_roll = defaultdict(lambda: {"budget": 0.0, "spend": 0.0, "revenue": 0.0,
-                                     "orders": 0.0, "campaigns": 0, "adsets": 0})
+                                     "orders": 0.0, "campaigns": 0, "adsets": 0,
+                                     "days_running": None})
     portal_roll = defaultdict(lambda: {"budget": 0.0, "spend": 0.0, "revenue": 0.0,
                                        "orders": 0.0, "campaigns": 0, "adsets": 0})
     tot = {"budget": 0.0, "spend": 0.0, "orders": 0.0, "revenue": 0.0, "adsets": 0}
@@ -452,6 +453,9 @@ def build(preset="yesterday", category=None, with_creatives=True):
         pr["budget"] += budget; pr["spend"] += m.get("spend", 0.0)
         pr["revenue"] += m.get("revenue", 0.0); pr["orders"] += m.get("orders", 0.0)
         pr["campaigns"] += 1; pr["adsets"] += len(adsets_meta)
+        c_days = _days_since(c.get("created_time"))   # product age = oldest live campaign
+        if c_days is not None:
+            pr["days_running"] = c_days if pr["days_running"] is None else max(pr["days_running"], c_days)
         qr = portal_roll[portal]
         qr["budget"] += budget; qr["spend"] += m.get("spend", 0.0)
         qr["revenue"] += m.get("revenue", 0.0); qr["orders"] += m.get("orders", 0.0)
@@ -469,7 +473,7 @@ def build(preset="yesterday", category=None, with_creatives=True):
             "budget_share": round(100 * v["budget"] / total_budget, 1),
             "spend": round(v["spend"]), "revenue": round(v["revenue"]),
             "orders": int(v["orders"]), "campaigns": v["campaigns"],
-            "adsets": v["adsets"],
+            "adsets": v["adsets"], "days_running": v["days_running"],
             "roas": round((v["revenue"] / v["spend"]), 2) if v["spend"] else 0.0,
         })
     products.sort(key=lambda x: -x["budget"])
