@@ -158,9 +158,10 @@ def fetch_perf_yesterday(cids, yday):
         batch = cids[i:i + 50]
         d = meta_get(f"{GRAPH_API}/", {
             "ids": ",".join(batch),
+            # Default attribution (account setting = 7d click + 1d view) so the
+            # numbers match what the operator sees in the Ads Manager UI.
             "fields": (
                 f"insights.time_range({{'since':'{yday}','until':'{yday}'}})"
-                f".action_attribution_windows(['7d_click'])"
                 f"{{spend,purchase_roas,actions,action_values}}"
             ),
         })
@@ -321,8 +322,7 @@ def fetch_portal_sales(yday):
                 d = meta_get(
                     f"{GRAPH_API}/{aid}/insights",
                     {"time_range": json.dumps({"since": yday, "until": yday}),
-                     "action_attribution_windows": json.dumps(["7d_click"]),
-                     "fields": "spend,actions,action_values"},
+                     "fields": "spend,actions,action_values"},  # default attribution (matches Ads Manager)
                     max_retries=3,
                 )
                 rows = (d or {}).get("data") or []
