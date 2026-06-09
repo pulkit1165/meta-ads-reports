@@ -307,6 +307,29 @@ CREATE TABLE IF NOT EXISTS antariksh_shopify_daily (
     PRIMARY KEY (date, portal)
 );
 
+-- REAL Shopify category revenue, at (date, portal, category, source) grain.
+-- Unlike antariksh_daily (whose per-category split is pixel-attributed), this
+-- table is GROUND TRUTH: every Shopify line item is mapped to a category via
+-- its SKU (= NTN code) against product_ntn_labels. SKUs missing from the master
+-- sheet are resolved by a product-title keyword fallback so new lines (e.g. the
+-- gold-tone jewellery range) read correctly before the sheet catches up.
+--   source = 'sheet' : category came from the master SKU sheet (authoritative)
+--   source = 'name'  : inferred from product_title keyword fallback (estimate)
+--   source = 'none'  : neither matched → bucketed as 'Other'
+-- The dashboard sums across `source` for the category total and uses the
+-- name/none share to render the "X% via name match / Y% uncategorized" badge.
+CREATE TABLE IF NOT EXISTS antariksh_category_daily (
+    date     TEXT NOT NULL,
+    portal   TEXT NOT NULL,                   -- SM / SML / NBP
+    category TEXT NOT NULL,                    -- canonical category, 'Other' if unresolved
+    source   TEXT NOT NULL,                    -- sheet / name / none
+    revenue  REAL    DEFAULT 0,                -- SUM(line_revenue), non-cancelled orders
+    units    INTEGER DEFAULT 0,                -- SUM(quantity)
+    orders   INTEGER DEFAULT 0,                -- COUNT(DISTINCT order_id) touching this cat
+    PRIMARY KEY (date, portal, category, source)
+);
+CREATE INDEX IF NOT EXISTS idx_antk_cat_date ON antariksh_category_daily(date);
+
 -- 5-minute live snapshot history: today's running Shopify sales/orders +
 -- hourly Meta spend. 'ALL' row = all portals combined. Powers the hero KPIs
 -- and the live sparkline; older rows kept for the intraday trend.
