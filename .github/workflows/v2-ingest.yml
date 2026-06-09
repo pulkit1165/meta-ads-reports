@@ -136,6 +136,7 @@ jobs:
       # the VERCEL_TOKEN secret is added (so this is safe to merge immediately).
       - name: Build + deploy Antariksh (Vercel)
         if: ${{ success() }}
+        continue-on-error: true   # never let Antariksh break the main pipeline/deploy
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
           VERCEL_ORG_ID: team_AocNAz8F008iWPSLVvar2Xb5
