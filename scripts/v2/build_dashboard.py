@@ -844,6 +844,64 @@ tr:hover td { background:#fafbff; }
 .sr-low { background:#fef3c7; color:#78350f; padding:2px 6px; border-radius:4px; }
 .sr-med { background:#dcfce7; color:#14532d; padding:2px 6px; border-radius:4px; }
 .sr-hi { background:#bbf7d0; color:#065f46; font-weight:700; padding:2px 6px; border-radius:4px; }
+
+/* ── Category Tabs — sticky under topbar, drives single-category filter ── */
+.cat-tabs {
+  background: linear-gradient(180deg, #fff 0%, #f8faff 100%);
+  border-bottom: 2px solid #1a3d7c;
+  padding: 0 20px;
+  position: sticky;
+  /* Topbar height is ~64px tall; this sits right under it */
+  top: 64px;
+  z-index: 49;
+  box-shadow: 0 2px 6px rgba(13,33,69,.06);
+  overflow-x: auto;
+  white-space: nowrap;
+}
+.cat-tabs-inner { display:flex; gap:0; }
+.cat-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 18px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #6b7280;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  transition: all .12s;
+  user-select: none;
+}
+.cat-tab:hover { color:#1a3d7c; background: rgba(91,141,239,.05); }
+.cat-tab.active {
+  color: #0d2145;
+  border-bottom-color: #5b8def;
+  background: rgba(91,141,239,.08);
+}
+.cat-tab .tab-icon { font-size:14px; }
+.cat-tab .tab-count {
+  background:#eef2ff;
+  color:#1a3d7c;
+  font-size:10px;
+  font-weight:800;
+  padding:1px 7px;
+  border-radius:10px;
+  margin-left:4px;
+}
+.cat-tab.active .tab-count { background:#1a3d7c; color:#fff; }
+
+/* Scope badge — appears in each page <h2> when one category tab is selected */
+.scope-badge {
+  display:inline-block;
+  background:#dbeafe;
+  color:#1d4ed8;
+  font-size:11px;
+  font-weight:800;
+  padding:3px 11px;
+  border-radius:14px;
+  margin-left:10px;
+  vertical-align: middle;
+}
 </style>
 </head>
 <body>
@@ -936,6 +994,13 @@ tr:hover td { background:#fafbff; }
                 style="background:#1a3d7c;color:#fff;border:none;padding:6px 13px;border-radius:6px;font-size:11px;cursor:pointer;font-weight:700;white-space:nowrap">🔄 Refresh now</button>
       </div>
     </div>
+  </div>
+
+  <!-- Category Tabs — sticky single-category navigator. Populated by JS from
+       DIM.categories. Driving F.categories (set to {} for All, or one
+       category) keeps every existing filter/render path intact. -->
+  <div class="cat-tabs">
+    <div class="cat-tabs-inner" id="cat-tabs-inner"></div>
   </div>
 
   <div class="page-area">
@@ -1511,6 +1576,100 @@ function buildChips(containerId, values, set) {
 buildChips('filter-portals',    DIM.portals,        F.portals);
 buildChips('filter-categories', DIM.categories,     F.categories);
 buildChips('filter-creatives',  DIM.creative_types, F.creative_types);
+
+// ── Category Tab Bar ──────────────────────────────────────────────────
+// Single-select tab navigator under the topbar. "All" tab clears
+// F.categories. Any other tab sets F.categories to exactly that one
+// category. Stays in sync with the existing chip-style category filter
+// in the topbar (clicking either updates both).
+const CAT_ICONS = {
+  'Skin': '✨', 'Hair': '💇',
+  'Crystal Home Decor': '🏺', 'Crystal': '🏺', 'Crystal Decor': '🏺',
+  '24K Jewellery': '💍', 'Jewellery': '💍',
+  'Crystal Accessory': '📿',
+  'Nutraceuticals': '🌿', 'Nutra': '🌿',
+  'Perfumes': '💎', 'Perfume': '💎', 'Fragrance': '💎',
+  'DS': '🎨', 'Aibot': '🤖',
+  'Other': '📦', 'Mix/Other': '📦', 'Unmapped': '❓',
+};
+const catIcon = c => CAT_ICONS[c] || '📦';
+
+// Pre-compute unique campaign count per category from RAW — cheap one-shot.
+const _catCampCounts = (function() {
+  const seen = {};
+  for (const r of RAW) {
+    const cat = r.category || 'Unmapped';
+    if (!seen[cat]) seen[cat] = new Set();
+    if (r.campaign_id) seen[cat].add(r.campaign_id);
+  }
+  const out = {};
+  for (const c in seen) out[c] = seen[c].size;
+  return out;
+})();
+
+function buildCategoryTabs() {
+  const inner = document.getElementById('cat-tabs-inner');
+  if (!inner) return;
+  inner.innerHTML = '';
+  // Order: keep DIM.categories order but pin highest-count first if no preferred order
+  const cats = [...(DIM.categories || [])]
+    .filter(c => c)
+    .sort((a, b) => (_catCampCounts[b] || 0) - (_catCampCounts[a] || 0));
+  const totalCount = cats.reduce((s, c) => s + (_catCampCounts[c] || 0), 0);
+  const items = [{ cat: '__all__', icon: '🌐', label: 'All Categories', count: totalCount }]
+    .concat(cats.map(c => ({ cat: c, icon: catIcon(c), label: c, count: _catCampCounts[c] || 0 })));
+  for (const it of items) {
+    const tab = document.createElement('div');
+    tab.className = 'cat-tab';
+    tab.dataset.cat = it.cat;
+    tab.innerHTML = `<span class="tab-icon">${it.icon}</span>${it.label}` +
+                    `<span class="tab-count">${it.count}</span>`;
+    tab.addEventListener('click', () => {
+      F.categories.clear();
+      if (it.cat !== '__all__') F.categories.add(it.cat);
+      // Sync chip-style filter so they don't fight each other
+      document.querySelectorAll('#filter-categories .chip').forEach(ch => {
+        ch.classList.toggle('active', F.categories.has(ch.textContent));
+      });
+      syncCategoryTabs();
+      apply();
+    });
+    inner.appendChild(tab);
+  }
+  syncCategoryTabs();
+}
+
+function syncCategoryTabs() {
+  const active = F.categories.size === 1 ? [...F.categories][0] : null;
+  document.querySelectorAll('.cat-tab').forEach(t => {
+    const cat = t.dataset.cat;
+    const isAll = cat === '__all__';
+    t.classList.toggle('active', (active === null && isAll) || cat === active);
+  });
+}
+
+// Inject "SKIN ONLY · 82 camps" badge into every page's <h2> whenever
+// exactly one category is selected. Idempotent — removes/re-creates on
+// each call so it always reflects F.categories.
+function updateScopeBadges() {
+  const single = F.categories.size === 1 ? [...F.categories][0] : null;
+  document.querySelectorAll('.page > h2').forEach(h => {
+    let bg = h.querySelector('.scope-badge');
+    if (single) {
+      const count = _catCampCounts[single] || 0;
+      if (!bg) {
+        bg = document.createElement('span');
+        bg.className = 'scope-badge';
+        h.appendChild(bg);
+      }
+      bg.textContent = `${single.toUpperCase()} ONLY · ${count} camps`;
+    } else if (bg) {
+      bg.remove();
+    }
+  });
+}
+
+buildCategoryTabs();
 
 // Build product-family chips with type-to-search.
 // Each chip = one family; count = SKUs grouped into it.
@@ -3393,6 +3552,8 @@ function exportCSV(which) {
 function apply() {
   const rows = applyFilters(RAW);
   const prevRows = getCompareSet();
+  updateScopeBadges();   // refresh "SKIN ONLY · N camps" badge on every h2
+  syncCategoryTabs();    // keep tab bar in sync if chip filter was used
   // Always render Overview KPI strip (visible on Overview page)
   renderOverview(rows, prevRows);
   // Render whichever page is active for charts/tables that need a visible canvas
