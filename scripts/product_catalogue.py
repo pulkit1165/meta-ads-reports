@@ -80,7 +80,13 @@ PRODUCT_RULES = [
     (['crystal.*frame', 'frame'],                        'Crystal Frame',                'Crystal'),
 
     # ── JEWELLERY ─────────────────────────────────────────────────────────────
-    (['jewellery', 'jewelry', 'wanda', 'earring', 'ring'],
+    # 'wanda' removed (06-08): it's a creative team name, not a product
+    # indicator — was mis-tagging Skin ads with 'wanda' in their name as
+    # Jewellery (e.g. ntn_adv_wanda_retarget_conv_skin_offer_reel matched
+    # 'wanda' before reaching Skin-catchall below). Compound names like
+    # wanda_jewellery still match via 'jewellery' substring.
+    (['24k.*chain', 'gold.*chain', 'gold.*necklace', '24k.*pendant',
+      'jewellery', 'jewelry', 'earring', '_ring_', 'ring_'],
                                                          'Jewellery',                    'Jewellery'),
 
     # ── FRAGRANCE / PERFUME ───────────────────────────────────────────────────
