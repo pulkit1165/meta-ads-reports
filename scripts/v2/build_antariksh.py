@@ -180,40 +180,54 @@ def build_payload(conn, days):
 
 HD_PRESETS = ['today', 'yesterday', 'last_7d', 'last_30d']
 
+# Every category that gets the rich live-Meta module (same tabs as Crystal Home
+# Decor). Crystal is FIRST so it warms the shared account-level caches in
+# home_decor_dashboard_data; every other category then reuses them cheaply.
+# Categories not listed here (Other / DS) keep the generic Profit-First deep-dive.
+HD_CATEGORIES = [
+    'Crystal Home Decor', 'Skin', 'Hair', '24K Jewellery',
+    'Crystal Accessory', 'Perfumes', 'Nutraceuticals', 'Aibot',
+]
 
-def build_homedecor(presets=HD_PRESETS):
-    """Rich Home-Decor payload per preset, fetched live from Meta at build time
-    (campaigns -> ad sets -> creatives, product + website rollups, creative
-    report). Embedded into the page so the browser makes zero API calls, exactly
-    like the main payload. Degrades to {} when META_ACCESS_TOKEN is absent or a
-    preset errors, so it never breaks the main build."""
+
+def build_categories(presets=HD_PRESETS, categories=HD_CATEGORIES):
+    """Rich per-category payloads (campaigns -> ad sets -> creatives, product +
+    website rollups, creative report, closed budget), fetched live from Meta at
+    build time and embedded as {category: {preset: payload}} so the browser makes
+    zero API calls. Degrades to {} when META_ACCESS_TOKEN is absent; per
+    category/preset errors are isolated so one bad slice never blocks the rest or
+    the main build."""
     import os
     out = {}
     if not os.getenv('META_ACCESS_TOKEN'):
-        print("  home-decor: META_ACCESS_TOKEN not set — embedding empty payload",
+        print("  categories: META_ACCESS_TOKEN not set — embedding empty payload",
               file=sys.stderr)
         return out
     try:
         import home_decor_dashboard_data as hdd
     except Exception as e:  # noqa: BLE001
-        print(f"  home-decor: import failed ({e}) — embedding empty", file=sys.stderr)
+        print(f"  categories: import failed ({e}) — embedding empty", file=sys.stderr)
         return out
-    for p in presets:
-        try:
-            out[p] = hdd.build(p)
-            ov = out[p].get('overview', {})
-            print(f"  home-decor[{p}]: {ov.get('campaigns', 0)} camps, "
-                  f"Rs {ov.get('budget', 0):,}/day", file=sys.stderr)
-        except Exception as e:  # noqa: BLE001
-            print(f"  home-decor[{p}] failed: {e}", file=sys.stderr)
+    for cat in categories:
+        cat_out = {}
+        for p in presets:
+            try:
+                cat_out[p] = hdd.build(p, category=cat)
+                ov = cat_out[p].get('overview', {})
+                print(f"  cat[{cat}][{p}]: {ov.get('campaigns', 0)} camps, "
+                      f"Rs {ov.get('budget', 0):,}/day", file=sys.stderr)
+            except Exception as e:  # noqa: BLE001
+                print(f"  cat[{cat}][{p}] failed: {e}", file=sys.stderr)
+        if cat_out:
+            out[cat] = cat_out
     return out
 
 
-def render(payload, homedecor=None):
+def render(payload, catdata=None):
     data = json.dumps(payload, separators=(',', ':'))
-    hd = json.dumps(homedecor or {}, separators=(',', ':'), ensure_ascii=False)
+    cd = json.dumps(catdata or {}, separators=(',', ':'), ensure_ascii=False)
     return (HTML.replace('/*__PAYLOAD__*/', data)
-                .replace('/*__HOMEDECOR__*/', hd))
+                .replace('/*__CATDATA__*/', cd))
 
 
 def main():
@@ -227,11 +241,11 @@ def main():
     payload = build_payload(conn, args.days)
     conn.close()
 
-    homedecor = build_homedecor()
+    catdata = build_categories()
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(render(payload, homedecor))
+    out.write_text(render(payload, catdata))
     kb = out.stat().st_size / 1024
     print(f"wrote {out}  ({kb:.0f} KB)  "
           f"{len(payload['adDays'])} ad-days, {len(payload['shop'])} shop-days, "
@@ -509,7 +523,7 @@ HTML = r"""<!doctype html>
     <!-- HOME DECOR (rich module: live from Meta, embedded at build) -->
     <div id="view-homedecor" class="wrap" style="display:none">
       <section class="section">
-        <h2><span class="n">&#128302;</span> Crystal Home Decor <span class="muted" id="hdScope" style="text-transform:none;letter-spacing:0;font-size:13px"></span></h2>
+        <h2><span class="n" id="hdIcon">&#128302;</span> <span id="hdName">Crystal Home Decor</span> <span class="muted" id="hdScope" style="text-transform:none;letter-spacing:0;font-size:13px"></span></h2>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0 6px">
           <div class="seg" id="hdTabs"></div>
           <div class="spacer"></div>
@@ -529,11 +543,11 @@ HTML = r"""<!doctype html>
 </div>
 <script>
 const P = /*__PAYLOAD__*/;
-const HOMEDECOR = /*__HOMEDECOR__*/;
+const CATDATA = /*__CATDATA__*/;   // {category: {preset: payload}} — live from Meta, embedded
 const GOAL = P.goalOrders || 5000;
 const PRODS = (P.products && P.products.rows) || [];
 const WEB = {SM:'Studd Muffyn', NBP:'Nuskhe By Paras', SML:'Studd Muffyn Life'};
-const CAT_ICON = {'Skin':'&#129496;','Hair':'&#128088;','24K Jewellery':'&#128142;','Crystal Home Decor':'&#128302;','Nutraceuticals':'&#128138;','Perfumes':'&#127810;','Other':'&#128230;','Aibot':'&#129302;'};
+const CAT_ICON = {'Skin':'&#129496;','Hair':'&#128088;','24K Jewellery':'&#128142;','Crystal Home Decor':'&#128302;','Crystal Accessory':'&#128255;','Nutraceuticals':'&#128138;','Perfumes':'&#127810;','Other':'&#128230;','Aibot':'&#129302;'};
 
 const fmtINR = n => { n=Math.round(n||0); const a=Math.abs(n);
   if(a>=1e7) return '₹'+(n/1e7).toFixed(2)+'Cr';
@@ -818,14 +832,16 @@ function setTitles(){
     :'Company<small>profit-first view, all categories</small>';
 }
 // ===================== HOME DECOR MODULE (embedded Meta payload) =====================
-let HDPRESET='yesterday', HDTAB='overview';
+let HDPRESET='yesterday', HDTAB='overview', HDCAT='Crystal Home Decor';
 const roasClass = roiClass;
 const HD_PRESET_LABELS={today:'Today',yesterday:'Yesterday',last_7d:'Last 7D',last_30d:'Last 30D'};
 const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability'],['closed','Closed Budget']];
 function hdEsc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function rg(r){r=r||0;return '<span class="rg '+roasClass(r)+'">'+r.toFixed(2)+'×</span>';}
 function hdAgo(ts){let s=Math.floor(Date.now()/1000-ts);if(s<0)s=0;if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
-function hdPick(){return (HOMEDECOR&&(HOMEDECOR[HDPRESET]||HOMEDECOR.yesterday||HOMEDECOR[Object.keys(HOMEDECOR)[0]]))||null;}
+function hdCatData(){return (CATDATA&&CATDATA[HDCAT])||null;}
+function hdHasCat(cat){return !!(CATDATA&&CATDATA[cat]);}
+function hdPick(){const c=hdCatData(); return c&&(c[HDPRESET]||c.yesterday||c[Object.keys(c)[0]])||null;}
 function hdKpi(l,v,sub,tag){return '<div class="kpi"><div class="lbl">'+l+(tag?' <span class="tag">'+tag+'</span>':'')+'</div><div class="val">'+v+'</div><div class="sub">'+(sub||'')+'</div></div>';}
 function hdCard(ad){
   const clickable = ad.preview || ad.image || ad.thumbnail;
@@ -955,12 +971,12 @@ function hdClosed(d){
 function hdRender(){
   document.getElementById('hdTabs').innerHTML=HD_TABS.map(t=>'<button data-t="'+t[0]+'"'+(t[0]===HDTAB?' class="on"':'')+'>'+t[1]+'</button>').join('');
   [...document.querySelectorAll('#hdTabs button')].forEach(b=>b.onclick=()=>{HDTAB=b.dataset.t;hdRender();});
-  const presets=Object.keys(HD_PRESET_LABELS).filter(p=>HOMEDECOR&&HOMEDECOR[p]);
+  const cd=hdCatData(); const presets=Object.keys(HD_PRESET_LABELS).filter(p=>cd&&cd[p]);
   document.getElementById('hdPresetSeg').innerHTML=(presets.length?presets:['yesterday']).map(p=>'<button data-p="'+p+'"'+(p===HDPRESET?' class="on"':'')+'>'+HD_PRESET_LABELS[p]+'</button>').join('');
   [...document.querySelectorAll('#hdPresetSeg button')].forEach(b=>b.onclick=()=>{HDPRESET=b.dataset.p;hdRender();});
   const d=hdPick(), body=document.getElementById('hdBody'), fp=document.getElementById('hdFetched');
   if(!d){ document.getElementById('hdScope').textContent=''; fp.textContent='';
-    body.innerHTML='<section class="section"><div class="card"><div class="muted">Home-Decor data is not embedded in this build (no Meta token at build time). It will populate on the next scheduled build.</div></div></section>'; return; }
+    body.innerHTML='<section class="section"><div class="card"><div class="muted">'+hdEsc(HDCAT)+' data is not embedded in this build (no Meta token at build time). It will populate on the next scheduled build.</div></div></section>'; return; }
   document.getElementById('hdScope').textContent='('+(d.since||'')+' → '+(d.until||'')+')';
   fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b>'+(d.fetched_ts?' ('+hdAgo(d.fetched_ts)+')':'');
   body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : HDTAB==='closed'?hdClosed(d) : hdCreative(d);
@@ -979,14 +995,18 @@ function applyView(view,cat){
   STATE.view=view; STATE.cat=cat||null;
   document.querySelectorAll('.item').forEach(x=>x.classList.remove('active'));
   let sel;
-  if(view==='homedecor') sel=document.querySelector('.item[data-cat="Crystal Home Decor"]');
+  if(view==='homedecor'){ HDCAT=cat||'Crystal Home Decor'; HDTAB='overview'; sel=document.querySelector('.item[data-cat="'+cssEsc(HDCAT)+'"]'); }
   else if(view==='category') sel=document.querySelector('.item[data-cat="'+cssEsc(cat)+'"]');
   else sel=document.querySelector('.item[data-view="home"]');
   if(sel)sel.classList.add('active');
   const hd=view==='homedecor';
   document.getElementById('reportWrap').style.display=hd?'none':'';
   document.getElementById('view-homedecor').style.display=hd?'':'none';
-  if(hd) document.getElementById('crumb').innerHTML='Crystal Home Decor<small>category module · live from Meta (embedded)</small>';
+  if(hd){
+    const nm=document.getElementById('hdName'); if(nm)nm.textContent=HDCAT;
+    const ic=document.getElementById('hdIcon'); if(ic)ic.innerHTML=CAT_ICON[HDCAT]||'&#9670;';
+    document.getElementById('crumb').innerHTML=esc(HDCAT)+'<small>category module · live from Meta (embedded)</small>';
+  }
   window.scrollTo({top:0});
   renderAll();
 }
@@ -995,6 +1015,8 @@ function cssEsc(s){return (s||'').replace(/"/g,'\\"');}
 // ---------- category nav ----------
 (function(){
   const tot={}; P.catRev.forEach(r=>{tot[r.c]=(tot[r.c]||0)+r.rev;});
+  // Meta-only categories (live module, possibly no Shopify revenue) still get a sidebar entry.
+  Object.keys(CATDATA||{}).forEach(c=>{ if(!(c in tot)) tot[c]=0; });
   const cats=Object.keys(tot).sort((a,b)=>tot[b]-tot[a]);
   let h=''; cats.forEach(c=>{h+='<div class="item" data-cat="'+esc(c)+'"><span class="ic">'+(CAT_ICON[c]||'&#9670;')+'</span> '+esc(c)+'</div>';});
   document.getElementById('catnav').innerHTML=h;
@@ -1020,7 +1042,7 @@ dTo.onchange=()=>{STATE.to=dTo.value;renderAll();};
 
 // ---------- sidebar clicks ----------
 document.querySelectorAll('.item').forEach(it=>it.onclick=()=>{
-  if(it.dataset.cat){ applyView(it.dataset.cat==='Crystal Home Decor'?'homedecor':'category', it.dataset.cat); }
+  if(it.dataset.cat){ applyView(hdHasCat(it.dataset.cat)?'homedecor':'category', it.dataset.cat); }
   else if(it.dataset.view==='home'){ applyView('home',null); }
   else if(it.dataset.go){ const t=document.getElementById(it.dataset.go); if(t)t.scrollIntoView({behavior:'smooth',block:'start'}); }
 });

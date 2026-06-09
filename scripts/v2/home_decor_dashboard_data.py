@@ -26,7 +26,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from _utils import GRAPH_API, IST, PORTAL_ACCOUNTS, meta_get, MetaRateLimitError  # noqa: E402
+from _utils import GRAPH_API, IST, PORTAL_ACCOUNTS, meta_get, meta_paginate, MetaRateLimitError  # noqa: E402
 
 # Reuse the canonical home-decor classification + budget math.
 import home_decor_sheet as hd  # noqa: E402
@@ -141,9 +141,22 @@ def _closed_day_budget(c):
     return sum(float(a.get("lifetime_budget") or 0) / 100 for a in adsets)
 
 
-def collect_campaigns():
-    """[(portal, friendly, campaign_dict)] for active home-decor campaigns."""
+# ── account-level campaign-list cache (fetched once, serves every category) ───
+# The list of campaigns per account is NOT date-scoped, so we pull it ONCE per
+# effective_status and reuse it across all categories AND all date presets. This
+# is what makes building every category affordable in the hourly job: without it
+# we'd re-list (and re-deep-fetch) per category and blow the API budget.
+_CAMP_LIST_CACHE = {}   # status ("ACTIVE"/"PAUSED") -> [(portal, friendly, campaign_dict)]
+
+
+def _list_campaigns(status):
+    """All non-excluded campaigns for an effective_status, every account, cached."""
+    if status in _CAMP_LIST_CACHE:
+        return _CAMP_LIST_CACHE[status]
     out = []
+    fields = ("id,name,daily_budget,lifetime_budget,start_time,stop_time,"
+              "created_time,updated_time,effective_status,"
+              "adsets.limit(100){id,name,effective_status,daily_budget,lifetime_budget}")
     for portal, accts in PORTAL_ACCOUNTS.items():
         for env_var, friendly in accts:
             if env_var in REPORT_EXCLUDE_ACCOUNTS:
@@ -152,66 +165,44 @@ def collect_campaigns():
             if not aid:
                 continue
             try:
-                d = meta_get(
+                rows = meta_paginate(
                     f"{GRAPH_API}/{aid}/campaigns",
-                    {"fields": "id,name,daily_budget,lifetime_budget,start_time,stop_time,"
-                               "created_time,"
-                               "adsets.limit(100){id,name,effective_status,daily_budget,lifetime_budget}",
-                     "effective_status": '["ACTIVE"]', "limit": 500},
-                    max_retries=3,
-                )
+                    {"fields": fields, "effective_status": f'["{status}"]', "limit": 200})
             except (MetaRateLimitError, Exception) as e:  # noqa: BLE001
-                print(f"  x {friendly}: {e}", file=sys.stderr)
+                print(f"  x list {friendly} {status}: {e}", file=sys.stderr)
                 continue
-            for c in (d or {}).get("data") or []:
-                name = c.get("name") or ""
-                if hd.excluded(name):
-                    continue
-                if derive_category_v2(name) != hd.HOME_DECOR_CATEGORY:
-                    continue
-                _, corr_cat = hd.classify_corrected(name)
-                if corr_cat != "Crystal":
-                    continue
-                out.append((portal, friendly, c))
+            for c in rows:
+                if not hd.excluded(c.get("name") or ""):
+                    out.append((portal, friendly, c))
             time.sleep(0.2)
+    _CAMP_LIST_CACHE[status] = out
     return out
 
 
-def collect_closed_campaigns():
-    """[(portal, friendly, campaign_dict)] for PAUSED home-decor campaigns, so the
-    dashboard can show budget that was switched off (with closure date + age)."""
-    out = []
-    for portal, accts in PORTAL_ACCOUNTS.items():
-        for env_var, friendly in accts:
-            if env_var in REPORT_EXCLUDE_ACCOUNTS:
-                continue
-            aid = os.environ.get(env_var)
-            if not aid:
-                continue
-            try:
-                d = meta_get(
-                    f"{GRAPH_API}/{aid}/campaigns",
-                    {"fields": "id,name,daily_budget,lifetime_budget,start_time,stop_time,"
-                               "created_time,updated_time,effective_status,"
-                               "adsets.limit(100){id,effective_status,daily_budget,lifetime_budget}",
-                     "effective_status": '["PAUSED"]', "limit": 500},
-                    max_retries=3,
-                )
-            except (MetaRateLimitError, Exception) as e:  # noqa: BLE001
-                print(f"  x closed {friendly}: {e}", file=sys.stderr)
-                continue
-            for c in (d or {}).get("data") or []:
-                name = c.get("name") or ""
-                if hd.excluded(name):
-                    continue
-                if derive_category_v2(name) != hd.HOME_DECOR_CATEGORY:
-                    continue
-                _, corr_cat = hd.classify_corrected(name)
-                if corr_cat != "Crystal":
-                    continue
-                out.append((portal, friendly, c))
-            time.sleep(0.2)
-    return out
+def _in_category(name, category):
+    """True if a campaign name belongs to `category` per derive_category_v2.
+    For Crystal Home Decor we keep the extra product-level 'Crystal' guard that
+    drops wanda-misclassified skin/jewellery (matches home_decor_sheet)."""
+    if derive_category_v2(name) != category:
+        return False
+    if category == hd.HOME_DECOR_CATEGORY:
+        _, corr_cat = hd.classify_corrected(name)
+        if corr_cat != "Crystal":
+            return False
+    return True
+
+
+def collect_campaigns(category):
+    """[(portal, friendly, campaign_dict)] for active campaigns in `category`."""
+    return [(p, f, c) for (p, f, c) in _list_campaigns("ACTIVE")
+            if _in_category(c.get("name") or "", category)]
+
+
+def collect_closed_campaigns(category):
+    """[(portal, friendly, campaign_dict)] for PAUSED campaigns in `category`, so
+    the dashboard can show budget switched off (with closure date + age)."""
+    return [(p, f, c) for (p, f, c) in _list_campaigns("PAUSED")
+            if _in_category(c.get("name") or "", category)]
 
 
 def campaign_insights(cids, since, until):
@@ -231,69 +222,84 @@ def campaign_insights(cids, since, until):
     return out
 
 
-def adset_insights(cid, since, until):
-    """adset_id -> {spend, roas, purchases, revenue} for one campaign."""
-    out = {}
-    try:
-        d = meta_get(f"{GRAPH_API}/{cid}/insights",
-                     {"level": "adset",
-                      "fields": "adset_id,adset_name,spend,purchase_roas,actions,action_values",
-                      "time_range": json.dumps({"since": since, "until": until}),
-                      "limit": 200})
-    except (MetaRateLimitError, Exception):  # noqa: BLE001
-        return out
-    for row in (d or {}).get("data") or []:
-        out[row.get("adset_id")] = {
-            "spend": _spend(row), "roas": _roas(row),
-            "purchases": _orders(row), "revenue": _revenue(row),
-        }
-    return out
+# ── account-level ad performance, cached per preset (serves every category) ───
+# Instead of 3 calls per campaign (adset + ad insights + ads list) we pull
+# level=ad insights ONCE per account per preset and bucket by campaign/adset/ad.
+# Adset and campaign drill-down metrics are summed from these ad rows. The same
+# fetched data feeds every category, so cost is ~accounts×presets, not campaigns.
+_AD_PERF_CACHE = {}     # preset -> {cid: {asid: {adid: {name,spend,roas,purchases,revenue}}}}
 
 
-def ad_insights(cid, since, until):
-    """ad_id -> {spend, roas, purchases, revenue} for one campaign."""
-    out = {}
-    try:
-        d = meta_get(f"{GRAPH_API}/{cid}/insights",
-                     {"level": "ad",
-                      "fields": "ad_id,spend,purchase_roas,actions,action_values",
-                      "time_range": json.dumps({"since": since, "until": until}),
-                      "limit": 300})
-    except (MetaRateLimitError, Exception):  # noqa: BLE001
-        return out
-    for row in (d or {}).get("data") or []:
-        out[row.get("ad_id")] = {
-            "spend": _spend(row), "roas": _roas(row),
-            "purchases": _orders(row), "revenue": _revenue(row),
-        }
-    return out
+def _ad_perf(preset):
+    """{campaign_id: {adset_id: {ad_id: metrics}}} for `preset`, all accounts."""
+    if preset in _AD_PERF_CACHE:
+        return _AD_PERF_CACHE[preset]
+    since, until = preset_range(preset)
+    perf = {}
+    for portal, accts in PORTAL_ACCOUNTS.items():
+        for env_var, friendly in accts:
+            if env_var in REPORT_EXCLUDE_ACCOUNTS:
+                continue
+            aid = os.environ.get(env_var)
+            if not aid:
+                continue
+            try:
+                rows = meta_paginate(
+                    f"{GRAPH_API}/{aid}/insights",
+                    {"level": "ad",
+                     "fields": "ad_id,ad_name,adset_id,campaign_id,"
+                               "spend,purchase_roas,actions,action_values",
+                     "time_range": json.dumps({"since": since, "until": until}),
+                     "limit": 500})
+            except (MetaRateLimitError, Exception) as e:  # noqa: BLE001
+                print(f"  x adperf {friendly} {preset}: {e}", file=sys.stderr)
+                continue
+            for r in rows:
+                cid, asid, adid = r.get("campaign_id"), r.get("adset_id"), r.get("ad_id")
+                if not cid or not adid:
+                    continue
+                perf.setdefault(cid, {}).setdefault(asid, {})[adid] = {
+                    "name": r.get("ad_name"),
+                    "spend": _spend(r), "roas": _roas(r),
+                    "purchases": _orders(r), "revenue": _revenue(r),
+                }
+            time.sleep(0.3)
+    _AD_PERF_CACHE[preset] = perf
+    return perf
 
 
-def campaign_ads(cid):
-    """adset_id -> [ {id,name,status,thumbnail,image,preview} ] for one campaign.
-    `preview` is Meta's shareable ad-preview link (fb.me/...) — opens the fully
-    rendered ad so videos play; needs no token and no special permission (the
+_CREATIVE_CACHE = {}    # ad_id -> {thumbnail, image, preview, status, name}
+
+
+def _creatives_for(ad_ids):
+    """ad_id -> {thumbnail, image, preview, status, name}, fetched in id-batches,
+    cached per ad. `preview` is Meta's shareable ad-preview link (fb.me/...) —
+    opens the fully rendered ad so videos play; needs no special permission (the
     video `source` field is permission-gated for this app). `image` is the
     full-res still used as a lightbox fallback for image-only ads."""
-    out = {}
-    try:
-        d = meta_get(f"{GRAPH_API}/{cid}/ads",
-                     {"fields": "id,name,adset_id,effective_status,"
-                                "preview_shareable_link,creative{thumbnail_url,image_url}",
-                      "limit": 200})
-    except (MetaRateLimitError, Exception):  # noqa: BLE001
-        return out
-    for ad in (d or {}).get("data") or []:
-        cr = ad.get("creative") or {}
-        out.setdefault(ad.get("adset_id"), []).append({
-            "id": ad.get("id"),
-            "name": ad.get("name"),
-            "status": ad.get("effective_status"),
-            "thumbnail": cr.get("thumbnail_url") or cr.get("image_url"),
-            "image": cr.get("image_url") or cr.get("thumbnail_url"),
-            "preview": ad.get("preview_shareable_link"),
-        })
-    return out
+    need = [a for a in dict.fromkeys(ad_ids) if a and a not in _CREATIVE_CACHE]
+    for i in range(0, len(need), 50):
+        batch = need[i:i + 50]
+        try:
+            d = meta_get(f"{GRAPH_API}/",
+                         {"ids": ",".join(batch),
+                          "fields": "name,effective_status,preview_shareable_link,"
+                                    "creative{thumbnail_url,image_url}"})
+        except (MetaRateLimitError, Exception):  # noqa: BLE001
+            d = {}
+        for adid, obj in (d or {}).items():
+            if not isinstance(obj, dict):
+                continue
+            cr = obj.get("creative") or {}
+            _CREATIVE_CACHE[adid] = {
+                "thumbnail": cr.get("thumbnail_url") or cr.get("image_url"),
+                "image": cr.get("image_url") or cr.get("thumbnail_url"),
+                "preview": obj.get("preview_shareable_link"),
+                "status": obj.get("effective_status"),
+                "name": obj.get("name"),
+            }
+        time.sleep(0.2)
+    return {a: _CREATIVE_CACHE.get(a, {}) for a in ad_ids}
 
 
 def _roll(d):
@@ -363,15 +369,24 @@ def build_creative_report(all_ads):
     }
 
 
-def build(preset="yesterday", with_creatives=True):
+def build(preset="yesterday", category=None, with_creatives=True):
     from collections import defaultdict
+    category = category or hd.HOME_DECOR_CATEGORY
     since, until = preset_range(preset)
     _now = datetime.now(IST)
     fetched_at = _now.strftime("%d %b %Y, %H:%M:%S IST")
     fetched_ts = _now.timestamp()          # epoch seconds, for JS "x ago"
-    rows = collect_campaigns()
+    rows = collect_campaigns(category)
     cids = [c["id"] for _, _, c in rows]
     cins = campaign_insights(cids, since, until) if cids else {}
+    # Account-level ad performance (cached, shared across categories) replaces the
+    # old 3-calls-per-campaign drill-down. Adset/ad metrics are summed from here.
+    perf = _ad_perf(preset) if with_creatives else {}
+    ad_ids = set()
+    for _, _, c in rows:
+        for ads in (perf.get(c["id"]) or {}).values():
+            ad_ids.update(ads.keys())
+    creatives = _creatives_for(ad_ids) if (with_creatives and ad_ids) else {}
 
     campaigns = []
     all_ads = []
@@ -387,32 +402,42 @@ def build(preset="yesterday", with_creatives=True):
         m = cins.get(cid, {})
         budget = hd.per_day_budget(c)
         adsets_meta = ((c.get("adsets") or {}).get("data")) or []
-        ains = adset_insights(cid, since, until)
-        ads_by_set = campaign_ads(cid) if with_creatives else {}
-        adins = ad_insights(cid, since, until) if with_creatives else {}
+        cperf = perf.get(cid, {})          # adset_id -> {ad_id: metrics}
         adsets = []
         for a in adsets_meta:
             asid = a.get("id")
-            am = ains.get(asid, {})
             ads = []
-            for ad in ads_by_set.get(asid, []):
-                pm = adins.get(ad["id"], {})
-                ctype = creative_type_of(ad.get("name"), name)
-                ad_obj = {**ad, "type": ctype,
+            a_spend = a_rev = 0.0
+            a_pur = 0
+            for adid, pm in (cperf.get(asid) or {}).items():
+                cr = creatives.get(adid, {})
+                ad_name = pm.get("name") or cr.get("name")
+                ctype = creative_type_of(ad_name, name)
+                ad_obj = {"id": adid, "name": ad_name,
+                          "status": cr.get("status"),
+                          "thumbnail": cr.get("thumbnail"),
+                          "image": cr.get("image"),
+                          "preview": cr.get("preview"),
+                          "type": ctype,
                           "spend": round(pm.get("spend", 0.0)),
                           "roas": round(pm.get("roas", 0.0), 2),
                           "purchases": int(pm.get("purchases", 0))}
                 ads.append(ad_obj)
                 all_ads.append({**ad_obj, "product": product, "campaign": name,
                                 "revenue": pm.get("revenue", 0.0)})
+                a_spend += pm.get("spend", 0.0)
+                a_rev += pm.get("revenue", 0.0)
+                a_pur += int(pm.get("purchases", 0))
+            ads.sort(key=lambda x: -x["spend"])
             adsets.append({
                 "id": asid, "name": a.get("name"),
                 "status": a.get("effective_status"),
-                "roas": round(am.get("roas", 0.0), 2),
-                "purchases": int(am.get("purchases", 0)),
-                "spend": round(am.get("spend", 0.0)),
+                "roas": round((a_rev / a_spend), 2) if a_spend else 0.0,
+                "purchases": a_pur,
+                "spend": round(a_spend),
                 "ads": ads,
             })
+        adsets.sort(key=lambda x: -x["spend"])
         campaigns.append({
             "id": cid, "name": name, "product": product,
             "portal": portal, "account": friendly,
@@ -461,12 +486,12 @@ def build(preset="yesterday", with_creatives=True):
             "roas": round((v.get("revenue", 0.0) / sp), 2) if sp else 0.0,
         })
 
-    # ── Closed budget: home-decor campaigns paused within [since, until] ──
+    # ── Closed budget: category campaigns paused within [since, until] ──
     # A campaign closed mid-window already drops out of `campaigns` (those are
     # ACTIVE-only), so it is naturally "shifted" here. "Closed on" uses Meta's
     # updated_time (the closest available proxy for when it was switched off).
     closed = []
-    closed_rows = collect_closed_campaigns()
+    closed_rows = collect_closed_campaigns(category)
     in_window = []
     for portal, friendly, c in closed_rows:
         upd = _parse_meta_time(c.get("updated_time"))
@@ -504,7 +529,8 @@ def build(preset="yesterday", with_creatives=True):
         "products": len(products), "ads": len(all_ads),
         "closed": len(closed), "closed_budget": closed_budget_total,
     }
-    return {"ok": True, "preset": preset, "since": since, "until": until,
+    return {"ok": True, "preset": preset, "category": category,
+            "since": since, "until": until,
             "fetched_at": fetched_at, "fetched_ts": fetched_ts,
             "overview": overview, "websites": websites, "products": products,
             "campaigns": campaigns, "closed": closed,
@@ -515,12 +541,15 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--preset", default="yesterday",
                     choices=["today", "yesterday", "last_7d", "last_30d"])
+    ap.add_argument("--category", default=None,
+                    help="category to build (default: Crystal Home Decor)")
     ap.add_argument("--out", default=None)
     ap.add_argument("--no-creatives", action="store_true")
     args = ap.parse_args()
     if not os.getenv("META_ACCESS_TOKEN"):
         sys.exit("META_ACCESS_TOKEN not set")
-    data = build(args.preset, with_creatives=not args.no_creatives)
+    data = build(args.preset, category=args.category,
+                 with_creatives=not args.no_creatives)
     payload = json.dumps(data, ensure_ascii=False, indent=2)
     if args.out:
         Path(args.out).write_text(payload, encoding="utf-8")
