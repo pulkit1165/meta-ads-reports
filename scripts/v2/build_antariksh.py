@@ -510,7 +510,7 @@ function renderCategory(){
 // ===================== HOME DECOR MODULE (embedded Meta payload) =====================
 let HDPRESET='yesterday', HDTAB='overview';
 const HD_PRESET_LABELS={today:'Today',yesterday:'Yesterday',last_7d:'Last 7D',last_30d:'Last 30D'};
-const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['creative','Creative Report']];
+const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability']];
 function hdEsc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function rg(r){r=r||0;return '<span class="rg '+roasClass(r)+'">'+r.toFixed(2)+'×</span>';}
 function hdAgo(ts){let s=Math.floor(Date.now()/1000-ts);if(s<0)s=0;if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
@@ -575,6 +575,36 @@ function hdCreative(d){
   h+='</tbody></table></div></section>';
   return h;
 }
+function hdClearance(d){
+  const ps=(d.products||[]).slice().sort((a,b)=>(a.roas||0)-(b.roas||0));
+  const sig=r=> r<1.0?['#d4434a','Liquidate — ad spend losing money'] : r<1.8?['#c47a00','Clear slow stock — cut budget / discount'] : ['#1a9d52','Healthy — keep'];
+  const cands=ps.filter(p=>(p.roas||0)<1.8&&(p.spend||0)>0);
+  const spendBehind=cands.reduce((s,p)=>s+(p.spend||0),0);
+  let h='<section class="section"><div class="kpis" style="grid-template-columns:repeat(3,1fr)">';
+  h+=hdKpi('Clearance candidates',fmtNum(cands.length),'products with ROAS &lt; 1.8×');
+  h+=hdKpi('Products',fmtNum(ps.length),'live in home decor');
+  h+=hdKpi('Spend behind them',fmtINR(spendBehind),'on sub-1.8× products');
+  h+='</div></section>';
+  h+='<section class="section"><div class="card"><h3>Clearance priority (worst ROAS first)</h3><div class="csub">Heuristic from ad performance &mdash; no live inventory feed yet. Low ROAS + spend = candidates to clear / wind down. Wire Shopify inventory for true days-of-cover.</div><table><thead><tr><th>Product</th><th>ROAS</th><th>Spend</th><th>Orders</th><th>Budget/day</th><th>Signal</th></tr></thead><tbody>';
+  ps.forEach(p=>{const s=sig(p.roas||0);h+='<tr><td><b>'+hdEsc(p.product)+'</b></td><td>'+rg(p.roas)+'</td><td>'+fmtINR(p.spend)+'</td><td>'+fmtNum(p.orders)+'</td><td>'+fmtINR(p.budget)+'</td><td style="color:'+s[0]+';font-size:12px">'+s[1]+'</td></tr>';});
+  h+='</tbody></table></div></section>';
+  return h;
+}
+function hdProfit(d){
+  const ps=(d.products||[]).map(p=>{const profit=(p.revenue||0)-(p.spend||0);return Object.assign({},p,{profit:profit,margin:p.revenue>0?100*profit/p.revenue:0});}).sort((a,b)=>b.profit-a.profit);
+  const tRev=ps.reduce((s,p)=>s+(p.revenue||0),0), tSpend=ps.reduce((s,p)=>s+(p.spend||0),0), tProfit=tRev-tSpend;
+  const pc=v=>'<span style="color:'+(v>=0?'#1a9d52':'#d4434a')+';font-weight:700">'+fmtINR(v)+'</span>';
+  let h='<section class="section"><div class="kpis" style="grid-template-columns:repeat(4,1fr)">';
+  h+=hdKpi('Revenue',fmtINR(tRev),'pixel-attributed','PIXEL');
+  h+=hdKpi('Ad Spend',fmtINR(tSpend),'Meta','META');
+  h+=hdKpi('Ad Contribution',pc(tProfit),'revenue − ad spend');
+  h+=hdKpi('Margin',(tRev>0?100*tProfit/tRev:0).toFixed(1)+'%','contribution / revenue');
+  h+='</div></section>';
+  h+='<section class="section"><div class="card"><h3>Product profitability</h3><div class="csub">Ad contribution = Pixel Revenue &minus; Ad Spend. Excludes COGS / product cost &mdash; add a cost sheet for true net profit.</div><table><thead><tr><th>Product</th><th>Spend</th><th>Revenue</th><th>Ad Contribution</th><th>Margin</th><th>ROAS</th><th>Orders</th></tr></thead><tbody>';
+  ps.forEach(p=>{h+='<tr><td><b>'+hdEsc(p.product)+'</b></td><td>'+fmtINR(p.spend)+'</td><td>'+fmtINR(p.revenue)+'</td><td>'+pc(p.profit)+'</td><td>'+p.margin.toFixed(1)+'%</td><td>'+rg(p.roas)+'</td><td>'+fmtNum(p.orders)+'</td></tr>';});
+  h+='</tbody></table></div></section>';
+  return h;
+}
 function hdRender(){
   document.getElementById('hdTabs').innerHTML=HD_TABS.map(t=>'<button data-t="'+t[0]+'"'+(t[0]===HDTAB?' class="on"':'')+'>'+t[1]+'</button>').join('');
   [...document.querySelectorAll('#hdTabs button')].forEach(b=>b.onclick=()=>{HDTAB=b.dataset.t;hdRender();});
@@ -586,7 +616,7 @@ function hdRender(){
     body.innerHTML='<section class="section"><div class="card"><div class="muted">Home-Decor data is not embedded in this build (no Meta token at build time). It will populate on the next scheduled build.</div></div></section>'; return; }
   document.getElementById('hdScope').textContent='('+(d.since||'')+' → '+(d.until||'')+')';
   fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b>'+(d.fetched_ts?' ('+hdAgo(d.fetched_ts)+')':'');
-  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : hdCreative(d);
+  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : hdCreative(d);
 }
 setInterval(()=>{ if(STATE.view==='homedecor'){ const d=hdPick(), fp=document.getElementById('hdFetched'); if(d&&d.fetched_ts&&fp) fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b> ('+hdAgo(d.fetched_ts)+')'; } }, 60000);
 // ===================== /HOME DECOR MODULE =====================
