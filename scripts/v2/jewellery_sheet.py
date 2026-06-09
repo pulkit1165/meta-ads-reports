@@ -25,6 +25,7 @@ access on the sheet (operator shares it manually once).
 Usage:
   python3 scripts/v2/jewellery_sheet.py
 """
+import json
 import os
 import sys
 import time
@@ -57,6 +58,34 @@ JEWELLERY_PRODUCTS = [
     "Jewellery", "Pyrite Bracelet", "Crystal Bracelet", "Prem Sutra Bracelet",
     "Pyrite Half & Half", "Nazar Sutra", "Sutra Range Mix",
 ]
+
+# Paras "storyline / travel" markers — edit _paras_storyline_ids.json (repo root)
+# to add either ad/campaign IDs (digits) OR name keywords (e.g. "saree", "travel").
+# Any Paras ad matching one of these is highlighted BLUE in the Paras block.
+_STORYLINE_FILE = Path(__file__).resolve().parent.parent.parent / "_paras_storyline_ids.json"
+
+
+def _load_storyline_markers():
+    try:
+        data = json.loads(_STORYLINE_FILE.read_text(encoding="utf-8"))
+        return [str(x).strip().lower() for x in data if str(x).strip()]
+    except Exception:  # noqa: BLE001 — missing/empty file → no highlights
+        return []
+
+
+def _is_storyline(c, markers):
+    if not markers:
+        return False
+    name = (c.get("name") or "").lower()
+    aid = str(c.get("ad_id") or "")
+    cid = str(c.get("camp_id") or "")
+    for m in markers:
+        if m.isdigit():
+            if m == aid or m == cid:
+                return True
+        elif m and m in name:
+            return True
+    return False
 
 
 # ── data collection ───────────────────────────────────────────────────────────
@@ -245,17 +274,21 @@ def write_sheet(by_product, yday, creatives, sales=None):
     cr_last = len(values)
 
     # ── Paras creatives (separated, at the bottom) ──
+    markers = _load_storyline_markers()
     paras = paras_ads
     values.append([])
     pr_title_row = len(values) + 1
-    values.append([f"🙋 PARAS CREATIVES ({len(paras)} ads) — {yday_label}, sorted by ROAS"])
+    values.append([f"🙋 PARAS CREATIVES ({len(paras)} ads) — {yday_label}, sorted by ROAS"
+                   f"{'  ·  storyline/travel in 🔵 blue' if markers else ''}"])
     pr_hdr_row = len(values) + 1
     values.append(chdr)
     pr_first = len(values) + 1
+    blue_rows = []
     if not paras:
         values.append(["", "(no Paras ads with spend)", "", "", "", ""])
     else:
         for i, c in enumerate(paras, 1):
+            r = len(values) + 1
             acct_num = (c.get("acct") or "").replace("act_", "")
             nm = c["name"][:60]
             if acct_num and c.get("ad_id"):
@@ -266,6 +299,8 @@ def write_sheet(by_product, yday, creatives, sales=None):
                 name_cell = nm
             camp_cell = '="%s"' % c.get("camp_id", "")
             values.append([i, name_cell, c["product"], round(c["spend"]), c["roas"], camp_cell])
+            if _is_storyline(c, markers):
+                blue_rows.append(r)
     pr_last = len(values)
 
     ws.clear()
@@ -342,6 +377,12 @@ def write_sheet(by_product, yday, creatives, sales=None):
                         "userEnteredFormat(backgroundColor,textFormat)"))
     fmt.append(cell_fmt(pr_first - 1, pr_last, 3, 4, money, "userEnteredFormat.numberFormat"))
     fmt.append(cell_fmt(pr_first - 1, pr_last, 4, 5, roasf, "userEnteredFormat.numberFormat"))
+    # Storyline / travel Paras ads → blue highlight
+    blue = {"red": 0.80, "green": 0.87, "blue": 0.97}
+    for r in blue_rows:
+        fmt.append(cell_fmt(r - 1, r, 0, 6,
+                            {"backgroundColor": blue, "textFormat": {"bold": True}},
+                            "userEnteredFormat(backgroundColor,textFormat)"))
     fmt += [
         {"updateSheetProperties": {
             "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": kpi_val}},
