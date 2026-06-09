@@ -239,6 +239,30 @@ def write_sheet(by_product, yday, creatives, sales=None):
                 red_rows.append(r)
     cr_last = len(values)
 
+    # ── Paras creatives (separated, at the bottom) ──
+    paras = [c for c in ads if "paras" in (c["name"] or "").lower()]
+    values.append([])
+    pr_title_row = len(values) + 1
+    values.append([f"🙋 PARAS CREATIVES ({len(paras)} ads) — {yday_label}, sorted by ROAS"])
+    pr_hdr_row = len(values) + 1
+    values.append(chdr)
+    pr_first = len(values) + 1
+    if not paras:
+        values.append(["", "(no Paras ads with spend)", "", "", "", ""])
+    else:
+        for i, c in enumerate(paras, 1):
+            acct_num = (c.get("acct") or "").replace("act_", "")
+            nm = c["name"][:60]
+            if acct_num and c.get("ad_id"):
+                url = (f"https://business.facebook.com/adsmanager/manage/ads?"
+                       f"act={acct_num}&selected_ad_ids={c['ad_id']}")
+                name_cell = '=HYPERLINK("%s","%s")' % (url, nm.replace('"', '""'))
+            else:
+                name_cell = nm
+            camp_cell = '="%s"' % c.get("camp_id", "")
+            values.append([i, name_cell, c["product"], round(c["spend"]), c["roas"], camp_cell])
+    pr_last = len(values)
+
     ws.clear()
     ws.update(range_name="A1", values=values, value_input_option="USER_ENTERED")
 
@@ -307,6 +331,12 @@ def write_sheet(by_product, yday, creatives, sales=None):
         fmt.append(cell_fmt(r - 1, r, 0, 6,
                             {"backgroundColor": lightred, "textFormat": {"bold": True}},
                             "userEnteredFormat(backgroundColor,textFormat)"))
+    # Paras section: title+header grey, money + ROAS number formats
+    fmt.append(cell_fmt(pr_title_row - 1, pr_hdr_row, 0, 6,
+                        {"backgroundColor": purple, "textFormat": {"bold": True, "foregroundColor": white}},
+                        "userEnteredFormat(backgroundColor,textFormat)"))
+    fmt.append(cell_fmt(pr_first - 1, pr_last, 3, 4, money, "userEnteredFormat.numberFormat"))
+    fmt.append(cell_fmt(pr_first - 1, pr_last, 4, 5, roasf, "userEnteredFormat.numberFormat"))
     fmt += [
         {"updateSheetProperties": {
             "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": kpi_val}},
