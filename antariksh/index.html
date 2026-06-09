@@ -1,0 +1,300 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Antariksh — NTN Ads Reports (UI mockup)</title>
+<style>
+  :root{
+    --bg:#f5f6f8; --panel:#ffffff; --ink:#1c2330; --muted:#6b7686;
+    --line:#e6e9ef; --brand:#2f5bff; --brand-soft:#eaf0ff;
+    --good:#0c9b5b; --bad:#d23b3b; --warn:#c98a00;
+    --shadow:0 1px 2px rgba(16,24,40,.05),0 1px 3px rgba(16,24,40,.08);
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,Arial,sans-serif;
+       color:var(--ink);background:var(--bg);}
+  a{color:inherit;text-decoration:none}
+
+  /* layout */
+  .app{display:grid;grid-template-columns:248px 1fr;min-height:100vh}
+
+  /* sidebar */
+  .side{background:#0f1830;color:#cdd5e3;display:flex;flex-direction:column;
+        position:sticky;top:0;height:100vh}
+  .brand{padding:18px 18px 14px;display:flex;align-items:center;gap:10px;
+         border-bottom:1px solid rgba(255,255,255,.08)}
+  .brand .logo{width:30px;height:30px;border-radius:8px;background:linear-gradient(135deg,#3b6bff,#6ad);
+               display:grid;place-items:center;font-weight:700;color:#fff}
+  .brand b{font-size:15px;color:#fff}
+  .brand small{display:block;color:#8693ad;font-size:11px;font-weight:500}
+  .newbtn{margin:14px;padding:9px 12px;border-radius:9px;background:var(--brand);
+          color:#fff;font-weight:600;font-size:13px;text-align:center;cursor:pointer;
+          display:flex;align-items:center;justify-content:center;gap:7px}
+  .newbtn:hover{filter:brightness(1.07)}
+  .nav{overflow:auto;flex:1;padding:4px 10px 18px}
+  .grp{margin:14px 6px 6px;font-size:10.5px;letter-spacing:.09em;text-transform:uppercase;color:#67738f}
+  .item{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;
+        cursor:pointer;color:#c4ccdb;font-size:13.5px;margin:1px 0}
+  .item .ic{width:16px;text-align:center;opacity:.85}
+  .item:hover{background:rgba(255,255,255,.06)}
+  .item.active{background:var(--brand);color:#fff;font-weight:600}
+  .item .dot{margin-left:auto;width:7px;height:7px;border-radius:50%;background:#3ad27f;opacity:.0}
+  .item.saved .dot{opacity:.9}
+  .side-foot{padding:12px 16px;border-top:1px solid rgba(255,255,255,.08);font-size:11px;color:#7d89a3}
+
+  /* main */
+  .main{display:flex;flex-direction:column;min-width:0}
+  .topbar{position:sticky;top:0;z-index:5;background:rgba(245,246,248,.86);
+          backdrop-filter:blur(8px);border-bottom:1px solid var(--line);
+          padding:12px 22px;display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+  .crumb{font-weight:700;font-size:16px}
+  .crumb small{font-weight:500;color:var(--muted);font-size:12px;display:block;margin-top:1px}
+  .spacer{flex:1}
+  .seg{display:flex;background:var(--panel);border:1px solid var(--line);border-radius:9px;overflow:hidden;box-shadow:var(--shadow)}
+  .seg button{border:0;background:transparent;padding:7px 12px;font-size:12.5px;cursor:pointer;color:var(--muted);font-weight:600}
+  .seg button.on{background:var(--brand);color:#fff}
+  .pill{display:inline-flex;align-items:center;gap:7px;background:var(--panel);border:1px solid var(--line);
+        border-radius:999px;padding:6px 12px;font-size:12px;box-shadow:var(--shadow)}
+  .pill .led{width:8px;height:8px;border-radius:50%;background:var(--good)}
+  .pill.range{color:var(--muted);font-weight:600}
+
+  .wrap{padding:22px;max-width:1180px}
+  .note{background:#fff7e6;border:1px solid #ffe3a3;color:#7a5500;border-radius:10px;
+        padding:10px 14px;font-size:12.5px;margin-bottom:18px}
+
+  /* KPI strip */
+  .kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-bottom:20px}
+  .kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 16px 14px;box-shadow:var(--shadow)}
+  .kpi .lbl{font-size:12px;color:var(--muted);font-weight:600;display:flex;align-items:center;gap:6px}
+  .kpi .val{font-size:26px;font-weight:750;margin:8px 0 4px;letter-spacing:-.01em}
+  .kpi .sub{font-size:12px}
+  .up{color:var(--good)} .down{color:var(--bad)}
+  .tag{display:inline-block;font-size:10px;font-weight:700;padding:1px 6px;border-radius:6px;background:var(--brand-soft);color:var(--brand)}
+
+  /* cards */
+  .grid2{display:grid;grid-template-columns:1.4fr 1fr;gap:16px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;box-shadow:var(--shadow);margin-bottom:16px}
+  .card h3{margin:0 0 2px;font-size:14.5px}
+  .card .csub{color:var(--muted);font-size:12px;margin-bottom:12px}
+
+  /* table */
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th,td{padding:9px 10px;text-align:right;border-bottom:1px solid var(--line);white-space:nowrap}
+  th:first-child,td:first-child{text-align:left}
+  thead th{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted);font-weight:700;cursor:pointer}
+  tbody tr:hover{background:#fafbff}
+  .roas-good{color:var(--good);font-weight:700}
+  .roas-mid{color:var(--warn);font-weight:700}
+  .roas-bad{color:var(--bad);font-weight:700}
+  .chip{display:inline-block;padding:2px 9px;border-radius:999px;font-size:11.5px;background:#eef1f6;color:#42506b;font-weight:600}
+
+  /* simple svg chart */
+  .chartbox{height:230px}
+  .legend{display:flex;gap:16px;font-size:12px;color:var(--muted);margin-top:8px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:middle}
+
+  .placeholder{display:grid;place-items:center;height:60vh;color:var(--muted);text-align:center}
+  .placeholder .big{font-size:40px;margin-bottom:10px;opacity:.5}
+  .hide{display:none}
+  @media(max-width:900px){.app{grid-template-columns:1fr}.side{display:none}.kpis{grid-template-columns:repeat(2,1fr)}.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ============ SIDEBAR ============ -->
+  <aside class="side">
+    <div class="brand">
+      <div class="logo">A</div>
+      <div><b>Antariksh</b><small>NTN Ads · reports workspace</small></div>
+    </div>
+    <div class="newbtn">+ New report block</div>
+    <nav class="nav">
+      <div class="grp">Pinned</div>
+      <div class="item active saved" data-page="overview"><span class="ic">◆</span> Overview <span class="dot"></span></div>
+      <div class="item saved" data-page="category"><span class="ic">▦</span> By Category <span class="dot"></span></div>
+
+      <div class="grp">Performance</div>
+      <div class="item" data-page="trends"><span class="ic">📈</span> Daily Trends</div>
+      <div class="item" data-page="spend"><span class="ic">₹</span> Spend vs Revenue</div>
+
+      <div class="grp">Breakdowns</div>
+      <div class="item saved" data-page="product"><span class="ic">◫</span> By Product <span class="dot"></span></div>
+      <div class="item" data-page="creative"><span class="ic">✦</span> By Creative Type</div>
+
+      <div class="grp">Ads</div>
+      <div class="item" data-page="top"><span class="ic">▲</span> Top Ads</div>
+      <div class="item" data-page="bottom"><span class="ic">▼</span> Bottom Ads</div>
+    </nav>
+    <div class="side-foot">Mockup • sample data only</div>
+  </aside>
+
+  <!-- ============ MAIN ============ -->
+  <div class="main">
+    <div class="topbar">
+      <div class="crumb" id="crumb">Overview<small id="crumbsub">Shopify-reality snapshot</small></div>
+      <div class="spacer"></div>
+      <div class="seg" id="rangeseg">
+        <button>Today</button><button class="on">7D</button><button>14D</button><button>30D</button><button>All</button>
+      </div>
+      <div class="pill range">Range: last 7 days</div>
+      <div class="pill"><span class="led"></span> Data refreshed 6 min ago</div>
+    </div>
+
+    <div class="wrap">
+      <div class="note">⚠️ This is a <b>UI mockup</b> with placeholder numbers — nothing here is live yet. Tell me which blocks to keep, rename, reorder, or add, and we lock it before wiring real data + committing.</div>
+
+      <!-- ===== OVERVIEW ===== -->
+      <section class="page" id="page-overview">
+        <div class="kpis">
+          <div class="kpi"><div class="lbl">Spend <span class="tag">META</span></div><div class="val">₹4.82L</div><div class="sub muted">last 7 days</div></div>
+          <div class="kpi"><div class="lbl">Revenue <span class="tag">SHOPIFY</span></div><div class="val">₹11.6L</div><div class="sub up">▲ 14% vs prev 7d</div></div>
+          <div class="kpi"><div class="lbl">ROAS <span class="tag">SHOPIFY</span></div><div class="val">2.41×</div><div class="sub up">▲ 0.18 vs prev 7d</div></div>
+          <div class="kpi"><div class="lbl">Orders <span class="tag">SHOPIFY</span></div><div class="val">1,284</div><div class="sub down">▼ 3% vs prev 7d</div></div>
+        </div>
+
+        <div class="grid2">
+          <div class="card">
+            <h3>Spend vs Revenue</h3>
+            <div class="csub">Daily — Meta spend against Shopify revenue</div>
+            <div class="chartbox" id="chart-sr"></div>
+            <div class="legend"><span><i style="background:#9aa7c2"></i>Spend</span><span><i style="background:#2f5bff"></i>Revenue</span></div>
+          </div>
+          <div class="card">
+            <h3>Top Categories</h3>
+            <div class="csub">By revenue, last 7 days</div>
+            <table>
+              <thead><tr><th>Category</th><th>Spend</th><th>Rev</th><th>ROAS</th></tr></thead>
+              <tbody>
+                <tr><td><span class="chip">24K Jewellery</span></td><td>₹1.2L</td><td>₹3.4L</td><td class="roas-good">2.83×</td></tr>
+                <tr><td><span class="chip">Skin</span></td><td>₹1.5L</td><td>₹3.1L</td><td class="roas-good">2.07×</td></tr>
+                <tr><td><span class="chip">Hair</span></td><td>₹0.9L</td><td>₹2.0L</td><td class="roas-mid">2.22×</td></tr>
+                <tr><td><span class="chip">Perfumes</span></td><td>₹0.6L</td><td>₹1.4L</td><td class="roas-mid">2.33×</td></tr>
+                <tr><td><span class="chip">Nutraceuticals</span></td><td>₹0.6L</td><td>₹1.7L</td><td class="roas-good">2.83×</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- ===== BY CATEGORY ===== -->
+      <section class="page hide" id="page-category">
+        <div class="kpis">
+          <div class="kpi"><div class="lbl">Categories active</div><div class="val">9</div><div class="sub muted">with spend &gt; 0</div></div>
+          <div class="kpi"><div class="lbl">Best ROAS</div><div class="val">2.83×</div><div class="sub up">24K Jewellery</div></div>
+          <div class="kpi"><div class="lbl">Biggest spend</div><div class="val">₹1.5L</div><div class="sub muted">Skin</div></div>
+          <div class="kpi"><div class="lbl">Under 1.0× ROAS</div><div class="val">2</div><div class="sub down">money-losing buckets</div></div>
+        </div>
+        <div class="card">
+          <h3>Spend &amp; ROAS by Category</h3>
+          <div class="csub">last 7 days — bar = spend, sorted by ROAS</div>
+          <div class="chartbox" id="chart-cat"></div>
+        </div>
+        <div class="card">
+          <h3>All categories</h3>
+          <div class="csub">click a header to sort</div>
+          <table>
+            <thead><tr><th>Category</th><th>Spend</th><th>Revenue</th><th>Orders</th><th>ROAS</th></tr></thead>
+            <tbody>
+              <tr><td><span class="chip">24K Jewellery</span></td><td>₹1.20L</td><td>₹3.40L</td><td>212</td><td class="roas-good">2.83×</td></tr>
+              <tr><td><span class="chip">Nutraceuticals</span></td><td>₹0.60L</td><td>₹1.70L</td><td>188</td><td class="roas-good">2.83×</td></tr>
+              <tr><td><span class="chip">Perfumes</span></td><td>₹0.60L</td><td>₹1.40L</td><td>154</td><td class="roas-mid">2.33×</td></tr>
+              <tr><td><span class="chip">Hair</span></td><td>₹0.90L</td><td>₹2.00L</td><td>231</td><td class="roas-mid">2.22×</td></tr>
+              <tr><td><span class="chip">Skin</span></td><td>₹1.50L</td><td>₹3.10L</td><td>299</td><td class="roas-good">2.07×</td></tr>
+              <tr><td><span class="chip">Crystal Decor</span></td><td>₹0.45L</td><td>₹0.40L</td><td>32</td><td class="roas-bad">0.89×</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ===== BY PRODUCT ===== -->
+      <section class="page hide" id="page-product">
+        <div class="card">
+          <h3>Top products by revenue</h3>
+          <div class="csub">last 7 days • sample</div>
+          <table>
+            <thead><tr><th>Product</th><th>Spend</th><th>Revenue</th><th>Orders</th><th>ROAS</th></tr></thead>
+            <tbody>
+              <tr><td>Kundan Necklace Set</td><td>₹68k</td><td>₹2.1L</td><td>78</td><td class="roas-good">3.09×</td></tr>
+              <tr><td>AM/PM Booster Kit</td><td>₹92k</td><td>₹2.0L</td><td>121</td><td class="roas-mid">2.17×</td></tr>
+              <tr><td>Hair Growth Serum</td><td>₹54k</td><td>₹1.3L</td><td>96</td><td class="roas-mid">2.41×</td></tr>
+              <tr><td>Oud Perfume 50ml</td><td>₹41k</td><td>₹1.1L</td><td>88</td><td class="roas-good">2.68×</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- ===== Placeholder pages ===== -->
+      <section class="page hide" id="page-trends"><div class="placeholder"><div><div class="big">📈</div>Daily Trends report — layout TBD.<br>Tell me what lines you want (spend / revenue / ROAS / orders).</div></div></section>
+      <section class="page hide" id="page-spend"><div class="placeholder"><div><div class="big">₹</div>Spend vs Revenue report — layout TBD.</div></div></section>
+      <section class="page hide" id="page-creative"><div class="placeholder"><div><div class="big">✦</div>By Creative Type report — layout TBD.</div></div></section>
+      <section class="page hide" id="page-top"><div class="placeholder"><div><div class="big">▲</div>Top Ads report — layout TBD.</div></div></section>
+      <section class="page hide" id="page-bottom"><div class="placeholder"><div><div class="big">▼</div>Bottom Ads report — layout TBD.</div></div></section>
+
+    </div>
+  </div>
+</div>
+
+<script>
+  const titles = {
+    overview:["Overview","Shopify-reality snapshot"],
+    category:["By Category","Spend, revenue & ROAS per category"],
+    product:["By Product","Per-product performance"],
+    trends:["Daily Trends","Time-series KPIs"],
+    spend:["Spend vs Revenue","Daily Meta spend vs Shopify revenue"],
+    creative:["By Creative Type","Reel / image / carousel"],
+    top:["Top Ads","Best ROAS"],
+    bottom:["Bottom Ads","Worst ROAS"]
+  };
+  const items = document.querySelectorAll('.item');
+  function show(page){
+    document.querySelectorAll('.page').forEach(p=>p.classList.add('hide'));
+    document.getElementById('page-'+page).classList.remove('hide');
+    items.forEach(i=>i.classList.toggle('active', i.dataset.page===page));
+    document.getElementById('crumb').childNodes[0].nodeValue = titles[page][0];
+    document.getElementById('crumbsub').textContent = titles[page][1];
+    if(page==='overview') drawSpendRev();
+    if(page==='category') drawCat();
+  }
+  items.forEach(i=>i.addEventListener('click',()=>show(i.dataset.page)));
+
+  // range segmented control (cosmetic in mockup)
+  document.querySelectorAll('#rangeseg button').forEach(b=>{
+    b.addEventListener('click',()=>{
+      document.querySelectorAll('#rangeseg button').forEach(x=>x.classList.remove('on'));
+      b.classList.add('on');
+      document.querySelector('.pill.range').textContent='Range: '+(b.textContent==='Today'?'today':b.textContent==='All'?'all time':'last '+b.textContent.replace('D',' days'));
+    });
+  });
+
+  // ---- tiny dependency-free SVG charts ----
+  function svg(w,h){const s=document.createElementNS('http://www.w3.org/2000/svg','svg');s.setAttribute('viewBox',`0 0 ${w} ${h}`);s.setAttribute('width','100%');s.setAttribute('height','100%');return s;}
+  function el(n,a){const e=document.createElementNS('http://www.w3.org/2000/svg',n);for(const k in a)e.setAttribute(k,a[k]);return e;}
+  function drawSpendRev(){
+    const box=document.getElementById('chart-sr');if(box.dataset.done)return;box.dataset.done=1;
+    const W=560,H=230,pad=30; const spend=[62,70,66,74,69,71,70],rev=[150,168,160,178,172,175,179];
+    const max=200,bw=(W-pad*2)/spend.length;
+    const s=svg(W,H);
+    [0,50,100,150,200].forEach(g=>{const y=H-pad-(g/max)*(H-pad*2);s.appendChild(el('line',{x1:pad,y1:y,x2:W-pad,y2:y,stroke:'#eef1f6'}));s.appendChild(el('text',{x:4,y:y+3,'font-size':9,fill:'#9aa7c2'})).textContent=g;});
+    spend.forEach((v,i)=>{const x=pad+i*bw+6;const h=(v/max)*(H-pad*2);s.appendChild(el('rect',{x:x,y:H-pad-h,width:bw*0.32,height:h,rx:3,fill:'#9aa7c2'}));});
+    // revenue line
+    let d='';rev.forEach((v,i)=>{const x=pad+i*bw+bw*0.5;const y=H-pad-(v/max)*(H-pad*2);d+=(i?'L':'M')+x+' '+y+' ';s.appendChild(el('circle',{cx:x,cy:y,r:3,fill:'#2f5bff'}));});
+    s.appendChild(el('path',{d:d,fill:'none',stroke:'#2f5bff','stroke-width':2.5}));
+    box.appendChild(s);
+  }
+  function drawCat(){
+    const box=document.getElementById('chart-cat');if(box.dataset.done)return;box.dataset.done=1;
+    const W=560,H=230,pad=34; const cats=[['24K',120,2.83],['Nutra',60,2.83],['Perf',60,2.33],['Hair',90,2.22],['Skin',150,2.07],['Crystal',45,0.89]];
+    const max=160,bw=(W-pad*2)/cats.length;const s=svg(W,H);
+    cats.forEach((c,i)=>{const x=pad+i*bw+bw*0.18;const h=(c[1]/max)*(H-pad*2);const col=c[2]>=2.5?'#0c9b5b':c[2]>=1.5?'#c98a00':'#d23b3b';
+      s.appendChild(el('rect',{x:x,y:H-pad-h,width:bw*0.64,height:h,rx:4,fill:col}));
+      const t=el('text',{x:x+bw*0.32,y:H-pad+13,'font-size':10,fill:'#6b7686','text-anchor':'middle'});t.textContent=c[0];s.appendChild(t);
+      const t2=el('text',{x:x+bw*0.32,y:H-pad-h-5,'font-size':10,fill:'#1c2330','text-anchor':'middle','font-weight':700});t2.textContent=c[2]+'×';s.appendChild(t2);});
+    box.appendChild(s);
+  }
+  drawSpendRev();
+</script>
+</body>
+</html>
