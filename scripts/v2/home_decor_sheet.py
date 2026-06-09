@@ -47,9 +47,6 @@ from product_catalogue import derive_category_v2  # noqa: E402
 # product-level category == 'Crystal' on top of the v2 'Crystal Home Decor' tag.
 from active_budget_by_product import classify_corrected  # noqa: E402
 
-# Shopify daily store sales (real orders / gross / net, all 3 stores) — fail-safe.
-from shopify_daily_sales import store_sales  # noqa: E402
-
 # Operator's "home decor" sheet — service account must have Editor access.
 SHEET_ID = "1X0FDfiS5ZflJykVZcsFgieI0qHrWC4OOuO3jMBfB6K0"
 
@@ -303,12 +300,17 @@ def fetch_creatives(cid_to_product, yday):
     return out
 
 
-def fetch_portal_spend(yday):
-    """{portal: spend, 'TOTAL': spend} — total ad spend per portal on yday (ALL
-    categories, all accounts), for the store-wide ROAS in the sales block."""
-    out, tot = {}, 0.0
+def fetch_portal_sales(yday):
+    """Per-portal store sales from Meta (account-level insights, 7d click).
+
+    Returns {portal: {orders, gross, spend}, 'TOTAL': {...}} across ALL categories
+    (every account in the portal). orders = ad-attributed purchases, gross =
+    purchase conversion value (₹). Fail-safe — bad accounts just contribute 0.
+    """
+    out = {}
+    tot = {"orders": 0.0, "gross": 0.0, "spend": 0.0}
     for portal, accts in PORTAL_ACCOUNTS.items():
-        s = 0.0
+        agg = {"orders": 0.0, "gross": 0.0, "spend": 0.0}
         for env_var, friendly in accts:
             if env_var in EXCLUDE_ACCOUNTS:
                 continue
@@ -319,17 +321,22 @@ def fetch_portal_spend(yday):
                 d = meta_get(
                     f"{GRAPH_API}/{aid}/insights",
                     {"time_range": json.dumps({"since": yday, "until": yday}),
-                     "fields": "spend"},
+                     "action_attribution_windows": json.dumps(["7d_click"]),
+                     "fields": "spend,actions,action_values"},
                     max_retries=3,
                 )
                 rows = (d or {}).get("data") or []
                 if rows:
-                    s += float(rows[0].get("spend") or 0)
+                    r = rows[0]
+                    agg["spend"] += float(r.get("spend") or 0)
+                    agg["orders"] += _extract_action(r.get("actions"))
+                    agg["gross"] += _extract_action(r.get("action_values"))
             except Exception:  # noqa: BLE001 — fail-safe
                 pass
             time.sleep(0.2)
-        out[portal] = s
-        tot += s
+        out[portal] = agg
+        for k in agg:
+            tot[k] += agg[k]
     out["TOTAL"] = tot
     return out
 
@@ -402,28 +409,24 @@ def write_sheet(by_product, yday, creatives, sales=None):
     # KPI strip
     values.append(["Total Budget (₹/day)", "Spend (yesterday ₹)", "Campaigns Running", "ROAS"])
     values.append([round(tot_budget), round(tot_spend), tot_camps, tot_roas])
-    # ── Store sales (Shopify, real orders — all 3 stores) ──
+    # ── Store sales from Meta (ad-attributed, all 3 stores, all categories) ──
     values.append([])
     ss_title_row = len(values) + 1
-    values.append([f"💰 STORE SALES ({yday_label}) — real Shopify orders, all 3 stores  ·  "
-                   f"Gross = total paid · Net = after discounts · ROAS = Gross ÷ ad spend"])
+    values.append([f"💰 STORE SALES ({yday_label}) — Meta ad-attributed (7d click), all 3 stores  ·  "
+                   f"Gross = purchase value · ROAS = Gross ÷ ad spend"])
     ss_hdr_row = len(values) + 1
-    values.append(["Store", "Orders", "Gross Sales (₹)", "Net Sales (₹)", "Ad Spend (₹)", "ROAS"])
+    values.append(["Store", "Orders", "Gross Sales (₹)", "Ad Spend (₹)", "ROAS"])
     ss_first = len(values) + 1
     if sales:
         for p in ["SM", "SML", "NBP"]:
-            d = sales.get(p)
-            if d is None:
-                values.append([p, "—", "—", "—", "—", "—"])
-            else:
-                values.append([p, d["orders"], round(d["gross"]), round(d["net"]),
-                               round(d.get("spend", 0)), d.get("roas", 0.0)])
+            d = sales.get(p) or {"orders": 0, "gross": 0, "spend": 0}
+            rr = round(d["gross"] / d["spend"], 2) if d["spend"] else 0.0
+            values.append([p, round(d["orders"]), round(d["gross"]), round(d["spend"]), rr])
         t = sales["TOTAL"]
-        values.append(["TOTAL", t["orders"], round(t["gross"]), round(t["net"]),
-                       round(t.get("spend", 0)), t.get("roas", 0.0)])
+        rr = round(t["gross"] / t["spend"], 2) if t["spend"] else 0.0
+        values.append(["TOTAL", round(t["orders"]), round(t["gross"]), round(t["spend"]), rr])
     else:
-        values.append(["(fills with real data on the 7 AM run / GitHub Actions)",
-                       "", "", "", "", ""])
+        values.append(["(sales unavailable)", "", "", "", ""])
     ss_last = len(values)
 
     values.append([])
@@ -551,16 +554,16 @@ def write_sheet(by_product, yday, creatives, sales=None):
         fmt.append(cell_fmt(r - 1, r, 0, 6,
                             {"backgroundColor": lightred, "textFormat": {"bold": True}},
                             "userEnteredFormat(backgroundColor,textFormat)"))
-    # Sales block: title+header (dark), money cols (Gross/Net/Ad Spend), ROAS col, bold total
-    fmt.append(cell_fmt(ss_title_row - 1, ss_hdr_row, 0, 6,
+    # Sales block: title+header (grey), money cols (Gross/Ad Spend), ROAS col, bold total
+    fmt.append(cell_fmt(ss_title_row - 1, ss_hdr_row, 0, 5,
                         {"backgroundColor": blue,
                          "textFormat": {"bold": True,
                                         "foregroundColor": {"red": 0, "green": 0, "blue": 0}}},
                         "userEnteredFormat(backgroundColor,textFormat)"))
-    fmt.append(cell_fmt(ss_first - 1, ss_last, 2, 5, money, "userEnteredFormat.numberFormat"))
-    fmt.append(cell_fmt(ss_first - 1, ss_last, 5, 6, roasf, "userEnteredFormat.numberFormat"))
+    fmt.append(cell_fmt(ss_first - 1, ss_last, 2, 4, money, "userEnteredFormat.numberFormat"))
+    fmt.append(cell_fmt(ss_first - 1, ss_last, 4, 5, roasf, "userEnteredFormat.numberFormat"))
     if sales:
-        fmt.append(cell_fmt(ss_last - 1, ss_last, 0, 6,
+        fmt.append(cell_fmt(ss_last - 1, ss_last, 0, 5,
                             {"backgroundColor": lightblue, "textFormat": {"bold": True}},
                             "userEnteredFormat(backgroundColor,textFormat)"))
     fmt += [
@@ -586,21 +589,11 @@ def main():
     creatives = fetch_creatives(cid_to_product, yday)
     print(f"  {len(creatives)} home-decor ads with spend on {yday}")
     try:
-        sales = store_sales(yday)
+        sales = fetch_portal_sales(yday)
     except Exception as e:  # noqa: BLE001 — never let sales break the report
-        print(f"  Shopify sales fetch failed: {e}", file=sys.stderr)
+        print(f"  portal sales fetch failed: {e}", file=sys.stderr)
         sales = None
-    if sales:
-        try:
-            spend_by_portal = fetch_portal_spend(yday)
-            for p in ["SM", "SML", "NBP", "TOTAL"]:
-                if isinstance(sales.get(p), dict):
-                    sp = spend_by_portal.get(p, 0.0)
-                    sales[p]["spend"] = sp
-                    sales[p]["roas"] = round(sales[p]["gross"] / sp, 2) if sp else 0.0
-        except Exception as e:  # noqa: BLE001
-            print(f"  portal spend fetch failed: {e}", file=sys.stderr)
-    print(f"  store sales: {'ok' if sales else 'unavailable (fills on GHA)'}")
+    print(f"  store sales: {'ok' if sales else 'unavailable'}")
     title, n, budget, spend, roas = write_sheet(by_product, yday, creatives, sales)
     print()
     print(f"  {n} home-decor camps  |  ₹{int(budget):,}/day budget  |  "
