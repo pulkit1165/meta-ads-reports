@@ -374,6 +374,11 @@ HTML = r"""<!doctype html>
           <div class="muted" id="hdFetched" style="font-size:12px;margin-bottom:8px"></div>
         </section>
         <div id="hdBody"></div>
+        <div id="hdModal" onclick="hdCloseModal(event)" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:9999;align-items:center;justify-content:center;flex-direction:column;gap:12px">
+          <div id="hdModalContent"></div>
+          <div id="hdModalCap" style="color:#fff;font-size:12px;max-width:90vw;text-align:center;opacity:.85"></div>
+          <button id="hdModalX" onclick="hdCloseModal(event)" style="position:absolute;top:16px;right:20px;background:#fff;color:#111;border:none;border-radius:6px;padding:6px 12px;cursor:pointer;font-weight:600">Close &#10005;</button>
+        </div>
       </div><!-- /view-homedecor -->
     </div>
   </div>
@@ -517,12 +522,30 @@ function hdAgo(ts){let s=Math.floor(Date.now()/1000-ts);if(s<0)s=0;if(s<60)retur
 function hdPick(){return (HOMEDECOR&&(HOMEDECOR[HDPRESET]||HOMEDECOR.yesterday||HOMEDECOR[Object.keys(HOMEDECOR)[0]]))||null;}
 function hdKpi(l,v,sub,tag){return '<div class="kpi"><div class="lbl">'+l+(tag?' <span class="tag">'+tag+'</span>':'')+'</div><div class="val">'+v+'</div><div class="sub">'+(sub||'')+'</div></div>';}
 function hdCard(ad){
-  return '<div style="width:120px;font-size:10px" class="muted">'+
-    '<div style="width:120px;height:120px;background:var(--bg2,#f0f2f7);border:1px solid var(--line,#e6e9f2);border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center">'+
-    (ad.thumbnail?'<img src="'+ad.thumbnail+'" loading="lazy" referrerpolicy="no-referrer" style="max-width:100%;max-height:100%">':'<span>no preview</span>')+'</div>'+
+  const clickable = ad.preview || ad.image || ad.thumbnail;
+  const hint = ad.preview ? 'Play creative (opens Meta ad preview)' : (ad.image?'View creative':'');
+  const media='<div onclick="hdOpen(this)" data-pv="'+hdEsc(ad.preview||'')+'" data-img="'+hdEsc(ad.image||ad.thumbnail||'')+'" data-name="'+hdEsc(ad.name)+'" title="'+hint+'" style="position:relative;width:120px;height:120px;background:var(--bg2,#f0f2f7);border:1px solid var(--line,#e6e9f2);border-radius:8px;overflow:hidden;display:flex;align-items:center;justify-content:center;'+(clickable?'cursor:pointer':'')+'">'+
+    (ad.thumbnail?'<img src="'+ad.thumbnail+'" loading="lazy" referrerpolicy="no-referrer" style="max-width:100%;max-height:100%">':'<span>no preview</span>')+
+    (ad.preview?'<span style="position:absolute;inset:0;display:flex;align-items:center;justify-content:center"><span style="width:34px;height:34px;border-radius:50%;background:rgba(0,0,0,.55);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px">&#9654;</span></span>':'')+
+    '</div>';
+  return '<div style="width:120px;font-size:10px" class="muted">'+media+
     '<div style="margin-top:4px;display:flex;justify-content:space-between;align-items:center"><span class="chip">'+hdEsc(ad.type||'—')+'</span>'+rg(ad.roas)+'</div>'+
     '<div style="margin-top:3px;color:var(--ink,#1f2937);overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+hdEsc(ad.name)+'">'+hdEsc(ad.name)+'</div>'+
     '<div style="margin-top:2px">'+fmtINR(ad.spend)+' &middot; '+fmtNum(ad.purchases)+' ord</div></div>';
+}
+function hdOpen(el){
+  const pv=el.getAttribute('data-pv'), img=el.getAttribute('data-img'), nm=el.getAttribute('data-name');
+  if(pv){ window.open(pv,'_blank','noopener'); return; }   // plays the rendered ad on Meta
+  const m=document.getElementById('hdModal'), c=document.getElementById('hdModalContent');
+  if(img){ c.innerHTML='<img src="'+img+'" referrerpolicy="no-referrer" style="max-width:92vw;max-height:80vh;border-radius:10px">'; }
+  else { c.innerHTML='<div style="color:#fff">No preview available for this ad.</div>'; }
+  document.getElementById('hdModalCap').textContent=nm||'';
+  m.style.display='flex';
+}
+function hdCloseModal(ev){
+  if(ev && ev.target && ev.target.id!=='hdModal' && ev.target.id!=='hdModalX') return;
+  document.getElementById('hdModal').style.display='none';
+  document.getElementById('hdModalContent').innerHTML='';   // stops video playback
 }
 function hdFmtCard(l,o){o=o||{};return '<div class="card" style="box-shadow:none;border-radius:10px"><div class="lbl muted" style="font-size:12px;font-weight:600">'+l+'</div><div style="font-size:20px;font-weight:750;margin:4px 0">'+fmtNum(o.count||0)+' ads</div><div style="font-size:12px" class="muted">'+fmtINR(o.spend||0)+' &middot; '+rg(o.roas)+'</div></div>';}
 function hdOverview(d){

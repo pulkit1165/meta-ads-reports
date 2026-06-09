@@ -188,12 +188,16 @@ def ad_insights(cid, since, until):
 
 
 def campaign_ads(cid):
-    """adset_id -> [ {id,name,thumbnail,status} ] for one campaign."""
+    """adset_id -> [ {id,name,status,thumbnail,image,preview} ] for one campaign.
+    `preview` is Meta's shareable ad-preview link (fb.me/...) — opens the fully
+    rendered ad so videos play; needs no token and no special permission (the
+    video `source` field is permission-gated for this app). `image` is the
+    full-res still used as a lightbox fallback for image-only ads."""
     out = {}
     try:
         d = meta_get(f"{GRAPH_API}/{cid}/ads",
                      {"fields": "id,name,adset_id,effective_status,"
-                                "creative{thumbnail_url,image_url}",
+                                "preview_shareable_link,creative{thumbnail_url,image_url}",
                       "limit": 200})
     except (MetaRateLimitError, Exception):  # noqa: BLE001
         return out
@@ -204,6 +208,8 @@ def campaign_ads(cid):
             "name": ad.get("name"),
             "status": ad.get("effective_status"),
             "thumbnail": cr.get("thumbnail_url") or cr.get("image_url"),
+            "image": cr.get("image_url") or cr.get("thumbnail_url"),
+            "preview": ad.get("preview_shareable_link"),
         })
     return out
 
@@ -259,8 +265,9 @@ def build_creative_report(all_ads):
     scaling.sort(key=lambda x: -x["spend"])
 
     def slim(a):
-        return {k: a[k] for k in ("id", "name", "product", "type", "thumbnail",
-                                  "spend", "roas", "purchases", "campaign")}
+        return {k: a.get(k) for k in ("id", "name", "product", "type", "thumbnail",
+                                      "image", "preview", "spend", "roas", "purchases",
+                                      "campaign")}
     return {
         "min_spend": MIN_AD_SPEND,
         "winning": [slim(a) for a in winning],
