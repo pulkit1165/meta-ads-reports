@@ -131,7 +131,7 @@ def open_sheet():
     return gspread.authorize(creds).open_by_key(SHEET_ID)
 
 
-def write_sheet(by_product, yday, creatives):
+def write_sheet(by_product, yday, creatives, sales=None):
     sh = open_sheet()
     title = yday
     titles = {w.title: w for w in sh.worksheets()}
@@ -173,7 +173,29 @@ def write_sheet(by_product, yday, creatives):
     values.append(["Total Budget (₹/day)", "Spend (yesterday ₹)", "Campaigns Running", "ROAS"])
     values.append([round(tot_budget), round(tot_spend), tot_camps, tot_roas])
     values.append([])
+    # ── Store sales from Meta (ad-attributed, all 3 stores, all categories) ──
+    ss_title_row = len(values) + 1
+    values.append([f"💰 STORE SALES ({yday_label}) — Meta ad-attributed (7d click), all 3 stores  ·  "
+                   f"Gross = purchase value · ROAS = Gross ÷ ad spend"])
+    ss_hdr_row = len(values) + 1
+    values.append(["Store", "Orders", "Gross Sales (₹)", "Ad Spend (₹)", "ROAS"])
+    ss_first = len(values) + 1
+    if sales:
+        for p in ["SM", "SML", "NBP"]:
+            d = sales.get(p) or {"orders": 0, "gross": 0, "spend": 0}
+            rr = round(d["gross"] / d["spend"], 2) if d["spend"] else 0.0
+            values.append([p, round(d["orders"]), round(d["gross"]), round(d["spend"]), rr])
+        t = sales["TOTAL"]
+        rr = round(t["gross"] / t["spend"], 2) if t["spend"] else 0.0
+        values.append(["TOTAL", round(t["orders"]), round(t["gross"]), round(t["spend"]), rr])
+    else:
+        values.append(["(sales unavailable)", "", "", "", ""])
+    ss_last = len(values)
+
+    values.append([])
+    tbl_hdr = len(values) + 1
     values.append(["#", "Product", "#Camps", "Budget (₹/day)", "Spend (₹)", "ROAS", "Verdict"])
+    tbl_first = len(values) + 1
     for i, (product, ncamps, budget, spend, roas) in enumerate(prod_rows, 1):
         verdict = hd._verdict(roas) if ncamps else "💤 Off"
         values.append([i, product, ncamps, round(budget), round(spend), roas, verdict])
@@ -223,8 +245,7 @@ def write_sheet(by_product, yday, creatives):
     # ── formatting ──
     sid = ws.id
     kpi_hdr, kpi_val = 4, 5
-    tbl_hdr = 7
-    tbl_first = tbl_hdr + 1
+    # tbl_hdr, tbl_first, ss_*, cr_*, total_row captured during building above.
     # Toned-down palette: plain grey headings only (kept green/red on top/worst).
     purple = {"red": 0.91, "green": 0.91, "blue": 0.91}        # header grey
     lightpurple = {"red": 0.96, "green": 0.96, "blue": 0.96}   # subtle row grey
@@ -263,6 +284,15 @@ def write_sheet(by_product, yday, creatives):
         cell_fmt(total_row - 1, total_row, 0, 7,
                  {"backgroundColor": lightpurple, "textFormat": {"bold": True}},
                  "userEnteredFormat(backgroundColor,textFormat)"),
+        # Store-sales block (5 cols): title+header grey, money cols, ROAS, bold total
+        cell_fmt(ss_title_row - 1, ss_hdr_row, 0, 5,
+                 {"backgroundColor": purple, "textFormat": {"bold": True, "foregroundColor": white}},
+                 "userEnteredFormat(backgroundColor,textFormat)"),
+        cell_fmt(ss_first - 1, ss_last, 2, 4, money, "userEnteredFormat.numberFormat"),
+        cell_fmt(ss_first - 1, ss_last, 4, 5, roasf, "userEnteredFormat.numberFormat"),
+        cell_fmt(ss_last - 1, ss_last, 0, 5,
+                 {"backgroundColor": lightpurple, "textFormat": {"bold": True}},
+                 "userEnteredFormat(backgroundColor,textFormat)"),
         cell_fmt(cr_title_row - 1, cr_hdr_row, 0, 6,
                  {"backgroundColor": purple, "textFormat": {"bold": True, "foregroundColor": white}},
                  "userEnteredFormat(backgroundColor,textFormat)"),
@@ -279,7 +309,7 @@ def write_sheet(by_product, yday, creatives):
                             "userEnteredFormat(backgroundColor,textFormat)"))
     fmt += [
         {"updateSheetProperties": {
-            "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": tbl_hdr}},
+            "properties": {"sheetId": sid, "gridProperties": {"frozenRowCount": kpi_val}},
             "fields": "gridProperties.frozenRowCount"}},
         {"autoResizeDimensions": {
             "dimensions": {"sheetId": sid, "dimension": "COLUMNS",
@@ -299,7 +329,13 @@ def main():
     print(f"Fetching ad-level creatives for {len(cid_to_product)} jewellery camps...")
     creatives = hd.fetch_creatives(cid_to_product, yday)
     print(f"  {len(creatives)} jewellery ads with spend on {yday}")
-    title, n, budget, spend, roas = write_sheet(by_product, yday, creatives)
+    try:
+        sales = hd.fetch_portal_sales(yday)
+    except Exception as e:  # noqa: BLE001
+        print(f"  portal sales fetch failed: {e}", file=sys.stderr)
+        sales = None
+    print(f"  store sales: {'ok' if sales else 'unavailable'}")
+    title, n, budget, spend, roas = write_sheet(by_product, yday, creatives, sales)
     print()
     print(f"  {n} jewellery camps  |  ₹{int(budget):,}/day budget  |  "
           f"₹{int(spend):,} spend ({yday})  |  {roas}x ROAS")
