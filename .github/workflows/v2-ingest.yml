@@ -128,6 +128,27 @@ jobs:
           mkdir -p out/v2
           python3 scripts/v2/build_dashboard.py --days 30 --out out/v2/categories.html
 
+      # Rebuild the Antariksh dashboard from the same fresh DB and ship it to its
+      # own Vercel project (antariksh-three.vercel.app). The HTML is NOT committed
+      # back to main (avoids hourly 4MB git bloat) — it's deployed straight to
+      # Vercel, mirroring how the Cloudflare deploy ships out/ without committing.
+      # Org/project IDs below are non-secret; the deploy gracefully no-ops until
+      # the VERCEL_TOKEN secret is added (so this is safe to merge immediately).
+      - name: Build + deploy Antariksh (Vercel)
+        if: ${{ success() }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_AocNAz8F008iWPSLVvar2Xb5
+          VERCEL_PROJECT_ID: prj_lxnCOpXro6HtrSWZSavX1dSkX1LM
+        run: |
+          python3 scripts/v2/build_antariksh_rollup.py --db state/ntn.db --days 120
+          python3 scripts/v2/build_antariksh.py --db state/ntn.db --days 90
+          if [ -z "$VERCEL_TOKEN" ]; then
+            echo "VERCEL_TOKEN secret not set — built antariksh/index.html but skipping Vercel deploy."
+            exit 0
+          fi
+          npx --yes vercel@latest deploy antariksh --prod --yes --token="$VERCEL_TOKEN"
+
       # Deploy straight from v2-ingest so the live dashboard is fresh the
       # moment the DB is. Previously only today-live deployed, and its cron
       # is flaky (~30% slot reliability + concurrency cancels), so the

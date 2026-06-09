@@ -270,3 +270,51 @@ CREATE TABLE IF NOT EXISTS ingest_log (
     PRIMARY KEY (job_name, target_date, started_at)
 );
 CREATE INDEX IF NOT EXISTS idx_il_status ON ingest_log(status, target_date);
+
+-- ── Antariksh dashboard rollups ──────────────────────────────────────────
+-- Pre-aggregated daily numbers so the Antariksh home page renders historical
+-- views instantly (calendar / category / creative split all read from here).
+-- Rebuilt by scripts/v2/build_antariksh_rollup.py.
+
+-- Meta side, at (date, portal, category, creative_type) grain. spend is REAL
+-- ground truth; meta_purchases/meta_revenue are pixel-attributed (used only
+-- for the per-category / per-creative split, which Shopify can't provide).
+CREATE TABLE IF NOT EXISTS antariksh_daily (
+    date           TEXT NOT NULL,
+    portal         TEXT NOT NULL,           -- SM / SML / NBP
+    category       TEXT NOT NULL,           -- canonical category, 'Other' if untagged
+    creative_type  TEXT NOT NULL,           -- Paras/Motion/Static/Partnership/AI/Wanda/Other
+    spend          REAL    DEFAULT 0,       -- Meta spend (real Rupees)
+    impressions    INTEGER DEFAULT 0,
+    clicks         INTEGER DEFAULT 0,
+    meta_purchases REAL    DEFAULT 0,       -- Meta-attributed orders (pixel)
+    meta_revenue   REAL    DEFAULT 0,       -- Meta-attributed revenue (pixel)
+    ad_count       INTEGER DEFAULT 0,       -- distinct ads with spend>0
+    PRIMARY KEY (date, portal, category, creative_type)
+);
+CREATE INDEX IF NOT EXISTS idx_antk_daily_date ON antariksh_daily(date);
+
+-- Shopify GROUND TRUTH per (date, portal): real orders + revenue + prepaid.
+-- prepaid_orders / cod_orders drive the Prepaid% block; delivered% needs a
+-- courier feed not yet ingested, so it has no column here yet.
+CREATE TABLE IF NOT EXISTS antariksh_shopify_daily (
+    date           TEXT NOT NULL,
+    portal         TEXT NOT NULL,
+    orders         INTEGER DEFAULT 0,       -- non-cancelled
+    revenue        REAL    DEFAULT 0,       -- SUM(total_price), non-cancelled
+    prepaid_orders INTEGER DEFAULT 0,       -- financial_status in (paid, partially_paid)
+    cod_orders     INTEGER DEFAULT 0,       -- financial_status = pending (COD proxy)
+    PRIMARY KEY (date, portal)
+);
+
+-- 5-minute live snapshot history: today's running Shopify sales/orders +
+-- hourly Meta spend. 'ALL' row = all portals combined. Powers the hero KPIs
+-- and the live sparkline; older rows kept for the intraday trend.
+CREATE TABLE IF NOT EXISTS antariksh_live (
+    ts      TEXT NOT NULL,                  -- ISO timestamp of the snapshot
+    portal  TEXT NOT NULL,                  -- SM / SML / NBP / ALL
+    sales   REAL    DEFAULT 0,              -- today's Shopify sales so far
+    orders  INTEGER DEFAULT 0,              -- today's order count so far
+    spend   REAL    DEFAULT 0,              -- today's Meta spend (hourly refresh)
+    PRIMARY KEY (ts, portal)
+);
