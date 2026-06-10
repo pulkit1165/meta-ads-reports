@@ -4,8 +4,9 @@ on:
   # Every 10 min — operator wants the dashboard as close to Meta/Shopify
   # reality as practical. Repo is public so Actions minutes are unlimited.
   # At 10 min the worst-case stale window is 10 min + ~5 min runtime =
-  # ~15 min, average ~5 min. concurrency:cancel-in-progress:false queues
-  # overlapping runs. Don't go below 10 min without a runtime audit —
+  # ~15 min, average ~5 min. Overlapping scheduled runs queue (see the
+  # concurrency block below); a manual run preempts them. Don't go below 10 min
+  # without a runtime audit —
   # ingests take 5-7 min so any tighter spacing risks back-to-back queue
   # buildup.
   schedule:
@@ -28,7 +29,13 @@ on:
 
 concurrency:
   group: v2-ingest
-  cancel-in-progress: false
+  # Data refreshes every 10 min via the schedule. EXCEPT when manually run:
+  # a workflow_dispatch run (e.g. the dashboard "Refresh data" button) cancels
+  # any in-progress scheduled run and starts immediately, so a manual refresh
+  # is never stuck behind / cancelled by the cron. Scheduled runs use
+  # cancel-in-progress=false, so they never interrupt a running manual refresh —
+  # they queue and the newest one runs after it finishes.
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
 
 permissions:
   contents: write
