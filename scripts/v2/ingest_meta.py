@@ -20,8 +20,14 @@ import json
 import os
 import sys
 import traceback
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+
+# Per-account Meta fetches run concurrently (Meta rate-limits are per-account, so
+# independent accounts don't compete). DB writes stay serial on the main thread
+# (single SQLite writer), so the result is byte-identical — only faster.
+_FETCH_WORKERS = 6
 
 # Add v2 dir to path so we can import _utils
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -462,27 +468,35 @@ def refresh_ad_effective_status(conn, portals):
     Independent of any date window — captures live status."""
     ensure_effective_status_column(conn)
     total = 0
-    for portal in portals:
-        for env_key, account_name in PORTAL_ACCOUNTS[portal]:
-            account_id = os.environ.get(env_key)
-            if not account_id:
-                continue
-            try:
-                rows = meta_paginate(
-                    f'{GRAPH_API}/{account_id}/ads',
-                    {'fields': 'id,effective_status', 'limit': 500},
-                )
-            except MetaRateLimitError as e:
-                print(f"   {account_name}: rate-limit on status fetch — {e}")
-                continue
-            for r in rows:
-                conn.execute(
-                    'UPDATE meta_ads_meta SET effective_status = ? '
-                    'WHERE ad_id = ?',
-                    (r.get('effective_status'), r.get('id'))
-                )
-            total += len(rows)
-            print(f"   {account_name}: {len(rows)} ad statuses")
+    accts = [(account_name, os.environ.get(env_key))
+             for portal in portals
+             for env_key, account_name in PORTAL_ACCOUNTS[portal]
+             if os.environ.get(env_key)]
+
+    def _fetch(acct):
+        name, aid = acct
+        try:
+            return name, meta_paginate(
+                f'{GRAPH_API}/{aid}/ads',
+                {'fields': 'id,effective_status', 'limit': 500}), None
+        except MetaRateLimitError as e:
+            return name, None, e
+
+    with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as ex:
+        results = list(ex.map(_fetch, accts))
+
+    for name, rows, err in results:        # serial DB writes (single writer)
+        if err is not None:
+            print(f"   {name}: rate-limit on status fetch — {err}")
+            continue
+        for r in rows:
+            conn.execute(
+                'UPDATE meta_ads_meta SET effective_status = ? '
+                'WHERE ad_id = ?',
+                (r.get('effective_status'), r.get('id'))
+            )
+        total += len(rows)
+        print(f"   {name}: {len(rows)} ad statuses")
     return total
 
 
@@ -495,53 +509,76 @@ def ingest_for_date(conn, date_str: str, portals: list, *,
 
     started = log_ingest_start(conn, 'ingest_meta', date_str)
     try:
+        # Accounts in original order; skip unset env vars (same as before).
+        accts = []
         for portal in portals:
-            print(f"\n→ Portal: {portal}")
             for env_key, account_name in PORTAL_ACCOUNTS[portal]:
                 account_id = os.environ.get(env_key)
                 if not account_id:
                     print(f"  ⚠️  {env_key} not set — skipping {account_name}")
                     continue
-                print(f"  · {account_name} ({account_id})")
+                accts.append((portal, account_name, account_id))
 
-                # 1. Campaign metadata (lightweight, always pull)
+        # PHASE 1 — fetch campaigns + ad insights concurrently (network only, no
+        # DB writes here). Mirrors the old per-account control flow exactly:
+        # a campaign rate-limit skips the whole account; an ad rate-limit skips
+        # ads + targeting for that account.
+        def _fetch(acct):
+            _portal, _name, _aid = acct
+            r = {'camps': None, 'camps_err': None, 'rows': None, 'rows_err': None}
+            try:
+                r['camps'] = fetch_campaigns(_aid)
+            except MetaRateLimitError as e:
+                r['camps_err'] = e
+                return r
+            if not campaigns_only:
                 try:
-                    camps = fetch_campaigns(account_id)
-                    n = upsert_campaigns(conn, portal, account_id, camps)
-                    total_camps += n
-                    print(f"     campaigns: {n} upserted")
+                    r['rows'] = fetch_ad_insights(_aid, date_str)
                 except MetaRateLimitError as e:
-                    print(f"     campaigns: rate limit unrecoverable — {e}")
-                    continue
+                    r['rows_err'] = e
+            return r
 
-                if campaigns_only:
-                    continue
+        with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as ex:
+            fetched = list(ex.map(_fetch, accts))
 
-                # 2. Ad-level insights for the date
-                try:
-                    rows = fetch_ad_insights(account_id, date_str)
-                    parsed = [
-                        parse_ad_row(r, portal, account_id, account_name, date_str)
-                        for r in rows if r.get('ad_id')
-                    ]
-                    n = upsert_ads_daily(conn, parsed)
-                    total_ads += n
-                    ad_ids_in_account = [p['ad_id'] for p in parsed]
-                    affected_ad_ids.update(ad_ids_in_account)
-                    print(f"     ads w/ spend on {date_str}: {n} upserted")
-                except MetaRateLimitError as e:
-                    print(f"     ads: rate limit unrecoverable — {e}")
-                    continue
+        # PHASE 2 — serial DB writes in original order (single SQLite writer).
+        for (portal, account_name, account_id), r in zip(accts, fetched):
+            print(f"  · {account_name} ({account_id})")
 
-                # 3. Ad-set targeting (audience inclusions/exclusions). Cached
-                # 7 days so we only call Meta for new or stale adsets.
-                try:
-                    fetch_adsets_targeting(conn, portal, account_id,
-                                           ad_ids_in_account)
-                except MetaRateLimitError as e:
-                    print(f"     adset targeting: rate limit — {e}")
-                except Exception as e:
-                    print(f"     adset targeting: error {e}")
+            # 1. Campaign metadata (lightweight, always pull)
+            if r['camps_err'] is not None:
+                print(f"     campaigns: rate limit unrecoverable — {r['camps_err']}")
+                continue
+            n = upsert_campaigns(conn, portal, account_id, r['camps'])
+            total_camps += n
+            print(f"     campaigns: {n} upserted")
+
+            if campaigns_only:
+                continue
+
+            # 2. Ad-level insights for the date
+            if r['rows_err'] is not None:
+                print(f"     ads: rate limit unrecoverable — {r['rows_err']}")
+                continue
+            parsed = [
+                parse_ad_row(rr, portal, account_id, account_name, date_str)
+                for rr in r['rows'] if rr.get('ad_id')
+            ]
+            n = upsert_ads_daily(conn, parsed)
+            total_ads += n
+            ad_ids_in_account = [p['ad_id'] for p in parsed]
+            affected_ad_ids.update(ad_ids_in_account)
+            print(f"     ads w/ spend on {date_str}: {n} upserted")
+
+            # 3. Ad-set targeting (audience inclusions/exclusions). Cached
+            # 7 days so we only call Meta for new or stale adsets.
+            try:
+                fetch_adsets_targeting(conn, portal, account_id,
+                                       ad_ids_in_account)
+            except MetaRateLimitError as e:
+                print(f"     adset targeting: rate limit — {e}")
+            except Exception as e:
+                print(f"     adset targeting: error {e}")
 
         # 3. Refresh lifetime ad metadata for all ads we touched
         if affected_ad_ids:
@@ -624,18 +661,23 @@ def main():
     print(f"\n══════ active-status snapshot ══════")
     snap_time = now_iso()
     snapshots = []
-    for portal in portals:
-        for env_key, account_name in PORTAL_ACCOUNTS[portal]:
-            account_id = os.environ.get(env_key)
-            if not account_id:
-                continue
-            print(f"  · {portal}/{account_name}")
-            counts = fetch_active_status_counts(account_id)
+    snap_accts = [(portal, account_name, os.environ.get(env_key))
+                  for portal in portals
+                  for env_key, account_name in PORTAL_ACCOUNTS[portal]
+                  if os.environ.get(env_key)]
+
+    def _snap(acct):
+        portal, name, aid = acct
+        return portal, aid, name, fetch_active_status_counts(aid)
+
+    with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as ex:
+        for portal, account_id, account_name, counts in ex.map(_snap, snap_accts):
             snapshots.append((
                 portal, account_id, account_name,
                 counts['active_camps'], counts['active_ads'],
             ))
-            print(f"     camps={counts['active_camps']:>4}  ads={counts['active_ads']:>5}")
+            print(f"  · {portal}/{account_name}: "
+                  f"camps={counts['active_camps']:>4}  ads={counts['active_ads']:>5}")
     if snapshots:
         n = upsert_active_snapshot(conn, snap_time, snapshots)
         tot_c = sum(s[3] for s in snapshots)
