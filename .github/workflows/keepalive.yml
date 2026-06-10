@@ -1,0 +1,51 @@
+name: keepalive (reliable 10-min dispatcher for v2-ingest)
+
+# Why this exists: GitHub's own "*/10" schedule is best-effort and heavily
+# throttled (observed firing only ~hourly, with multi-hour gaps). API-triggered
+# workflow_dispatch is NOT throttled, so this workflow guarantees a real ~10-min
+# cadence: it dispatches v2-ingest every 10 minutes (source=auto, so those ticks
+# queue and never preempt a running ingest), then RE-ARMS itself so the chain
+# continues without depending on the scheduler. A loose schedule backstop only
+# restarts the chain if it ever dies.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/30 * * * *"   # backstop only — restarts the chain if it broke
+
+permissions:
+  contents: read
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: true   # keep exactly one chain alive
+
+jobs:
+  tick:
+    runs-on: ubuntu-latest
+    timeout-minutes: 58
+    steps:
+      - name: Dispatch v2-ingest every 10 min, then re-arm
+        env:
+          PAT: ${{ secrets.KEEPALIVE_PAT }}
+          REPO: ${{ github.repository }}
+        run: |
+          if [ -z "$PAT" ]; then
+            echo "KEEPALIVE_PAT secret not set — cannot dispatch. Set it to a PAT with actions:write."
+            exit 0
+          fi
+          dispatch() {
+            curl -s -o /dev/null -w "%{http_code}" -X POST \
+              -H "Authorization: Bearer $PAT" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/$REPO/actions/workflows/$1/dispatches" \
+              -d "$2"
+          }
+          # 5 ticks x 10 min = ~50 min of coverage this run
+          for i in 1 2 3 4 5; do
+            code=$(dispatch v2-ingest.yml '{"ref":"main","inputs":{"source":"auto"}}')
+            echo "tick $i/5 -> v2-ingest dispatched (HTTP $code) at $(date -u +%H:%M:%SZ)"
+            if [ "$i" -lt 5 ]; then sleep 600; fi
+          done
+          # re-arm the chain so it continues without relying on GitHub's scheduler
+          code=$(dispatch keepalive.yml '{"ref":"main"}')
+          echo "re-armed keepalive (HTTP $code)"

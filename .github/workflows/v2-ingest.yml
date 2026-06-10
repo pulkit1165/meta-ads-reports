@@ -26,16 +26,23 @@ on:
         required: false
         type: boolean
         default: false
+      source:
+        description: "Internal: 'auto' = keepalive 10-min tick (queues, never preempts). Empty = human/manual refresh (preempts in-progress)."
+        required: false
+        default: ""
 
 concurrency:
   group: v2-ingest
-  # Data refreshes every 10 min via the schedule. EXCEPT when manually run:
-  # a workflow_dispatch run (e.g. the dashboard "Refresh data" button) cancels
-  # any in-progress scheduled run and starts immediately, so a manual refresh
-  # is never stuck behind / cancelled by the cron. Scheduled runs use
-  # cancel-in-progress=false, so they never interrupt a running manual refresh —
+  # Refreshes ~every 10 min, driven by the keepalive workflow (the GitHub
+  # 'schedule' cron above is unreliable/throttled, so keepalive dispatches this
+  # on a real 10-min cadence with source=auto). Behaviour:
+  #   • Human/manual refresh (dashboard "Refresh data" button or a bare
+  #     workflow_dispatch, source="") PREEMPTS any in-progress run — instant.
+  #   • Keepalive auto ticks (source=auto) and the schedule cron do NOT preempt;
+  #     they queue, so they never cancel a running ingest (which would make runs
+  #     longer than 10 min never finish). Older queued ticks supersede cleanly.
   # they queue and the newest one runs after it finishes.
-  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.source != 'auto' }}
 
 permissions:
   contents: write
