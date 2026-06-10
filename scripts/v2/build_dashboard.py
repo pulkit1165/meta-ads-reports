@@ -1325,6 +1325,8 @@ tr:hover td { background:#fafbff; }
             <th data-col="revenue" data-type="num">Revenue</th>
             <th data-col="orders" data-type="num">Orders</th>
             <th data-col="roas" data-type="num">ROAS</th>
+            <th data-col="profit_pct" data-type="num" title="Modelled profit margin from this row's ROAS using the operator's anchors (breakeven 1.8x, 10% @ 2.2x, 20% @ 2.6x): profit% = 25·ROAS − 45. NOTE: ROAS here is Meta-pixel attributed, so treat as optimistic vs Shopify reality.">Profit %</th>
+            <th data-col="roas20_gap" data-type="num" title="ROAS needed for 20% profit = 2.6x. ✓ = product clears the bar, ✗ = below it. Sorts by distance from 2.6x.">20% Profit ROAS</th>
             <th data-col="hit_15" data-type="num">≥1.5x</th>
             <th data-col="hit_20" data-type="num">≥2.0x</th>
             <th data-col="hit_25" data-type="num">≥2.5x</th>
@@ -3347,6 +3349,12 @@ function renderProductsPage(rows) {
     const adIds = [...(adIdsByProd.get(p.key) || new Map()).keys()];
     p.category = adIds.length ? (adCategory.get(adIds[0]) || '') : '';
     p.orders = p.purchases;
+    // Operator's Antariksh profit model (anchors: breakeven 1.8x, 10% @ 2.2x,
+    // 20% @ 2.6x) → profit% = 25·ROAS − 45. ROAS here is pixel-attributed, so
+    // these read optimistic vs Shopify reality. roas20_gap = distance from the
+    // 2.6x ROAS needed for 20% profit (used for sorting the target column).
+    p.profit_pct = 25 * (p.roas || 0) - 45;
+    p.roas20_gap = (p.roas || 0) - 2.6;
     ROASBKT.forEach(thr => {
       const key = 'hit_' + String(thr).replace('.', '').padEnd(2, '0').slice(0, 2);
       const hit = launched.filter(r => r >= thr).length;
@@ -3364,6 +3372,14 @@ function renderProductsPage(rows) {
     const cls = v >= 50 ? 'sr-hi' : v >= 25 ? 'sr-med' : v >= 10 ? 'sr-low' : 'sr-0';
     return `<span class="${cls}">${v.toFixed(0)}%</span><br><span class="subtle">${r[key + '_h']}/${r[key + '_n']}</span>`;
   }
+  function profitCells(p) {
+    const pp = p.profit_pct || 0;
+    const pcls = pp >= 20 ? 'sr-hi' : pp >= 10 ? 'sr-med' : pp >= 0 ? 'sr-low' : 'sr-0';
+    const profCell = `<span class="${pcls}">${pp >= 0 ? '+' : ''}${pp.toFixed(0)}%</span>`;
+    const ok = (p.roas || 0) >= 2.6;
+    const tgtCell = `<span class="${ok ? 'sr-hi' : 'sr-0'}">2.6× ${ok ? '✓' : '✗'}</span>`;
+    return `<td>${profCell}</td><td>${tgtCell}</td>`;
+  }
   document.querySelector('#tbl-products tbody').innerHTML = sorted.map(p =>
     `<tr>
       <td><strong class="cell-name" title="${p.product}">${p.product}</strong></td>
@@ -3371,10 +3387,11 @@ function renderProductsPage(rows) {
       <td>${fmt.num(p.active_ads)}</td><td>${fmt.inr(p.spend)}</td>
       <td>${fmt.inr(p.revenue)}</td><td>${fmt.num(p.orders)}</td>
       <td>${fmt.roas(p.roas)}</td>
+      ${profitCells(p)}
       <td>${rateCell(p, 1.5)}</td><td>${rateCell(p, 2.0)}</td><td>${rateCell(p, 2.5)}</td>
       <td>${rateCell(p, 3.0)}</td><td>${rateCell(p, 4.0)}</td><td>${rateCell(p, 5.0)}</td>
     </tr>`
-  ).join('') || '<tr><td colspan="13" class="empty">No data.</td></tr>';
+  ).join('') || '<tr><td colspan="15" class="empty">No data.</td></tr>';
 }
 
 function renderProdSuccessPage(rows) {

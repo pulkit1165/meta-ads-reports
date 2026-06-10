@@ -301,6 +301,16 @@ HTML = r"""<!doctype html>
   .footbanner{background:#0f1830;color:#cdd5e3;border-radius:14px;padding:14px 20px;margin:6px 0 30px;font-size:13.5px;font-weight:700;letter-spacing:.02em;text-align:center}
   .footbanner b{color:#7fd3a6}
 
+  .livebar{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 18px;margin:0 0 18px;box-shadow:var(--shadow)}
+  .livebar .lh{font-size:12px;font-weight:800;letter-spacing:.12em;display:flex;align-items:center;gap:8px;color:var(--bad);margin-bottom:10px}
+  .livebar .lh .led{width:9px;height:9px;border-radius:50%;background:var(--bad);box-shadow:0 0 0 0 rgba(214,59,59,.55);animation:livepulse 1.8s infinite}
+  .livebar .lh small{color:var(--muted);font-weight:600;letter-spacing:0;text-transform:none}
+  .livekpis{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}
+  .livekpis .lk .lkl{font-size:11.5px;color:var(--muted);font-weight:600}
+  .livekpis .lk .lkv{font-size:25px;font-weight:800;margin-top:3px;letter-spacing:-.01em}
+  @keyframes livepulse{0%{box-shadow:0 0 0 0 rgba(214,59,59,.5)}70%{box-shadow:0 0 0 7px rgba(214,59,59,0)}100%{box-shadow:0 0 0 0 rgba(214,59,59,0)}}
+  @media(max-width:720px){.livekpis{grid-template-columns:repeat(2,1fr)}}
+
   .wrap{padding:22px;max-width:1240px;width:100%}
   .section{margin-bottom:24px;scroll-margin-top:80px}
   .section>h2{font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:0 0 12px;display:flex;align-items:center;gap:8px}
@@ -397,6 +407,9 @@ HTML = r"""<!doctype html>
       </div>
 
       <div class="note" id="stalenote" style="display:none"></div>
+
+      <!-- LIVE TODAY (latest embedded day, refreshes each build) -->
+      <div class="livebar" id="liveBar" style="display:none"></div>
 
       <!-- 1. COMPANY / CATEGORY OVERVIEW -->
       <section class="section" id="r1">
@@ -573,6 +586,7 @@ let STATE = {
 // ---------- profit model (ROI -> Profit%) ----------
 function lineParams(){const a=STATE.anchors; const slope=10/((a.p20)-(a.p10)||0.4); const intercept=10-slope*a.p10; return {slope,intercept};}
 function profitPct(roi){const {slope,intercept}=lineParams(); return slope*roi+intercept;}
+function roiForProfit(p){const {slope,intercept}=lineParams(); return slope!==0?(p-intercept)/slope:0;}
 function breakevenROI(){const {slope,intercept}=lineParams(); return slope!==0? -intercept/slope : 1.8;}
 function statusOf(roi){const a=STATE.anchors, be=breakevenROI();
   if(roi>=a.p20) return {k:'scale',label:'SCALE'};
@@ -627,6 +641,25 @@ function portalStats(p,cat){
 const PORTALS = P.portals.filter(p=>p!=='ALL');
 const prodList = () => PRODS.filter(p=>!curCat()||p.c===curCat());
 
+// ---------- live today (restores the original "Live KPIs" hero) ----------
+function renderLive(){
+  const bar=document.getElementById('liveBar');
+  if(curCat()){ bar.style.display='none'; return; }   // company home only
+  const last=P.maxDate, isToday=last===P.today;
+  let sales=0,orders=0,spend=0;
+  P.shop.forEach(r=>{if(r.d===last&&inPortal(r.p)){sales+=r.rev;orders+=r.o;}});
+  P.adDays.forEach(r=>{if(r.d===last&&inPortal(r.p)){spend+=r.s;}});
+  const roas=spend>0?sales/spend:0;
+  const scope=(isToday?'today '+last+' (so far)':'latest day '+last)+(STATE.portal!=='ALL'?' · '+STATE.portal:'');
+  bar.style.display='';
+  bar.innerHTML='<div class="lh"><span class="led"></span> LIVE SALES <small>— '+scope+'</small></div>'+
+    '<div class="livekpis">'+
+      '<div class="lk"><div class="lkl">Sales (Shopify)</div><div class="lkv">'+fmtINR(sales)+'</div></div>'+
+      '<div class="lk"><div class="lkl">Orders</div><div class="lkv">'+fmtNum(orders)+'</div></div>'+
+      '<div class="lk"><div class="lkl">ROAS</div><div class="lkv"><span class="rg '+roiClass(roas)+'">'+roas.toFixed(2)+'×</span></div></div>'+
+      '<div class="lk"><div class="lkl">Ad spend</div><div class="lkv">'+fmtINR(spend)+'</div></div>'+
+    '</div>';
+}
 // ---------- 1. overview ----------
 function renderOverview(){
   const cat=curCat(); const wrap=document.getElementById('ovKpis');
@@ -981,7 +1014,8 @@ function hdSetTarget(el){const c=hdCfgLoad(),k=el.getAttribute('data-k');const v
   c[k]=c[k]||{}; if(v==='')delete c[k].target; else c[k].target=+v||0; hdCfgSave(c);hdRender();}
 function hdAllProducts(d){
   const cfg=hdCfgLoad();
-  const ps=(d.products||[]).slice().sort((a,b)=>(b.budget||0)-(a.budget||0));
+  const ps=(d.products||[]).slice().sort((a,b)=>(b.spend||0)-(a.spend||0));
+  const t20=roiForProfit(20);
   const buckets={new:{cnt:0,bud:0,tgt:0},old:{cnt:0,bud:0,tgt:0},clearance:{cnt:0,bud:0,tgt:0}};
   const rowsData=ps.map(p=>{const k=hdKey(p.product),saved=cfg[k]||{};
     const cls=saved.cls||hdDefaultClass(p);
@@ -994,16 +1028,19 @@ function hdAllProducts(d){
   h+='</div></section>';
   h+='<section class="section"><div class="card"><h3>All products — stage, class &amp; target budget</h3>'+
      '<div class="csub">Tag each product New / Old / Stock Clearance and set a target daily budget. Saved on this device. Maturity stage is estimated from age + ROAS.</div>'+
-     '<table><thead><tr><th>Product</th><th>Maturity stage</th><th>Class</th><th>Spend</th><th>Budget/day now</th><th>Target budget/day</th></tr></thead><tbody>';
+     '<table><thead><tr><th>Product</th><th>Maturity stage</th><th>Class</th><th>Spend</th><th>Profit ratio</th><th title="ROAS needed for 20% profit">20% ROAS</th><th>Budget/day now</th><th>Target budget/day</th></tr></thead><tbody>';
   rowsData.forEach(r=>{const p=r.p,st=hdStage(p);
     const opt=(v,l)=>'<option value="'+v+'"'+(r.cls===v?' selected':'')+'>'+l+'</option>';
     h+='<tr><td><b>'+hdEsc(p.product)+'</b>'+(p.days_running!=null?' <span class="muted" style="font-size:11px">'+fmtNum(p.days_running)+'d</span>':'')+'</td>'+
       '<td><span style="color:'+st[1]+';font-weight:600">'+st[0]+'</span></td>'+
       '<td><select data-k="'+hdEsc(r.k)+'" onchange="hdSetClass(this)" style="font-size:12px;padding:3px 6px;border:1px solid var(--line,#e6e9f2);border-radius:6px;background:var(--card,#fff);color:inherit">'+
         opt('new','New')+opt('old','Old')+opt('clearance','Stock Clearance')+'</select></td>'+
-      '<td>'+fmtINR(p.spend)+'</td><td>'+fmtINR(p.budget)+'</td>'+
+      '<td>'+fmtINR(p.spend)+'</td>'+
+      '<td>'+rg(p.roas)+'</td>'+
+      '<td class="muted">'+t20.toFixed(2)+'×</td>'+
+      '<td>'+fmtINR(p.budget)+'</td>'+
       '<td><input type="number" min="0" step="100" value="'+(r.tgt===''?'':r.tgt)+'" data-k="'+hdEsc(r.k)+'" onchange="hdSetTarget(this)" placeholder="set" style="width:110px;font-size:12px;padding:4px 6px;border:1px solid var(--line,#e6e9f2);border-radius:6px;background:var(--card,#fff);color:inherit"></td></tr>';});
-  if(!ps.length) h+='<tr><td colspan="6" class="muted">No active products in this category.</td></tr>';
+  if(!ps.length) h+='<tr><td colspan="8" class="muted">No active products in this category.</td></tr>';
   h+='</tbody></table></div></section>';
   return h;
 }
@@ -1058,7 +1095,7 @@ setInterval(()=>{ if(STATE.view==='homedecor'){ const d=hdPick(), fp=document.ge
 function renderAll(){
   if(STATE.view==='homedecor'){ hdRender(); return; }
   setTitles(); renderBanner(); renderChrome();
-  renderOverview(); renderCatBudget(); renderAllocation();
+  renderLive(); renderOverview(); renderCatBudget(); renderAllocation();
   renderContribution(); renderProfitability(); renderBudgetInHand();
   renderStock(); renderLifecycle(); renderDecisionBoard();
 }
