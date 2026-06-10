@@ -311,6 +311,29 @@ HTML = r"""<!doctype html>
   @keyframes livepulse{0%{box-shadow:0 0 0 0 rgba(214,59,59,.5)}70%{box-shadow:0 0 0 7px rgba(214,59,59,0)}100%{box-shadow:0 0 0 0 rgba(214,59,59,0)}}
   @media(max-width:720px){.livekpis{grid-template-columns:repeat(2,1fr)}}
 
+  .dutybanner{overflow:hidden;background:linear-gradient(90deg,#eef2ff,#f0fdf4);border:1px solid var(--line);border-radius:12px;padding:9px 0;margin:0 0 14px;box-shadow:var(--shadow)}
+  .dutytrack{display:inline-flex;white-space:nowrap;animation:dutyscroll 34s linear infinite;will-change:transform}
+  .dutybanner:hover .dutytrack{animation-play-state:paused}
+  .duty{padding:0 4px;font-weight:700;font-size:12.5px;color:var(--ink)}
+  .duty b{color:var(--bad)}
+  .duty .sep{color:var(--blue);margin:0 6px;font-weight:900}
+  @keyframes dutyscroll{from{transform:translateX(0)}to{transform:translateX(-50%)}}
+
+  .fbox{background:linear-gradient(90deg,#fff7ed,#eff6ff);border:1px solid var(--line);border-left:4px solid var(--blue);border-radius:10px;padding:11px 14px;margin:0 0 14px;font-size:13px;line-height:1.5}
+  .fbox b{color:var(--blue)}
+  .crq{display:grid;grid-template-columns:repeat(3,1fr);gap:14px}
+  .crq .cb{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;box-shadow:var(--shadow)}
+  .crq .cb h4{margin:0;font-size:14.5px;display:flex;align-items:center;gap:7px}
+  .crq .cb .goal{font-size:11px;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.05em;margin:3px 0 10px}
+  .crq .row{display:flex;justify-content:space-between;align-items:center;padding:5px 0;border-bottom:1px dashed var(--line);font-size:13px}
+  .crq .row:last-of-type{border-bottom:0}
+  .crq .row .k{color:var(--muted)}
+  .crq input.tin{width:98px;font-size:13px;padding:4px 6px;border:1px solid var(--line);border-radius:6px;background:var(--panel);color:inherit;text-align:right}
+  .crq .cr{margin-top:10px;text-align:center;background:#f7f9ff;border:1px solid var(--line);border-radius:10px;padding:10px}
+  .crq .cr .n{font-size:30px;font-weight:800;line-height:1}
+  .crq .cr .l{font-size:10.5px;color:var(--muted);font-weight:600;margin-top:3px}
+  @media(max-width:760px){.crq{grid-template-columns:1fr}}
+
   .wrap{padding:22px;max-width:1240px;width:100%}
   .section{margin-bottom:24px;scroll-margin-top:80px}
   .section>h2{font-size:13px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:0 0 12px;display:flex;align-items:center;gap:8px}
@@ -535,6 +558,7 @@ HTML = r"""<!doctype html>
 
     <!-- HOME DECOR (rich module: live from Meta, embedded at build) -->
     <div id="view-homedecor" class="wrap" style="display:none">
+      <div class="dutybanner"><div class="dutytrack" id="dutyTrack"></div></div>
       <section class="section">
         <h2><span class="n" id="hdIcon">&#128302;</span> <span id="hdName">Crystal Home Decor</span> <span class="muted" id="hdScope" style="text-transform:none;letter-spacing:0;font-size:13px"></span></h2>
         <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin:8px 0 6px">
@@ -862,10 +886,10 @@ function setTitles(){
     :'Company<small>profit-first view, all categories</small>';
 }
 // ===================== HOME DECOR MODULE (embedded Meta payload) =====================
-let HDPRESET='yesterday', HDTAB='overview', HDCAT='Crystal Home Decor';
+let HDPRESET='yesterday', HDTAB='overview', HDCAT='Crystal Home Decor', HDPUSHSEL=null;
 const roasClass = roiClass;
 const HD_PRESET_LABELS={today:'Today',yesterday:'Yesterday',last_7d:'Last 7D',last_30d:'Last 30D'};
-const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['products','All Products'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability'],['closed','Closed Budget']];
+const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['products','All Products'],['plan','Creative Plan'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability'],['closed','Closed Budget']];
 function hdEsc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function rg(r){r=r||0;return '<span class="rg '+roasClass(r)+'">'+r.toFixed(2)+'×</span>';}
 function hdAgo(ts){let s=Math.floor(Date.now()/1000-ts);if(s<0)s=0;if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
@@ -1044,6 +1068,78 @@ function hdAllProducts(d){
   h+='</tbody></table></div></section>';
   return h;
 }
+// ---------- Creative Plan: requirement chart + push calendar ----------
+const CRE_GROWTH=7500, CRE_MAINT=15000;
+function hdPlanLoad(){try{return JSON.parse(localStorage.getItem('hdCreativePlan')||'{}')||{};}catch(e){return {};}}
+function hdPlanSave(c){try{localStorage.setItem('hdCreativePlan',JSON.stringify(c));}catch(e){}}
+function hdPushLoad(){try{return JSON.parse(localStorage.getItem('hdPushPlan')||'{}')||{};}catch(e){return {};}}
+function hdPushSave(c){try{localStorage.setItem('hdPushPlan',JSON.stringify(c));}catch(e){}}
+function hdCreativeReq(cur,tgt){const g=Math.max(0,(tgt||0)-(cur||0))/CRE_GROWTH, m=(cur||0)/CRE_MAINT; return {g:g,m:m,total:Math.ceil(g+m)};}
+function hdBucketClasses(d){const cfg=hdCfgLoad(),b={new:[],old:[],clearance:[]};
+  (d.products||[]).forEach(p=>{const k=hdKey(p.product),cls=(cfg[k]&&cfg[k].cls)||hdDefaultClass(p);(b[cls]||b.old).push(p);});
+  return b;}
+function hdPlanSetTarget(el){const c=hdPlanLoad(),k=HDCAT+'::'+el.getAttribute('data-cls'),v=el.value.trim();
+  c[k]=c[k]||{}; if(v==='')delete c[k].target; else c[k].target=+v||0; hdPlanSave(c); hdRender();}
+function hdSign(n){return (n>0?'+':n<0?'&minus;':'')+fmtINR(Math.abs(n));}
+function hdPlan(d){
+  const planCfg=hdPlanLoad(), b=hdBucketClasses(d);
+  const meta=[['new','New products','Growth','#2f6bff'],['old','Old products','Maintenance','#0c9b5b'],['clearance','Stock clearance','Clearance','#d23b3b']];
+  let h='<section class="section">';
+  h+='<div class="fbox">&#129513; <b>Creatives needed = (Target &minus; Current) &divide; ₹7,500</b> (growth) <b>+ Current &divide; ₹15,000</b> (maintenance). '+
+     'Current budget is pulled live from Meta; set a Target and the requirement updates instantly.</div>';
+  h+='<div class="crq">';
+  let tot={cur:0,tgt:0,cre:0};
+  meta.forEach(m=>{const arr=b[m[0]]||[];
+    const cur=arr.reduce((s,p)=>s+(p.budget||0),0);
+    const k=HDCAT+'::'+m[0], saved=planCfg[k]||{};
+    const tgt=(saved.target!=null)?saved.target:cur;
+    const chg=tgt-cur, req=hdCreativeReq(cur,tgt);
+    tot.cur+=cur; tot.tgt+=tgt; tot.cre+=req.total;
+    h+='<div class="cb"><h4><span style="color:'+m[3]+'">&#9679;</span> '+m[1]+'</h4><div class="goal">'+m[2]+' &middot; '+arr.length+' products</div>'+
+       '<div class="row"><span class="k">Current (Meta)</span><span>'+fmtINR(cur)+'/day</span></div>'+
+       '<div class="row"><span class="k">Target /day</span><span><input class="tin" type="number" min="0" step="500" value="'+((saved.target!=null)?saved.target:'')+'" placeholder="'+Math.round(cur)+'" data-cls="'+m[0]+'" onchange="hdPlanSetTarget(this)"></span></div>'+
+       '<div class="row"><span class="k">Change tomorrow</span><span style="font-weight:700;color:'+(chg>0?'var(--good)':chg<0?'var(--bad)':'var(--muted)')+'">'+hdSign(chg)+'</span></div>'+
+       '<div class="cr"><div class="n">'+req.total+'</div><div class="l">creatives needed<br>(<span style="color:#2f6bff">'+req.g.toFixed(1)+' growth</span> + <span style="color:#0c9b5b">'+req.m.toFixed(1)+' maint</span>)</div></div>'+
+       '</div>';});
+  h+='</div>';
+  h+='<div class="muted" style="font-size:12px;margin-top:10px">Category total &mdash; current '+fmtINR(tot.cur)+'/day &middot; target '+fmtINR(tot.tgt)+'/day &middot; <b style="color:var(--ink)">'+tot.cre+'</b> creatives to brief.</div>';
+  h+='</section>';
+  h+=hdPushCal(d);
+  return h;
+}
+function hdPushCal(d){
+  const all=hdPushLoad(), cat=all[HDCAT]||{};
+  const dates=Object.keys(cat).filter(dt=>(cat[dt]||[]).length).sort();
+  const today=P.today, next=dates.find(dt=>dt>=today)||dates[dates.length-1]||null;
+  let sel=HDPUSHSEL; if(!sel||!cat[sel]) sel=next;
+  const prodOpts=(d.products||[]).map(p=>'<option value="'+hdEsc(p.product)+'">'+hdEsc(p.product)+'</option>').join('');
+  const inp='font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:inherit';
+  let h='<section class="section"><div class="card"><h3>&#128197; Push Calendar</h3>'+
+        '<div class="csub">Plan the next product push for this category &mdash; pick a date, add the products and their push budget. Saved on this device.</div>';
+  h+='<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
+     '<div><div class="muted" style="font-size:11px">Next push</div><div style="font-size:19px;font-weight:800">'+(next||'&mdash;')+'</div></div>';
+  if(dates.length) h+='<div><div class="muted" style="font-size:11px">View date</div><select onchange="hdPushSelDate(this)" style="'+inp+'">'+dates.map(dt=>'<option value="'+dt+'"'+(dt===sel?' selected':'')+'>'+dt+(dt===next?' (next)':'')+'</option>').join('')+'</select></div>';
+  h+='</div>';
+  h+='<table><thead><tr><th style="text-align:left">Product</th><th>Push budget/day</th><th></th></tr></thead><tbody>';
+  const list=(sel&&cat[sel])||[];
+  if(list.length) list.forEach((e,i)=>{h+='<tr><td style="text-align:left">'+hdEsc(e.p)+'</td><td>'+fmtINR(e.b)+'</td><td><button onclick="hdPushDel(\''+sel+'\','+i+')" title="Remove" style="background:none;border:0;color:var(--bad);cursor:pointer;font-size:13px">&#10005;</button></td></tr>';});
+  else h+='<tr><td colspan="3" class="muted">No products scheduled'+(sel?(' for '+sel):'')+'.</td></tr>';
+  h+='</tbody></table>';
+  h+='<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">'+
+     '<div><div class="muted" style="font-size:11px">Product</div><select id="hdPushProd" style="'+inp+';max-width:210px">'+prodOpts+'</select></div>'+
+     '<div><div class="muted" style="font-size:11px">Push budget/day</div><input id="hdPushBudget" type="number" min="0" step="500" placeholder="e.g. 5000" style="'+inp+';width:130px"></div>'+
+     '<div><div class="muted" style="font-size:11px">Date</div><input id="hdPushDate" type="date" value="'+(sel||today)+'" style="'+inp+'"></div>'+
+     '<button onclick="hdPushAdd()" style="background:#6366f1;color:#fff;border:none;border-radius:7px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">+ Add</button>'+
+     '</div></div></section>';
+  return h;
+}
+function hdPushSelDate(el){HDPUSHSEL=el.value;hdRender();}
+function hdPushAdd(){const prod=document.getElementById('hdPushProd'),bud=document.getElementById('hdPushBudget'),dt=document.getElementById('hdPushDate');
+  const p=prod?prod.value:'',b=+((bud&&bud.value)||0),date=dt?dt.value:'';
+  if(!p||!date||!(b>0)){alert('Pick a product, a budget and a date.');return;}
+  const all=hdPushLoad(); all[HDCAT]=all[HDCAT]||{}; all[HDCAT][date]=all[HDCAT][date]||[]; all[HDCAT][date].push({p:p,b:b});
+  hdPushSave(all); HDPUSHSEL=date; hdRender();}
+function hdPushDel(date,i){const all=hdPushLoad(); if(all[HDCAT]&&all[HDCAT][date]){all[HDCAT][date].splice(i,1); if(!all[HDCAT][date].length)delete all[HDCAT][date];} hdPushSave(all); hdRender();}
 function hdProfit(d){
   const ps=(d.products||[]).map(p=>{const profit=(p.revenue||0)-(p.spend||0);return Object.assign({},p,{profit:profit});}).sort((a,b)=>b.profit-a.profit);
   const tRev=ps.reduce((s,p)=>s+(p.revenue||0),0), tSpend=ps.reduce((s,p)=>s+(p.spend||0),0), tProfit=tRev-tSpend;
@@ -1076,7 +1172,10 @@ function hdClosed(d){
   h+='</tbody></table></div></section>';
   return h;
 }
+const HD_DUTIES=['<span style="font-weight:900">&#128064; Observe data</span> — <b>not</b> make reports','Create listings','Work on new launches','Check del%','Weekly customer-care audits','Make relevant creatives','Always work to TAT'];
+function hdDutyHTML(){return HD_DUTIES.map(x=>'<span class="duty">'+x+'<span class="sep">&bull;</span></span>').join('');}
 function hdRender(){
+  const dt=document.getElementById('dutyTrack'); if(dt&&!dt.dataset.f){dt.innerHTML=hdDutyHTML()+hdDutyHTML();dt.dataset.f='1';}
   document.getElementById('hdTabs').innerHTML=HD_TABS.map(t=>'<button data-t="'+t[0]+'"'+(t[0]===HDTAB?' class="on"':'')+'>'+t[1]+'</button>').join('');
   [...document.querySelectorAll('#hdTabs button')].forEach(b=>b.onclick=()=>{HDTAB=b.dataset.t;hdRender();});
   const cd=hdCatData(); const presets=Object.keys(HD_PRESET_LABELS).filter(p=>cd&&cd[p]);
@@ -1087,7 +1186,7 @@ function hdRender(){
     body.innerHTML='<section class="section"><div class="card"><div class="muted">'+hdEsc(HDCAT)+' data is not embedded in this build (no Meta token at build time). It will populate on the next scheduled build.</div></div></section>'; return; }
   document.getElementById('hdScope').textContent='('+(d.since||'')+' → '+(d.until||'')+')';
   fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b>'+(d.fetched_ts?' ('+hdAgo(d.fetched_ts)+')':'');
-  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='products'?hdAllProducts(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : HDTAB==='closed'?hdClosed(d) : hdCreative(d);
+  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='products'?hdAllProducts(d) : HDTAB==='plan'?hdPlan(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : HDTAB==='closed'?hdClosed(d) : hdCreative(d);
 }
 setInterval(()=>{ if(STATE.view==='homedecor'){ const d=hdPick(), fp=document.getElementById('hdFetched'); if(d&&d.fetched_ts&&fp) fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b> ('+hdAgo(d.fetched_ts)+')'; } }, 60000);
 // ===================== /HOME DECOR MODULE =====================
