@@ -3011,7 +3011,12 @@ function renderNewToday() {
 // Render the new-ads card for one selected date.
 function renderNewTodayFor(date) {
   const data = PAYLOAD.new_today || { camps: [], today: '' };
-  const camps = (data.camps || []).filter(c => c.date === date);
+  // Respect the global Category + Portal filter chips so the Nayi Ads
+  // card narrows in sync with the rest of the dashboard. Operator wants
+  // to pick "Skin" at the top and see only Skin nayi ads here too.
+  let camps = (data.camps || []).filter(c => c.date === date);
+  if (F.categories.size) camps = camps.filter(c => F.categories.has(c.category));
+  if (F.portals.size)    camps = camps.filter(c => F.portals.has(c.portal));
   const totalSpent  = camps.reduce((s, c) => s + (c.spent_today || 0), 0);
   const totalPushed = camps.reduce((s, c) => s + (c.budget_val || 0), 0);
 
