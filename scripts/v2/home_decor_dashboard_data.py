@@ -22,8 +22,15 @@ import json
 import os
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
+
+# Per-account Meta fetches run concurrently (Meta rate-limits are per-account, so
+# independent accounts don't compete). Modest cap keeps app-level limits in check;
+# meta_get's own backoff/retry still guarantees completeness. Output is identical
+# to the sequential version — only faster.
+_FETCH_WORKERS = 6
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _utils import GRAPH_API, IST, PORTAL_ACCOUNTS, meta_get, meta_paginate, MetaRateLimitError  # noqa: E402
@@ -153,28 +160,30 @@ def _list_campaigns(status):
     """All non-excluded campaigns for an effective_status, every account, cached."""
     if status in _CAMP_LIST_CACHE:
         return _CAMP_LIST_CACHE[status]
-    out = []
     fields = ("id,name,daily_budget,lifetime_budget,start_time,stop_time,"
               "created_time,updated_time,effective_status,"
               "adsets.limit(100){id,name,effective_status,daily_budget,lifetime_budget}")
-    for portal, accts in PORTAL_ACCOUNTS.items():
-        for env_var, friendly in accts:
-            if env_var in REPORT_EXCLUDE_ACCOUNTS:
-                continue
-            aid = os.environ.get(env_var)
-            if not aid:
-                continue
-            try:
-                rows = meta_paginate(
-                    f"{GRAPH_API}/{aid}/campaigns",
-                    {"fields": fields, "effective_status": f'["{status}"]', "limit": 200})
-            except (MetaRateLimitError, Exception) as e:  # noqa: BLE001
-                print(f"  x list {friendly} {status}: {e}", file=sys.stderr)
-                continue
+    accounts = [(portal, friendly, os.environ.get(env_var))
+                for portal, accts in PORTAL_ACCOUNTS.items()
+                for env_var, friendly in accts
+                if env_var not in REPORT_EXCLUDE_ACCOUNTS and os.environ.get(env_var)]
+
+    def _fetch(item):
+        portal, friendly, aid = item
+        try:
+            return meta_paginate(
+                f"{GRAPH_API}/{aid}/campaigns",
+                {"fields": fields, "effective_status": f'["{status}"]', "limit": 200})
+        except (MetaRateLimitError, Exception) as e:  # noqa: BLE001
+            print(f"  x list {friendly} {status}: {e}", file=sys.stderr)
+            return []
+
+    out = []
+    with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as ex:
+        for (portal, friendly, aid), rows in zip(accounts, ex.map(_fetch, accounts)):
             for c in rows:
                 if not hd.excluded(c.get("name") or ""):
                     out.append((portal, friendly, c))
-            time.sleep(0.2)
     _CAMP_LIST_CACHE[status] = out
     return out
 
@@ -235,25 +244,28 @@ def _ad_perf(preset):
     if preset in _AD_PERF_CACHE:
         return _AD_PERF_CACHE[preset]
     since, until = preset_range(preset)
+    accounts = [(friendly, os.environ.get(env_var))
+                for portal, accts in PORTAL_ACCOUNTS.items()
+                for env_var, friendly in accts
+                if env_var not in REPORT_EXCLUDE_ACCOUNTS and os.environ.get(env_var)]
+
+    def _fetch(item):
+        friendly, aid = item
+        try:
+            return meta_paginate(
+                f"{GRAPH_API}/{aid}/insights",
+                {"level": "ad",
+                 "fields": "ad_id,ad_name,adset_id,campaign_id,"
+                           "spend,purchase_roas,actions,action_values",
+                 "time_range": json.dumps({"since": since, "until": until}),
+                 "limit": 500})
+        except (MetaRateLimitError, Exception) as e:  # noqa: BLE001
+            print(f"  x adperf {friendly} {preset}: {e}", file=sys.stderr)
+            return []
+
     perf = {}
-    for portal, accts in PORTAL_ACCOUNTS.items():
-        for env_var, friendly in accts:
-            if env_var in REPORT_EXCLUDE_ACCOUNTS:
-                continue
-            aid = os.environ.get(env_var)
-            if not aid:
-                continue
-            try:
-                rows = meta_paginate(
-                    f"{GRAPH_API}/{aid}/insights",
-                    {"level": "ad",
-                     "fields": "ad_id,ad_name,adset_id,campaign_id,"
-                               "spend,purchase_roas,actions,action_values",
-                     "time_range": json.dumps({"since": since, "until": until}),
-                     "limit": 500})
-            except (MetaRateLimitError, Exception) as e:  # noqa: BLE001
-                print(f"  x adperf {friendly} {preset}: {e}", file=sys.stderr)
-                continue
+    with ThreadPoolExecutor(max_workers=_FETCH_WORKERS) as ex:
+        for rows in ex.map(_fetch, accounts):
             for r in rows:
                 cid, asid, adid = r.get("campaign_id"), r.get("adset_id"), r.get("ad_id")
                 if not cid or not adid:
@@ -263,7 +275,6 @@ def _ad_perf(preset):
                     "spend": _spend(r), "roas": _roas(r),
                     "purchases": _orders(r), "revenue": _revenue(r),
                 }
-            time.sleep(0.3)
     _AD_PERF_CACHE[preset] = perf
     return perf
 
