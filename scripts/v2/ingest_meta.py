@@ -24,10 +24,12 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from pathlib import Path
 
-# Per-account Meta fetches run concurrently (Meta rate-limits are per-account, so
-# independent accounts don't compete). DB writes stay serial on the main thread
-# (single SQLite writer), so the result is byte-identical — only faster.
-_FETCH_WORKERS = 6
+# Per-account Meta fetches CAN run concurrently (the parallel structure below is
+# kept), but the binding limit here is Meta's APP-level request cap (per token),
+# not the per-account one — at 6 workers the ingest saturated it and backoff
+# thrash made runs SLOWER (25-39 min vs ~16). So the ingest runs effectively
+# sequentially (1 worker); raise this only if app-level headroom is confirmed.
+_FETCH_WORKERS = 1
 
 # Add v2 dir to path so we can import _utils
 sys.path.insert(0, str(Path(__file__).resolve().parent))
