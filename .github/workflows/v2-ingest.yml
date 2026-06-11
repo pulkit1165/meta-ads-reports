@@ -33,16 +33,15 @@ on:
 
 concurrency:
   group: v2-ingest
-  # Refreshes ~every 10 min, driven by the keepalive workflow (the GitHub
-  # 'schedule' cron above is unreliable/throttled, so keepalive dispatches this
-  # on a real 10-min cadence with source=auto). Behaviour:
-  #   • Human/manual refresh (dashboard "Refresh data" button or a bare
-  #     workflow_dispatch, source="") PREEMPTS any in-progress run — instant.
-  #   • Keepalive auto ticks (source=auto) and the schedule cron do NOT preempt;
-  #     they queue, so they never cancel a running ingest (which would make runs
-  #     longer than 10 min never finish). Older queued ticks supersede cleanly.
-  # they queue and the newest one runs after it finishes.
-  cancel-in-progress: ${{ github.event_name == 'workflow_dispatch' && github.event.inputs.source != 'auto' }}
+  # NEVER preempt — an in-progress run always finishes and deploys. Earlier we
+  # preempted on manual/source="" dispatches so a human refresh felt instant,
+  # but any frequent source="" caller (e.g. an external pinger or repeated
+  # Refresh clicks) then cancelled every in-progress run ~every 10 min before it
+  # could finish, freezing the live data. Queueing is safe: while one run is in
+  # progress, new triggers queue and the newest pending supersedes older pending
+  # ones, so we always converge to the latest data. A manual refresh now waits
+  # for the current run instead of cancelling it.
+  cancel-in-progress: false
 
 permissions:
   contents: write
