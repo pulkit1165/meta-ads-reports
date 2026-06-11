@@ -155,12 +155,45 @@ def fetch_products(conn, top=60):
             'prevFrom': prev_s, 'prevTo': prev_e}
 
 
+def fetch_all_products(conn):
+    """Full product catalog grouped by category, for the Daily Push Plan dropdown.
+    Every product ever sold on Shopify (not just advertised ones / a recent
+    window), categorized the same way as the rollup: master SKU sheet first,
+    product-title keyword fallback. Returns {category: [names sorted by revenue]}
+    so each category's dropdown lists its real catalog (search + free-type)."""
+    labels = {sku: cat for sku, cat in conn.execute(
+        "SELECT ntn_code, TRIM(category) FROM product_ntn_labels "
+        "WHERE TRIM(COALESCE(category,'')) != ''").fetchall()}
+    sku_info = {}
+    for sku, title, rev in conn.execute('''
+        SELECT oi.sku, oi.product_title, SUM(COALESCE(oi.line_revenue,0)) AS rev
+        FROM shopify_order_items oi
+        JOIN shopify_orders o ON oi.order_id=o.order_id AND oi.portal=o.portal
+        WHERE o.cancelled_at IS NULL
+        GROUP BY oi.sku, oi.product_title
+    ''').fetchall():
+        name = (title or sku or '').strip()
+        if not name:
+            continue
+        info = sku_info.setdefault(sku, {'titles': {}})
+        info['titles'][name] = info['titles'].get(name, 0.0) + (rev or 0.0)
+    cat_map = {}
+    for sku, info in sku_info.items():
+        name = max(info['titles'], key=info['titles'].get)
+        cat = labels.get(sku) or fallback_category(name) or 'Other'
+        names = cat_map.setdefault(cat, {})
+        names[name] = max(names.get(name, 0.0), info['titles'][name])
+    return {cat: [n for n, _ in sorted(names.items(), key=lambda x: x[1], reverse=True)]
+            for cat, names in cat_map.items()}
+
+
 def build_payload(conn, days):
     since = (datetime.now(IST).date() - timedelta(days=days - 1)).isoformat()
     ad_days = fetch_ad_days(conn, since)
     shop = fetch_shop_days(conn, since)
     cat_rev = fetch_cat_rev(conn, since)
     products = fetch_products(conn)
+    all_products = fetch_all_products(conn)
     dates = [r['d'] for r in shop] + [r['d'] for r in ad_days]
     portals = sorted({r['p'] for r in shop} | {r['p'] for r in ad_days})
     return {
@@ -175,6 +208,7 @@ def build_payload(conn, days):
         'shop': shop,
         'catRev': cat_rev,
         'products': products,
+        'allProducts': all_products,
     }
 
 
@@ -1133,7 +1167,9 @@ function hdPlanBudget(date,field,el){const v=el.value;hdPlanMut(date,day=>{day[f
 function hdPlanCell(date,kind,i,field,el){const v=el.value;hdPlanMut(date,day=>{if(day[kind][i])day[kind][i][field]=v;});}
 function hdPlanChip(date,kind,i,type,el){hdPlanMut(date,day=>{const r=day[kind][i];if(!r)return;r.cr=Array.isArray(r.cr)?r.cr:[];const x=r.cr.indexOf(type);if(x>=0)r.cr.splice(x,1);else r.cr.push(type);});
   const on=el.getAttribute('data-on')==='1';el.setAttribute('data-on',on?'0':'1');el.style.cssText=hdChipStyle(!on);}
-function hdPlanAddRow(date,kind){hdPlanMut(date,day=>{day[kind].push({st:'old',p:'',cr:[],n:'',b:'',sc:'',sr:''});});HDPLANOPEN=date;hdRender();}
+function hdPlanAddType(date,kind,i,el){const v=(el.value||'').trim();if(!v)return;hdPlanMut(date,day=>{const r=day[kind][i];if(!r)return;r.cr=Array.isArray(r.cr)?r.cr:[];if(r.cr.indexOf(v)<0)r.cr.push(v);});el.value='';HDPLANOPEN=date;hdRender();}
+function hdPlanDelType(date,kind,i,j){hdPlanMut(date,day=>{const r=day[kind][i];if(r&&Array.isArray(r.cr))r.cr.splice(j,1);});HDPLANOPEN=date;hdRender();}
+function hdPlanAddRow(date,kind){hdPlanMut(date,day=>{day[kind].push({st:'',p:'',cr:[],n:'',b:'',sc:'',sr:''});});HDPLANOPEN=date;hdRender();}
 function hdPlanDelRow(date,kind,i){hdPlanMut(date,day=>{day[kind].splice(i,1);});HDPLANOPEN=date;hdRender();}
 function hdPlanToggle(date,el){if(el.open)HDPLANOPEN=date;else if(HDPLANOPEN===date)HDPLANOPEN=null;}
 function hdPlanTable(date,kind,day){
@@ -1142,12 +1178,13 @@ function hdPlanTable(date,kind,day){
   let h='<table style="margin-top:6px"><thead><tr><th style="text-align:left">Status</th><th style="text-align:left">Product</th><th>Creative types</th><th>#</th><th>Budget</th><th>Push score</th><th>Success&nbsp;%</th><th></th></tr></thead><tbody>';
   if(!rows.length) h+='<tr><td colspan="8" class="muted">No rows yet &mdash; click &ldquo;+ Add row&rdquo;.</td></tr>';
   rows.forEach((r,i)=>{r.cr=Array.isArray(r.cr)?r.cr:[];
-    const stSel=HD_STATUS.map(s=>'<option value="'+s[0]+'"'+((r.st||'old')===s[0]?' selected':'')+'>'+s[1]+'</option>').join('');
-    const chips=HD_CRE_TYPES.map(t=>{const on=r.cr.indexOf(t)>=0;return '<button type="button" data-on="'+(on?'1':'0')+'" onclick="hdPlanChip(\''+date+'\',\''+kind+'\','+i+',\''+t+'\',this)" style="'+hdChipStyle(on)+'">'+t+'</button>';}).join(' ');
+    let chips=HD_CRE_TYPES.map(t=>{const on=r.cr.indexOf(t)>=0;return '<button type="button" data-on="'+(on?'1':'0')+'" onclick="hdPlanChip(\''+date+'\',\''+kind+'\','+i+',\''+t+'\',this)" style="'+hdChipStyle(on)+'">'+t+'</button>';}).join(' ');
+    r.cr.forEach((t,j)=>{if(HD_CRE_TYPES.indexOf(t)>=0)return;chips+=' <button type="button" onclick="hdPlanDelType(\''+date+'\',\''+kind+'\','+i+','+j+')" title="remove custom type" style="'+hdChipStyle(true)+'">'+hdEsc(t)+' &#10005;</button>';});
+    chips+=' <input onchange="hdPlanAddType(\''+date+'\',\''+kind+'\','+i+',this)" placeholder="+ custom" style="'+inp+';width:74px">';
     h+='<tr>'+
-      '<td><select onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'st\',this)" style="'+inp+'">'+stSel+'</select></td>'+
-      '<td><input list="hdPlanProds" value="'+hdEsc(r.p||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'p\',this)" placeholder="product" style="'+inp+';min-width:150px"></td>'+
-      '<td style="white-space:nowrap">'+chips+'</td>'+
+      '<td><input list="hdStatusList" value="'+hdEsc(r.st||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'st\',this)" placeholder="status" style="'+inp+';width:118px"></td>'+
+      '<td><input list="hdPlanProds" value="'+hdEsc(r.p||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'p\',this)" placeholder="search or type…" style="'+inp+';min-width:170px"></td>'+
+      '<td style="min-width:210px">'+chips+'</td>'+
       '<td><input type="number" min="0" step="1" value="'+hdEsc(r.n||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'n\',this)" placeholder="0" style="'+inp+';width:50px"></td>'+
       '<td><input type="number" min="0" step="500" value="'+hdEsc(r.b||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'b\',this)" placeholder="&#8377;" style="'+inp+';width:88px"></td>'+
       '<td><input type="number" min="0" max="100" step="1" value="'+hdEsc(r.sc||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'sc\',this)" placeholder="0-100" style="'+inp+';width:70px"></td>'+
@@ -1158,14 +1195,17 @@ function hdPlanTable(date,kind,day){
   return h;
 }
 function hdPushCal(d){
-  const prodList=(d.products||[]).map(p=>p.product).filter(Boolean);
+  const metaProds=(d.products||[]).map(p=>p.product).filter(Boolean);
+  const catProds=(P.allProducts&&P.allProducts[HDCAT])||[];
+  const seen={}, prodList=[];
+  catProds.concat(metaProds).forEach(p=>{const k=(p||'').trim();if(k&&!seen[k.toLowerCase()]){seen[k.toLowerCase()]=1;prodList.push(k);}});
   const datalist='<datalist id="hdPlanProds">'+prodList.map(p=>'<option value="'+hdEsc(p)+'"></option>').join('')+'</datalist>';
   const fld='font-size:14px;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--card,#fff);color:inherit;width:150px;font-weight:700';
   let h='<section class="section"><div class="card"><h3>&#128197; Daily Push Plan</h3>'+
     '<div class="csub"><b>Push</b> = extra budget added on top of what\'s already active to grow it (e.g. &#8377;100 active &rarr; push &#8377;20 more). '+
     '<b>Maintenance</b> = refill budget that dropped so the line holds (e.g. &#8377;100 active, &#8377;20 closed &rarr; add &#8377;20 back to &#8377;100). '+
     'Next 10 days for <b>'+hdEsc(HDCAT)+'</b> &mdash; fill in date-by-date, with a push score and success&nbsp;% per row. Saved on this device.</div>';
-  h+=datalist;
+  h+=datalist+'<datalist id="hdStatusList">'+HD_STATUS.map(s=>'<option value="'+s[1]+'"></option>').join('')+'</datalist>';
   hdPlanDays().forEach(date=>{const day=hdPlanDay(date), isToday=date===P.today, open=(HDPLANOPEN===date)||(HDPLANOPEN===null&&isToday);
     h+='<details'+(open?' open':'')+' ontoggle="hdPlanToggle(\''+date+'\',this)" style="border:1px solid var(--line);border-radius:10px;margin-bottom:10px;padding:10px 14px;background:var(--panel)">'+
       '<summary style="cursor:pointer;font-weight:800;font-size:15px">&#128197; '+hdPlanDateLabel(date)+(isToday?' <span style="color:var(--good);font-size:12px;font-weight:700">(today)</span>':'')+' <span class="muted" style="font-weight:500;font-size:12px">'+date+'</span></summary>'+
