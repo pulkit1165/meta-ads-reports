@@ -1117,39 +1117,68 @@ function hdPlan(d){
   h+=hdPushCal(d);
   return h;
 }
-function hdPushCal(d){
-  const all=hdPushLoad(), cat=all[HDCAT]||{};
-  const dates=Object.keys(cat).filter(dt=>(cat[dt]||[]).length).sort();
-  const today=P.today, next=dates.find(dt=>dt>=today)||dates[dates.length-1]||null;
-  let sel=HDPUSHSEL; if(!sel||!cat[sel]) sel=next;
-  const prodOpts=(d.products||[]).map(p=>'<option value="'+hdEsc(p.product)+'">'+hdEsc(p.product)+'</option>').join('');
-  const inp='font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:7px;background:var(--panel);color:inherit';
-  let h='<section class="section"><div class="card"><h3>&#128197; Push Calendar</h3>'+
-        '<div class="csub">Plan the next product push for this category &mdash; pick a date, add the products and their push budget. Saved on this device.</div>';
-  h+='<div style="display:flex;gap:18px;align-items:center;flex-wrap:wrap;margin-bottom:12px">'+
-     '<div><div class="muted" style="font-size:11px">Next push</div><div style="font-size:19px;font-weight:800">'+(next||'&mdash;')+'</div></div>';
-  if(dates.length) h+='<div><div class="muted" style="font-size:11px">View date</div><select onchange="hdPushSelDate(this)" style="'+inp+'">'+dates.map(dt=>'<option value="'+dt+'"'+(dt===sel?' selected':'')+'>'+dt+(dt===next?' (next)':'')+'</option>').join('')+'</select></div>';
-  h+='</div>';
-  h+='<table><thead><tr><th style="text-align:left">Product</th><th>Push budget/day</th><th></th></tr></thead><tbody>';
-  const list=(sel&&cat[sel])||[];
-  if(list.length) list.forEach((e,i)=>{h+='<tr><td style="text-align:left">'+hdEsc(e.p)+'</td><td>'+fmtINR(e.b)+'</td><td><button onclick="hdPushDel(\''+sel+'\','+i+')" title="Remove" style="background:none;border:0;color:var(--bad);cursor:pointer;font-size:13px">&#10005;</button></td></tr>';});
-  else h+='<tr><td colspan="3" class="muted">No products scheduled'+(sel?(' for '+sel):'')+'.</td></tr>';
+// ---------- Daily Push Plan: 10-day per-category calendar (team fills in) ----------
+const HD_CRE_TYPES=['Paras','Motion','Static','UGC'];
+const HD_STATUS=[['new','New'],['old','Old'],['clearance','Stock Clearance']];
+let HDPLANOPEN=null;
+function hdChipStyle(on){return 'font-size:11px;padding:3px 8px;margin:1px;border-radius:999px;cursor:pointer;border:1px solid '+(on?'#6366f1':'var(--line,#e6e9f2)')+';background:'+(on?'#6366f1':'transparent')+';color:'+(on?'#fff':'var(--muted)')+';font-weight:'+(on?'700':'500');}
+function hdAddDays(iso,n){const d=new Date(iso+'T00:00:00Z');d.setUTCDate(d.getUTCDate()+n);return d.toISOString().slice(0,10);}
+function hdPlanDays(){const t=P.today||new Date().toISOString().slice(0,10);const a=[];for(let i=0;i<10;i++)a.push(hdAddDays(t,i));return a;}
+function hdPlanDateLabel(iso){try{return new Date(iso+'T00:00:00Z').toLocaleDateString('en-IN',{weekday:'short',day:'numeric',month:'short',timeZone:'UTC'});}catch(e){return iso;}}
+function hdPlanNorm(day){if(!day||typeof day!=='object'||Array.isArray(day))day={pb:'',mb:'',push:[],maint:[]};
+  day.pb=day.pb||'';day.mb=day.mb||'';day.push=Array.isArray(day.push)?day.push:[];day.maint=Array.isArray(day.maint)?day.maint:[];return day;}
+function hdPlanDay(date){return hdPlanNorm((hdPushLoad()[HDCAT]||{})[date]);}
+function hdPlanMut(date,fn){const all=hdPushLoad();all[HDCAT]=all[HDCAT]||{};const day=hdPlanNorm(all[HDCAT][date]);fn(day);all[HDCAT][date]=day;hdPushSave(all);}
+function hdPlanBudget(date,field,el){const v=el.value;hdPlanMut(date,day=>{day[field]=v;});}
+function hdPlanCell(date,kind,i,field,el){const v=el.value;hdPlanMut(date,day=>{if(day[kind][i])day[kind][i][field]=v;});}
+function hdPlanChip(date,kind,i,type,el){hdPlanMut(date,day=>{const r=day[kind][i];if(!r)return;r.cr=Array.isArray(r.cr)?r.cr:[];const x=r.cr.indexOf(type);if(x>=0)r.cr.splice(x,1);else r.cr.push(type);});
+  const on=el.getAttribute('data-on')==='1';el.setAttribute('data-on',on?'0':'1');el.style.cssText=hdChipStyle(!on);}
+function hdPlanAddRow(date,kind){hdPlanMut(date,day=>{day[kind].push({st:'old',p:'',cr:[],n:'',b:'',sc:'',sr:''});});HDPLANOPEN=date;hdRender();}
+function hdPlanDelRow(date,kind,i){hdPlanMut(date,day=>{day[kind].splice(i,1);});HDPLANOPEN=date;hdRender();}
+function hdPlanToggle(date,el){if(el.open)HDPLANOPEN=date;else if(HDPLANOPEN===date)HDPLANOPEN=null;}
+function hdPlanTable(date,kind,day){
+  const rows=day[kind]||[];
+  const inp='font-size:12px;padding:4px 6px;border:1px solid var(--line,#e6e9f2);border-radius:6px;background:var(--card,#fff);color:inherit';
+  let h='<table style="margin-top:6px"><thead><tr><th style="text-align:left">Status</th><th style="text-align:left">Product</th><th>Creative types</th><th>#</th><th>Budget</th><th>Push score</th><th>Success&nbsp;%</th><th></th></tr></thead><tbody>';
+  if(!rows.length) h+='<tr><td colspan="8" class="muted">No rows yet &mdash; click &ldquo;+ Add row&rdquo;.</td></tr>';
+  rows.forEach((r,i)=>{r.cr=Array.isArray(r.cr)?r.cr:[];
+    const stSel=HD_STATUS.map(s=>'<option value="'+s[0]+'"'+((r.st||'old')===s[0]?' selected':'')+'>'+s[1]+'</option>').join('');
+    const chips=HD_CRE_TYPES.map(t=>{const on=r.cr.indexOf(t)>=0;return '<button type="button" data-on="'+(on?'1':'0')+'" onclick="hdPlanChip(\''+date+'\',\''+kind+'\','+i+',\''+t+'\',this)" style="'+hdChipStyle(on)+'">'+t+'</button>';}).join(' ');
+    h+='<tr>'+
+      '<td><select onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'st\',this)" style="'+inp+'">'+stSel+'</select></td>'+
+      '<td><input list="hdPlanProds" value="'+hdEsc(r.p||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'p\',this)" placeholder="product" style="'+inp+';min-width:150px"></td>'+
+      '<td style="white-space:nowrap">'+chips+'</td>'+
+      '<td><input type="number" min="0" step="1" value="'+hdEsc(r.n||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'n\',this)" placeholder="0" style="'+inp+';width:50px"></td>'+
+      '<td><input type="number" min="0" step="500" value="'+hdEsc(r.b||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'b\',this)" placeholder="&#8377;" style="'+inp+';width:88px"></td>'+
+      '<td><input type="number" min="0" max="100" step="1" value="'+hdEsc(r.sc||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'sc\',this)" placeholder="0-100" style="'+inp+';width:70px"></td>'+
+      '<td><input type="number" min="0" max="100" step="1" value="'+hdEsc(r.sr||'')+'" onchange="hdPlanCell(\''+date+'\',\''+kind+'\','+i+',\'sr\',this)" placeholder="%" style="'+inp+';width:62px"></td>'+
+      '<td><button onclick="hdPlanDelRow(\''+date+'\',\''+kind+'\','+i+')" title="Remove" style="background:none;border:0;color:var(--bad);cursor:pointer;font-size:13px">&#10005;</button></td></tr>';});
   h+='</tbody></table>';
-  h+='<div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)">'+
-     '<div><div class="muted" style="font-size:11px">Product</div><select id="hdPushProd" style="'+inp+';max-width:210px">'+prodOpts+'</select></div>'+
-     '<div><div class="muted" style="font-size:11px">Push budget/day</div><input id="hdPushBudget" type="number" min="0" step="500" placeholder="e.g. 5000" style="'+inp+';width:130px"></div>'+
-     '<div><div class="muted" style="font-size:11px">Date</div><input id="hdPushDate" type="date" value="'+(sel||today)+'" style="'+inp+'"></div>'+
-     '<button onclick="hdPushAdd()" style="background:#6366f1;color:#fff;border:none;border-radius:7px;padding:8px 16px;font-size:13px;font-weight:600;cursor:pointer">+ Add</button>'+
-     '</div></div></section>';
+  h+='<button onclick="hdPlanAddRow(\''+date+'\',\''+kind+'\')" style="margin-top:6px;background:none;border:1px dashed var(--line);border-radius:6px;color:var(--muted);cursor:pointer;font-size:12px;padding:5px 10px">+ Add row</button>';
   return h;
 }
-function hdPushSelDate(el){HDPUSHSEL=el.value;hdRender();}
-function hdPushAdd(){const prod=document.getElementById('hdPushProd'),bud=document.getElementById('hdPushBudget'),dt=document.getElementById('hdPushDate');
-  const p=prod?prod.value:'',b=+((bud&&bud.value)||0),date=dt?dt.value:'';
-  if(!p||!date||!(b>0)){alert('Pick a product, a budget and a date.');return;}
-  const all=hdPushLoad(); all[HDCAT]=all[HDCAT]||{}; all[HDCAT][date]=all[HDCAT][date]||[]; all[HDCAT][date].push({p:p,b:b});
-  hdPushSave(all); HDPUSHSEL=date; hdRender();}
-function hdPushDel(date,i){const all=hdPushLoad(); if(all[HDCAT]&&all[HDCAT][date]){all[HDCAT][date].splice(i,1); if(!all[HDCAT][date].length)delete all[HDCAT][date];} hdPushSave(all); hdRender();}
+function hdPushCal(d){
+  const prodList=(d.products||[]).map(p=>p.product).filter(Boolean);
+  const datalist='<datalist id="hdPlanProds">'+prodList.map(p=>'<option value="'+hdEsc(p)+'"></option>').join('')+'</datalist>';
+  const fld='font-size:14px;padding:6px 9px;border:1px solid var(--line);border-radius:7px;background:var(--card,#fff);color:inherit;width:150px;font-weight:700';
+  let h='<section class="section"><div class="card"><h3>&#128197; Daily Push Plan</h3>'+
+    '<div class="csub"><b>Push</b> = extra budget added on top of what\'s already active to grow it (e.g. &#8377;100 active &rarr; push &#8377;20 more). '+
+    '<b>Maintenance</b> = refill budget that dropped so the line holds (e.g. &#8377;100 active, &#8377;20 closed &rarr; add &#8377;20 back to &#8377;100). '+
+    'Next 10 days for <b>'+hdEsc(HDCAT)+'</b> &mdash; fill in date-by-date, with a push score and success&nbsp;% per row. Saved on this device.</div>';
+  h+=datalist;
+  hdPlanDays().forEach(date=>{const day=hdPlanDay(date), isToday=date===P.today, open=(HDPLANOPEN===date)||(HDPLANOPEN===null&&isToday);
+    h+='<details'+(open?' open':'')+' ontoggle="hdPlanToggle(\''+date+'\',this)" style="border:1px solid var(--line);border-radius:10px;margin-bottom:10px;padding:10px 14px;background:var(--panel)">'+
+      '<summary style="cursor:pointer;font-weight:800;font-size:15px">&#128197; '+hdPlanDateLabel(date)+(isToday?' <span style="color:var(--good);font-size:12px;font-weight:700">(today)</span>':'')+' <span class="muted" style="font-weight:500;font-size:12px">'+date+'</span></summary>'+
+      '<div style="margin-top:10px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800;font-size:14px;color:#2f6bff">&#11014; Push Budget</div>'+
+        '<input type="number" min="0" step="500" value="'+hdEsc(day.pb||'')+'" onchange="hdPlanBudget(\''+date+'\',\'pb\',this)" placeholder="&#8377; to push" style="'+fld+'"></div>'+
+      hdPlanTable(date,'push',day)+'</div>'+
+      '<div style="margin-top:16px"><div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><div style="font-weight:800;font-size:14px;color:#0c9b5b">&#128260; Maintenance Budget</div>'+
+        '<input type="number" min="0" step="500" value="'+hdEsc(day.mb||'')+'" onchange="hdPlanBudget(\''+date+'\',\'mb\',this)" placeholder="&#8377; to maintain" style="'+fld+'"></div>'+
+      hdPlanTable(date,'maint',day)+'</div>'+
+      '</details>';});
+  h+='</div></section>';
+  return h;
+}
 function hdProfit(d){
   const ps=(d.products||[]).map(p=>{const profit=(p.revenue||0)-(p.spend||0);return Object.assign({},p,{profit:profit});}).sort((a,b)=>b.profit-a.profit);
   const tRev=ps.reduce((s,p)=>s+(p.revenue||0),0), tSpend=ps.reduce((s,p)=>s+(p.spend||0),0), tProfit=tRev-tSpend;
