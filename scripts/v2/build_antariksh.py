@@ -1070,11 +1070,15 @@ function hdAllProducts(d){
 }
 // ---------- Creative Plan: requirement chart + push calendar ----------
 const CRE_GROWTH=7500, CRE_MAINT=15000;
+// You can't jump the full budget gap in one day — cap the extra budget pushed
+// per day at ₹50k for the category, split New ₹10k / Old ₹20k / Clearance ₹20k.
+const DAY_CAP={new:10000,old:20000,clearance:20000};
 function hdPlanLoad(){try{return JSON.parse(localStorage.getItem('hdCreativePlan')||'{}')||{};}catch(e){return {};}}
 function hdPlanSave(c){try{localStorage.setItem('hdCreativePlan',JSON.stringify(c));}catch(e){}}
 function hdPushLoad(){try{return JSON.parse(localStorage.getItem('hdPushPlan')||'{}')||{};}catch(e){return {};}}
 function hdPushSave(c){try{localStorage.setItem('hdPushPlan',JSON.stringify(c));}catch(e){}}
-function hdCreativeReq(cur,tgt){const g=Math.max(0,(tgt||0)-(cur||0))/CRE_GROWTH, m=(cur||0)/CRE_MAINT; return {g:g,m:m,total:Math.ceil(g+m)};}
+// growth = tomorrow's (capped) extra budget; maintenance = on the current budget.
+function hdCreativeReq(cur,growth){const g=Math.max(0,growth||0)/CRE_GROWTH, m=Math.max(0,cur||0)/CRE_MAINT; return {g:g,m:m,total:Math.ceil(g+m)};}
 function hdBucketClasses(d){const cfg=hdCfgLoad(),b={new:[],old:[],clearance:[]};
   (d.products||[]).forEach(p=>{const k=hdKey(p.product),cls=(cfg[k]&&cfg[k].cls)||hdDefaultClass(p);(b[cls]||b.old).push(p);});
   return b;}
@@ -1085,24 +1089,30 @@ function hdPlan(d){
   const planCfg=hdPlanLoad(), b=hdBucketClasses(d);
   const meta=[['new','New products','Growth','#2f6bff'],['old','Old products','Maintenance','#0c9b5b'],['clearance','Stock clearance','Clearance','#d23b3b']];
   let h='<section class="section">';
-  h+='<div class="fbox">&#129513; <b>Creatives needed = (Target &minus; Current) &divide; ₹7,500</b> (growth) <b>+ Current &divide; ₹15,000</b> (maintenance). '+
-     'Current budget is pulled live from Meta; set a Target and the requirement updates instantly.</div>';
+  h+='<div class="fbox">&#129513; You can\'t close the whole gap in one day &mdash; only <b>₹50k extra/day</b> is pushed, split <b>New ₹10k &middot; Old ₹20k &middot; Clearance ₹20k</b>, so big jumps are paced over several days. '+
+     '<b>Creatives tomorrow = (Tomorrow\'s push) &divide; ₹7,500</b> (growth) <b>+ Current &divide; ₹15,000</b> (maintenance). Current is live from Meta; set a Target.</div>';
   h+='<div class="crq">';
-  let tot={cur:0,tgt:0,cre:0};
+  let tot={cur:0,tgt:0,push:0,cre:0};
   meta.forEach(m=>{const arr=b[m[0]]||[];
     const cur=arr.reduce((s,p)=>s+(p.budget||0),0);
     const k=HDCAT+'::'+m[0], saved=planCfg[k]||{};
     const tgt=(saved.target!=null)?saved.target:cur;
-    const chg=tgt-cur, req=hdCreativeReq(cur,tgt);
-    tot.cur+=cur; tot.tgt+=tgt; tot.cre+=req.total;
-    h+='<div class="cb"><h4><span style="color:'+m[3]+'">&#9679;</span> '+m[1]+'</h4><div class="goal">'+m[2]+' &middot; '+arr.length+' products</div>'+
+    const gap=tgt-cur, cap=DAY_CAP[m[0]]||0;
+    const push=Math.min(Math.max(0,gap),cap);            // tomorrow's capped increment
+    const days=(gap>0&&cap>0)?Math.ceil(gap/cap):0;
+    const req=hdCreativeReq(cur,push);
+    tot.cur+=cur; tot.tgt+=tgt; tot.push+=push; tot.cre+=req.total;
+    const capped=gap>cap;
+    h+='<div class="cb"><h4><span style="color:'+m[3]+'">&#9679;</span> '+m[1]+'</h4><div class="goal">'+m[2]+' &middot; '+arr.length+' products &middot; cap '+fmtINR(cap)+'/day</div>'+
        '<div class="row"><span class="k">Current (Meta)</span><span>'+fmtINR(cur)+'/day</span></div>'+
        '<div class="row"><span class="k">Target /day</span><span><input class="tin" type="number" min="0" step="500" value="'+((saved.target!=null)?saved.target:'')+'" placeholder="'+Math.round(cur)+'" data-cls="'+m[0]+'" onchange="hdPlanSetTarget(this)"></span></div>'+
-       '<div class="row"><span class="k">Change tomorrow</span><span style="font-weight:700;color:'+(chg>0?'var(--good)':chg<0?'var(--bad)':'var(--muted)')+'">'+hdSign(chg)+'</span></div>'+
-       '<div class="cr"><div class="n">'+req.total+'</div><div class="l">creatives needed<br>(<span style="color:#2f6bff">'+req.g.toFixed(1)+' growth</span> + <span style="color:#0c9b5b">'+req.m.toFixed(1)+' maint</span>)</div></div>'+
+       '<div class="row"><span class="k">Remaining gap</span><span style="color:'+(gap>0?'var(--ink)':'var(--muted)')+'">'+hdSign(gap)+'</span></div>'+
+       '<div class="row"><span class="k">Push tomorrow</span><span style="font-weight:800;color:'+(push>0?'var(--good)':'var(--muted)')+'">'+hdSign(push)+(capped?' <span class="muted" style="font-weight:600">(capped)</span>':'')+'</span></div>'+
+       '<div class="row"><span class="k">Days to target</span><span>'+(days>0?days+(days===1?' day':' days'):'&mdash;')+'</span></div>'+
+       '<div class="cr"><div class="n">'+req.total+'</div><div class="l">creatives tomorrow<br>(<span style="color:#2f6bff">'+req.g.toFixed(1)+' growth</span> + <span style="color:#0c9b5b">'+req.m.toFixed(1)+' maint</span>)</div></div>'+
        '</div>';});
   h+='</div>';
-  h+='<div class="muted" style="font-size:12px;margin-top:10px">Category total &mdash; current '+fmtINR(tot.cur)+'/day &middot; target '+fmtINR(tot.tgt)+'/day &middot; <b style="color:var(--ink)">'+tot.cre+'</b> creatives to brief.</div>';
+  h+='<div class="muted" style="font-size:12px;margin-top:10px">Category total &mdash; current '+fmtINR(tot.cur)+'/day &middot; target '+fmtINR(tot.tgt)+'/day &middot; pushing <b style="color:var(--good)">'+hdSign(tot.push)+'</b> tomorrow &middot; <b style="color:var(--ink)">'+tot.cre+'</b> creatives to brief.</div>';
   h+='</section>';
   h+=hdPushCal(d);
   return h;
