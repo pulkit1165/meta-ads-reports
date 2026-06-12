@@ -1164,6 +1164,57 @@ function hdPlanLoad(){try{return JSON.parse(localStorage.getItem('hdCreativePlan
 function hdPlanSave(c){try{localStorage.setItem('hdCreativePlan',JSON.stringify(c));}catch(e){}}
 function hdPushLoad(){try{return JSON.parse(localStorage.getItem('hdPushPlan')||'{}')||{};}catch(e){return {};}}
 function hdPushSave(c){try{localStorage.setItem('hdPushPlan',JSON.stringify(c));}catch(e){}}
+// ---- Seed: pre-fill the Daily Push Plan from the team sheet (one-time per version). ----
+// Keys MUST match HD_CATEGORIES. Written into localStorage on load; never clobbers a date you already edited.
+const HD_PUSH_SEED={
+'Skin':{'2026-06-13':{pb:'77500',mb:'',maint:[],push:[
+{st:'Old',p:'Peptides',cr:['Paras','Static'],n:'2',b:'5000',sc:'',sr:''},
+{st:'Old',p:'Glutathione',cr:['Paras','Static'],n:'2',b:'10000',sc:'',sr:''},
+{st:'Old',p:'Botox',cr:['Paras','Motion'],n:'2',b:'7500',sc:'',sr:''},
+{st:'Old',p:'Trifecta',cr:['Paras','UGC'],n:'2',b:'7500',sc:'',sr:''},
+{st:'Old',p:'Hyaluronic',cr:['Paras','Static'],n:'2',b:'7500',sc:'',sr:''},
+{st:'Old',p:'Xtreme Pigmentation Combo',cr:['Static','Paras'],n:'2',b:'10000',sc:'',sr:''},
+{st:'Old',p:'Mousse',cr:['Paras','UGC'],n:'2',b:'10000',sc:'',sr:''},
+{st:'Stock Clearance',p:'Vitamin C Range',cr:['Motion','Static'],n:'2',b:'5000',sc:'',sr:''},
+{st:'Stock Clearance',p:'Anti Blemish Mask',cr:['Paras','Static'],n:'2',b:'5000',sc:'',sr:''},
+{st:'Stock Clearance',p:'Kojic Sunscreen',cr:['Paras','Motion'],n:'2',b:'5000',sc:'',sr:''},
+{st:'Stock Clearance',p:'Dirt Off',cr:['Motion','Static'],n:'2',b:'5000',sc:'',sr:''}
+]}},
+'Hair':{'2026-06-13':{pb:'30000',mb:'',maint:[],push:[
+{st:'Old',p:'Nagarmotha Oil',cr:['Paras'],n:'2',b:'15000',sc:'',sr:''},
+{st:'Old',p:'Hair Mist',cr:['Paras','Static'],n:'2',b:'15000',sc:'',sr:''},
+{st:'Stock Clearance',p:'Ayurkesh',cr:[],n:'',b:'',sc:'',sr:''}
+]}},
+'Nutraceuticals':{'2026-06-13':{pb:'20000',mb:'',maint:[],push:[
+{st:'Old',p:'Berberine',cr:['Paras'],n:'2',b:'15000',sc:'',sr:''},
+{st:'Stock Clearance',p:'Bro',cr:['Paras'],n:'2',b:'5000',sc:'',sr:''}
+]}},
+'Crystal Accessory':{'2026-06-13':{pb:'10000',mb:'',maint:[],push:[
+{st:'Old',p:'Riche Sutra',cr:['Paras','UGC'],n:'3',b:'10000',sc:'',sr:''}
+]}},
+'Crystal Home Decor':{'2026-06-13':{pb:'72500',mb:'',maint:[],push:[
+{st:'Old',p:'Peacock',cr:['Paras','broll edit'],n:'1',b:'7500',sc:'',sr:''},
+{st:'Old',p:'Selenite Plate',cr:['Paras','broll edit'],n:'1',b:'5000',sc:'',sr:''},
+{st:'Old',p:'Selenite Coaster',cr:['Paras','Motion'],n:'1',b:'7500',sc:'',sr:''},
+{st:'Old',p:'Hanuman Ji Miniature',cr:['Static','Motion'],n:'1',b:'7500',sc:'',sr:''},
+{st:'Stock Clearance',p:'3D Hanuman Plate',cr:['Paras','Static'],n:'2',b:'10000',sc:'',sr:''},
+{st:'New',p:'Pendants',cr:['UGC'],n:'10',b:'20000',sc:'',sr:''},
+{st:'Old',p:'Pendants',cr:['UGC'],n:'10',b:'15000',sc:'',sr:''}
+]}}
+};
+(function(){try{
+  var SEEDV='push-2026-06-13-v1';
+  if(localStorage.getItem('hdPushSeedV')===SEEDV)return;
+  var ls={};try{ls=JSON.parse(localStorage.getItem('hdPushPlan')||'{}')||{};}catch(e){ls={};}
+  Object.keys(HD_PUSH_SEED).forEach(function(cat){
+    ls[cat]=ls[cat]||{};
+    Object.keys(HD_PUSH_SEED[cat]).forEach(function(date){
+      if(!ls[cat][date]) ls[cat][date]=HD_PUSH_SEED[cat][date];
+    });
+  });
+  localStorage.setItem('hdPushPlan',JSON.stringify(ls));
+  localStorage.setItem('hdPushSeedV',SEEDV);
+}catch(e){}})();
 // growth = tomorrow's (capped) extra budget; maintenance = on the current budget.
 function hdCreativeReq(cur,growth){const g=Math.max(0,growth||0)/CRE_GROWTH, m=Math.max(0,cur||0)/CRE_MAINT; return {g:g,m:m,total:Math.ceil(g+m)};}
 function hdBucketClasses(d){const cfg=hdCfgLoad(),b={new:[],old:[],clearance:[]};
