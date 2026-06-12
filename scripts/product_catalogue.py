@@ -37,7 +37,7 @@ PRODUCT_RULES = [
     (['pitglow', 'pit_glow', 'pit glow', 'roll_on', 'rollon'],
                                                          'Pit Glow Roll On',             'Skin'),
     (['sunkissed', 'sun_kissed', 'sun kissed'],          'Sun Kissed Mousse',            'Skin'),
-    (['hyaluronic', 'hyaluroni'],                        'Hyaluronic Serum',             'Skin'),
+    (['hyaluronic', 'hyaluroni'],                        'Hyaluronic Gel',             'Skin'),
     (['lipbright', 'lip_bright', 'lip bright'],          'Lip Bright',                   'Skin'),
     (['berberine'],                                      'Berberine Capsules',           'Nutraceuticals'),
     (['charbigone', 'charbi_gone', 'charbi gone', 'charbi'],
