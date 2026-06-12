@@ -1,0 +1,93 @@
+{
+  "scenarios": [
+    {
+      "name": "month_1_ramp",
+      "description": "Month 1 ramp from 4K → 7K orders/day",
+      "orders_per_day": 5500,
+      "mix": {
+        "skin": 0.20,
+        "hair": 0.10,
+        "perfume": 0.05,
+        "jewellery": 0.30,
+        "crystals": 0.15,
+        "stock_clearance": 0.20
+      },
+      "roas": 2.55,
+      "delivery_pct": 82,
+      "tax_pct": 10.5,
+      "expected_monthly_profit_cr": 2.25,
+      "expected_ebitda_pct": 22.9
+    },
+    {
+      "name": "month_6_at_cap",
+      "description": "Month 6 — Hit 15K cap, steady operations",
+      "orders_per_day": 15000,
+      "mix": {
+        "skin": 0.20,
+        "hair": 0.10,
+        "perfume": 0.05,
+        "jewellery": 0.30,
+        "crystals": 0.15,
+        "stock_clearance": 0.20
+      },
+      "roas": 2.75,
+      "delivery_pct": 82,
+      "tax_pct": 10.5,
+      "expected_monthly_profit_cr": 7.65,
+      "expected_ebitda_pct": 22.9
+    },
+    {
+      "name": "festive_diwali",
+      "description": "Festive month (Diwali) — premium delivery + ROAS lift",
+      "orders_per_day": 15000,
+      "mix": {
+        "skin": 0.30,
+        "hair": 0.05,
+        "perfume": 0.15,
+        "jewellery": 0.35,
+        "crystals": 0.15
+      },
+      "roas": 3.5,
+      "delivery_pct": 84,
+      "tax_pct": 9.5,
+      "expected_monthly_profit_cr": 9.5,
+      "expected_ebitda_pct": 25
+    },
+    {
+      "name": "tax_optimized_crystals_heavy",
+      "description": "Tax-optimized mix — heavy Crystals + Neutra for 7% blended tax",
+      "orders_per_day": 5000,
+      "mix": {
+        "skin": 0.08,
+        "hair": 0.07,
+        "perfume": 0.05,
+        "crystals": 0.65,
+        "neutra": 0.15
+      },
+      "roas": 2.6,
+      "delivery_pct": 80,
+      "tax_pct": 7,
+      "expected_monthly_profit_cr": 3.63,
+      "expected_ebitda_pct": 28.5
+    },
+    {
+      "name": "60cr_annual_target",
+      "description": "Working backwards — 10-month ₹60cr profit target",
+      "target_annual_profit_cr": 60,
+      "horizon_months": 10,
+      "required_avg_orders_per_day": 11800,
+      "required_avg_ebitda_pct": 19.5,
+      "key_levers": {
+        "roas": 2.75,
+        "delivery_pct": 82,
+        "tax_pct": 8
+      }
+    }
+  ],
+  "notes": [
+    "All AOV assumed ₹850 unless overridden",
+    "Stock clearance at ₹40/order = bundle + B2B + marketplace partial recovery, NOT standalone discounting",
+    "Festive boost ~10% via better delivery + higher AOV bundle pricing",
+    "Tax breakdown: Skin/Hair/Perfume 18% GST · Jewellery 4% · Crystals 4% · Neutra 5% · Stock clearance ~12%"
+  ]
+}
