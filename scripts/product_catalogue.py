@@ -38,7 +38,8 @@ PRODUCT_RULES = [
                                                          'Pit Glow Roll On',             'Skin'),
     (['sunkissed', 'sun_kissed', 'sun kissed'],          'Sun Kissed Mousse',            'Skin'),
     (['hyaluronic', 'hyaluroni', 'nialuronic'],          'Hyaluronic Gel',               'Skin'),
-    (['lipbright', 'lip_bright', 'lip bright'],          'Lip Bright',                   'Skin'),
+    (['lipbright', 'lip_bright', 'lip bright',
+      'lip_reel', 'lip.*reel', 'skin.*lip'],             'Lip Bright',                   'Skin'),
     (['berberine'],                                      'Berberine Capsules',           'Nutraceuticals'),
     (['charbigone', 'charbi_gone', 'charbi gone', 'charbi'],
                                                          'Charbi Gone Capsules',         'Nutraceuticals'),
@@ -125,7 +126,9 @@ PRODUCT_RULES = [
     (['peptide', 'peptides'],                            'Peptide Products',             'Skin'),
     (['app.*offer', 'offer.*app'],                       'App Offer',                    'Skin'),
     (['sunmousse', 'sun.*mousse'],                       'Sun Kissed Mousse',            'Skin'),
-    (['lip_reel', 'lip.*reel', 'skin.*lip'],             'Lip Products',                 'Skin'),
+    # 'Lip Products' merged into 'Lip Bright' above (06-12) — operator
+    # treats them as one SKU group; no need for a separate catch-all row
+    # in the budget allocation table.
     (['timereversal', 'time.*reversal'],                 'Time Reversal Trifecta',       'Skin'),
     (['seg12', 'seg13', 'routine.*upgrade', 'premium.*combo'],
                                                          'Skin Retarget Combo',          'Skin'),
