@@ -923,7 +923,22 @@ function setTitles(){
 let HDPRESET='yesterday', HDTAB='overview', HDCAT='Crystal Home Decor', HDPUSHSEL=null;
 const roasClass = roiClass;
 const HD_PRESET_LABELS={today:'Today',yesterday:'Yesterday',last_7d:'Last 7D',last_30d:'Last 30D'};
-const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['products','All Products'],['plan','Creative Plan'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability'],['closed','Closed Budget']];
+const HD_TABS=[['overview','Category Overview'],['campaigns','Campaigns'],['budget','Product-Wise Budget'],['gap','Target vs Gap'],['products','All Products'],['plan','Creative Plan'],['creative','Creative Report'],['clearance','Stock Clearance'],['profit','Product Profitability'],['closed','Closed Budget']];
+// Fixed monthly budget targets from the category budget plan (operator-confirmed correct).
+// Keys MUST match HD_CATEGORIES spelling. Current budget/creatives are pulled live -> gap auto-updates each build.
+const HDTARGET={
+'Skin':{total:1018229,prods:[['24K Gold Serum',70833],['PitGlow',53125],['Time Reversal Cream',53125],['Tan Off',35417],['Anti Acne',35417],['Peptides',35417],['Vitamin C',35417],['Underarm & Neck',53125],['Glutathione',26563],['Mousse',53125],['Goat Milk',70833],['Blemish',17708],['Dirt Off',17708],['Triderma',17708],['BB SPF',26563],['Glass Skin',35417],['Botox',26563],['Trifecta',17708],['Hyaluronic',35417],['Pigmentation Combo',35417],['AM PM',141667],['D-Tan',17708],['Lip Bright',88542]]},
+'Hair':{total:230208,prods:[['Hair Oil',35417],['24x7 Phus Phus',53125],['Overnight Mist',53125],['Xtreme Combo',88542]]},
+'Crystal Accessory':{total:159375,prods:[['Pyrite Bracelet',35417],['Sutra Bracelet',17708],['Anxiety Free Bracelet',17708],['Riche Rich Half & Half',17708],['Riche Rich Bracelet',35417],['Other Bracelet',35417]]},
+'Perfumes':{total:88542,prods:[['Solid Perfume',88542]]},
+'Nutraceuticals':{total:88542,prods:[['Berberine',44271],['Charbigone',44271]]},
+'Crystal Home Decor':{total:111563,prods:[['Geode',14167],['Peacock Plate',44271],['Plates Mix',53125]]},
+'24K Jewellery':{total:177083,prods:[['24K Gold Jewellery Range',177083]]}
+};
+const HDTGTSPLIT=[['Paras',0.40,'Paras (40%)'],['UGC',0.30,'UGC + Partner (30%)'],['Motion',0.15,'Motion (15%)'],['Static',0.15,'Static (15%)']];
+function hdTgtCre(b){const tc=Math.round((b||0)/2000);return {tc:tc,Paras:Math.round(tc*0.40),UGC:Math.round(tc*0.30),Motion:Math.round(tc*0.15),Static:Math.round(tc*0.15)};}
+function hdMapType(t){t=(t||'').toLowerCase();if(t==='paras')return 'Paras';if(t==='ugc'||t==='partnership'||t==='partner')return 'UGC';if(t==='motion')return 'Motion';if(t==='static')return 'Static';return 'Other';}
+function hdNorm(s){return (s||'').toLowerCase().replace(/[^a-z0-9]/g,'');}
 function hdEsc(s){return (s==null?'':String(s)).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function rg(r){r=r||0;return '<span class="rg '+roasClass(r)+'">'+r.toFixed(2)+'×</span>';}
 function hdAgo(ts){let s=Math.floor(Date.now()/1000-ts);if(s<0)s=0;if(s<60)return s+'s ago';if(s<3600)return Math.floor(s/60)+'m ago';if(s<86400)return Math.floor(s/3600)+'h ago';return Math.floor(s/86400)+'d ago';}
@@ -1010,6 +1025,44 @@ function hdBudget(d){
     '<td><div style="display:flex;align-items:center;gap:8px;min-width:130px"><div style="flex:1;height:7px;background:var(--line,#e6e9f2);border-radius:4px;overflow:hidden"><div style="width:'+(p.budget_share||0)+'%;height:100%;background:#6366f1"></div></div><span class="muted" style="font-size:11px">'+(p.budget_share||0)+'%</span></div></td>'+
     '<td>'+fmtINR(p.spend)+'</td><td>'+rg(p.roas)+'</td><td>'+fmtNum(p.orders)+'</td><td>'+fmtNum(p.campaigns)+'</td><td>'+fmtNum(p.adsets)+'</td></tr>';});
   h+='</tbody></table></div></section>';
+  return h;
+}
+function hdGapCell(g){
+  if(g==null)return '<td class="muted">—</td>';
+  if(g>0)return '<td style="background:#fff2e0;color:#9a5b00;font-weight:700">+'+fmtNum(g)+' needed</td>';
+  if(g<0)return '<td style="background:#e6f5ea;color:#1a7a3d;font-weight:700">'+fmtNum(-g)+' surplus</td>';
+  return '<td style="background:#e6f5ea;color:#1a7a3d;font-weight:700">on track</td>';
+}
+function hdGap(d){
+  const tgt=HDTARGET[HDCAT];
+  if(!tgt){return '<section class="section"><div class="card"><div class="muted">No category-plan target is set for <b>'+hdEsc(HDCAT)+'</b>. Targets come from the team budget sheet — add this category there and it will show up here.</div></div></section>';}
+  const o=d.overview||{};
+  const curDay=o.budget||0, curMo=curDay*30, tb=tgt.total;
+  const tc=hdTgtCre(tb);
+  const cur={Paras:0,UGC:0,Motion:0,Static:0,Other:0}; let liveAll=0;
+  (d.campaigns||[]).forEach(c=>(c.adsets||[]).forEach(a=>(a.ads||[]).forEach(ad=>{
+    const st=(ad.status||'').toUpperCase();
+    if(st!==''&&st!=='ACTIVE')return;
+    cur[hdMapType(ad.type)]++; liveAll++;
+  })));
+  const budGapMo=tb-curMo;
+  let h='<section class="section"><div class="card" style="background:linear-gradient(0deg,#fafbff,#fff)"><div class="csub" style="margin-bottom:8px">Targets are fixed from the category budget plan (the numbers confirmed correct). <b>Current budget &amp; creatives are pulled live from Meta and recompute every build</b>, so the gaps below update on their own. Target budget is the monthly plan; current run-rate is shown as ₹/day and its ×30 monthly equivalent.</div>';
+  h+='<div class="kpis" style="grid-template-columns:repeat(4,1fr)">';
+  h+=hdKpi('Target budget',fmtINR(tb),'monthly plan','PLAN');
+  h+=hdKpi('Current run-rate',fmtINR(curDay),'₹/day live','META');
+  h+=hdKpi('Current ≈ monthly',fmtINR(curMo),'run-rate × 30','META');
+  h+=hdKpi('Budget gap',(budGapMo>0?'+':'')+fmtINR(budGapMo),budGapMo>0?'deploy more to hit plan':'at / above plan');
+  h+='</div></div></section>';
+  const rows=[['Total creatives',tc.tc,liveAll]].concat(HDTGTSPLIT.map(s=>[s[2],tc[s[0]],cur[s[0]]]));
+  let body='';
+  rows.forEach((r,i)=>{const g=r[1]-r[2];body+='<tr'+(i===0?' style="font-weight:800;background:#f6f7fc"':'')+'><td>'+hdEsc(r[0])+'</td><td>'+fmtNum(r[1])+'</td><td>'+fmtNum(r[2])+'</td>'+hdGapCell(g)+'</tr>';});
+  body+='<tr><td class="muted">Other (AI / Wanda / untagged)</td><td class="muted">—</td><td>'+fmtNum(cur.Other)+'</td><td class="muted">—</td></tr>';
+  h+='<section class="section"><div class="card"><h3>Creative library — target vs live</h3><div class="csub">Target creatives = monthly budget ÷ ₹2,000, split 40% Paras / 30% UGC+Partner / 15% Motion / 15% Static. Live = creatives currently active in this category on Meta.</div><table><thead><tr><th>Format</th><th>Target</th><th>Live now</th><th>Gap</th></tr></thead><tbody>'+body+'</tbody></table></div></section>';
+  const pmap={}; (d.products||[]).forEach(p=>{pmap[hdNorm(p.product)]=p;});
+  let pbody='';
+  (tgt.prods||[]).forEach(pr=>{const nm=pr[0],b=pr[1],t=hdTgtCre(b),mp=pmap[hdNorm(nm)],cd=mp?mp.budget:null;
+    pbody+='<tr><td><b>'+hdEsc(nm)+'</b></td><td>'+fmtINR(b)+'</td><td>'+fmtNum(t.tc)+'</td><td>'+fmtNum(t.Paras)+'</td><td>'+fmtNum(t.UGC)+'</td><td>'+fmtNum(t.Motion)+'</td><td>'+fmtNum(t.Static)+'</td><td>'+(cd!=null?fmtINR(cd):'<span class="muted">—</span>')+'</td><td>'+(cd!=null?fmtINR(cd*30):'<span class="muted">—</span>')+'</td></tr>';});
+  h+='<section class="section"><div class="card"><h3>Per-product plan</h3><div class="csub">Fixed monthly budget targets and the creative count each needs (same ÷2,000 formula). Current ₹/day is matched live from Meta where the product name lines up.</div><table><thead><tr><th>Product</th><th>Target budget</th><th>Tgt creatives</th><th>Paras</th><th>UGC</th><th>Motion</th><th>Static</th><th>Cur ₹/day</th><th>Cur ≈mo</th></tr></thead><tbody>'+pbody+'</tbody></table></div></section>';
   return h;
 }
 function hdCampaigns(d){
@@ -1265,7 +1318,7 @@ function hdRender(){
     body.innerHTML='<section class="section"><div class="card"><div class="muted">'+hdEsc(HDCAT)+' data is not embedded in this build (no Meta token at build time). It will populate on the next scheduled build.</div></div></section>'; return; }
   document.getElementById('hdScope').textContent='('+(d.since||'')+' → '+(d.until||'')+')';
   fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b>'+(d.fetched_ts?' ('+hdAgo(d.fetched_ts)+')':'');
-  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='products'?hdAllProducts(d) : HDTAB==='plan'?hdPlan(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : HDTAB==='closed'?hdClosed(d) : hdCreative(d);
+  body.innerHTML = HDTAB==='overview'?hdOverview(d) : HDTAB==='campaigns'?hdCampaigns(d) : HDTAB==='budget'?hdBudget(d) : HDTAB==='gap'?hdGap(d) : HDTAB==='products'?hdAllProducts(d) : HDTAB==='plan'?hdPlan(d) : HDTAB==='clearance'?hdClearance(d) : HDTAB==='profit'?hdProfit(d) : HDTAB==='closed'?hdClosed(d) : hdCreative(d);
 }
 setInterval(()=>{ if(STATE.view==='homedecor'){ const d=hdPick(), fp=document.getElementById('hdFetched'); if(d&&d.fetched_ts&&fp) fp.innerHTML='&#128336; Fetched from Meta: <b>'+hdEsc(d.fetched_at||'—')+'</b> ('+hdAgo(d.fetched_ts)+')'; } }, 60000);
 // ===================== /HOME DECOR MODULE =====================
