@@ -1,0 +1,57 @@
+name: Jewellery Trend Radar (daily, 7:30 AM IST)
+
+# Free v1 — scrapes Shopify best-seller collections across global jewellery
+# brands (Gorjana/PDPAOLA/Purelei/Astrid & Miyu/Missoma/By Charlotte), scores
+# NEW + fast-RISING + freshly-launched products, and writes a "Trend Radar" tab
+# (one per day) to the operator's sheet. No paid APIs, no Meta token — only the
+# antriksh-bot@ service account (Editor on the sheet). Day-over-day rank movement
+# is persisted in a hidden "_state" tab inside the same sheet.
+# See scripts/v2/jewellery_trend_radar.py.
+#
+# Note: GHA cron is best-effort — a delayed firing can land 10-30 min late under
+# heavy queue load. Fine for a daily snapshot.
+
+on:
+  schedule:
+    - cron: "0 2 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: jewellery-trend-radar
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    env:
+      GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/google-service-account.json
+      TZ: Asia/Kolkata
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > "$GOOGLE_SERVICE_ACCOUNT_FILE"
+          chmod 600 "$GOOGLE_SERVICE_ACCOUNT_FILE"
+
+      - name: Build + push Trend Radar to the sheet
+        run: python3 scripts/v2/jewellery_trend_radar.py
