@@ -30,6 +30,7 @@ CREATE TABLE IF NOT EXISTS campaign_hourly_snapshots (
   campaign_id   TEXT,
   campaign_name TEXT,
   objective     TEXT,
+  status        TEXT,            -- Active / Paused (delivered today)
   created_time  TEXT,
   age_hours     REAL,
   daily_budget  REAL,
@@ -60,7 +61,7 @@ CREATE TABLE IF NOT EXISTS camp_alert_log (
 """
 
 COLS = ['ts', 'hour_slot', 'account_id', 'account_name', 'campaign_id', 'campaign_name',
-        'objective', 'created_time', 'age_hours', 'daily_budget', 'spend', 'revenue',
+        'objective', 'status', 'created_time', 'age_hours', 'daily_budget', 'spend', 'revenue',
         'roas', 'orders', 'impressions', 'clicks', 'ctr', 'cpc', 'cpm', 'cpa']
 
 
@@ -79,8 +80,12 @@ def main():
 
     con = sqlite3.connect(args.db)
     con.executescript(SCHEMA)
+    # add status column to a pre-existing table (idempotent migration)
+    cols = {r[1] for r in con.execute("PRAGMA table_info(campaign_hourly_snapshots)")}
+    if 'status' not in cols:
+        con.execute("ALTER TABLE campaign_hourly_snapshots ADD COLUMN status TEXT")
     payload = [(ts, hour_slot, r['account_id'], r['account_name'], r['campaign_id'],
-                r['campaign_name'], r['objective'], r['created_time'], r['age_hours'],
+                r['campaign_name'], r['objective'], r['status'], r['created_time'], r['age_hours'],
                 r['daily_budget'], r['spend'], r['revenue'], r['roas'], r['orders'],
                 r['impressions'], r['clicks'], r['ctr'], r['cpc'], r['cpm'], r['cpa'])
                for r in rows]

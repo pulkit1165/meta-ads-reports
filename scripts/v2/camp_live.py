@@ -54,6 +54,23 @@ def list_accounts(token):
     return _paged('me/adaccounts', {'fields': 'account_id,name', 'limit': 500}, token)
 
 
+def _batch_ids(ids, fields, token):
+    """Fetch many objects by id via ?ids=; split on error (deleted ids)."""
+    if not ids:
+        return {}
+    q = urllib.parse.urlencode({'ids': ','.join(ids), 'fields': fields, 'access_token': token})
+    try:
+        return _get(API + '?' + q)
+    except Exception:
+        if len(ids) == 1:
+            return {}
+        m = len(ids) // 2
+        d = {}
+        d.update(_batch_ids(ids[:m], fields, token))
+        d.update(_batch_ids(ids[m:], fields, token))
+        return d
+
+
 def fetch_active_campaigns(token, account_ids=None, now=None):
     """account_ids: list of 'act_<id>' (default = all accessible accounts)."""
     now = now or datetime.now(IST)
@@ -63,15 +80,12 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
         accts = {a: a for a in account_ids}  # names filled below if missing
     out = []
     for aid, aname in accts.items():
-        # 1) active campaigns: budget / created / objective
+        # 1) active campaigns: budget / created / objective / status
+        CFIELDS = 'name,daily_budget,lifetime_budget,created_time,objective,effective_status'
         try:
             camps = _paged(f"{aid}/campaigns",
-                           {'effective_status': "['ACTIVE']",
-                            'fields': 'name,daily_budget,lifetime_budget,created_time,objective',
-                            'limit': 500}, token)
+                           {'effective_status': "['ACTIVE']", 'fields': CFIELDS, 'limit': 500}, token)
         except Exception:
-            continue
-        if not camps:
             continue
         cmeta = {c['id']: c for c in camps}
         # 2) today insights at campaign level
@@ -85,6 +99,16 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
                 ins[r['campaign_id']] = r
         except Exception:
             pass
+        # 2b) campaigns that DELIVERED today but are no longer active (paused today) —
+        # pull their meta so the snapshot/tracker shows them with status=Paused.
+        extra = [cid for cid in ins if cid not in cmeta]
+        if extra:
+            got = _batch_ids(extra, CFIELDS, token)
+            for cid, c in got.items():
+                if isinstance(c, dict) and c.get('name'):
+                    cmeta[cid] = c
+        if not cmeta:
+            continue
         # 3) ABO budget fallback: sum active adset budgets for campaigns w/ no campaign budget
         need_adset = [cid for cid, c in cmeta.items()
                       if not (int(c.get('daily_budget') or 0) or int(c.get('lifetime_budget') or 0))]
@@ -115,10 +139,11 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
                 age_h = None
             impr = int(r.get('impressions') or 0)
             clicks = int(r.get('clicks') or 0)
+            status = 'Active' if c.get('effective_status') == 'ACTIVE' else 'Paused'
             out.append({
                 'account_id': aid, 'account_name': accts.get(aid, aid),
                 'campaign_id': cid, 'campaign_name': c.get('name', ''),
-                'objective': c.get('objective', ''),
+                'objective': c.get('objective', ''), 'status': status,
                 'created_time': ct, 'age_hours': age_h,
                 'daily_budget': round(db / 100, 2),         # paise -> ₹
                 'spend': round(spend, 2), 'revenue': round(revenue, 2),

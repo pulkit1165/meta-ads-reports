@@ -86,6 +86,7 @@ def main():
             camps.append({
                 'id': cid, 'name': c['campaign_name'], 'account': c['account_name'],
                 'account_id': c['account_id'],
+                'status': (c['status'] if 'status' in c.keys() and c['status'] else 'Active'),
                 'objective': c['objective'], 'age': c['age_hours'], 'budget': c['daily_budget'],
                 'spend': c['spend'], 'revenue': c['revenue'], 'roas': c['roas'], 'orders': c['orders'],
                 'ctr': c['ctr'], 'cpc': c['cpc'], 'cpm': c['cpm'], 'cpa': c['cpa'],
@@ -178,6 +179,7 @@ function render(){
    const rows=sorted(C);
    v.innerHTML=`<div class="note">Report 2 — all active campaigns. Δ vs previous hour / 3h ago / day-start. Trend from 1h ROAS move.</div>`+
    tbl([{k:'name',t:'Campaign',l:1,f:r=>link(r)},{k:'account',t:'Account',l:1,f:r=>`<span class=muted>${r.account}</span>`},
+     {k:'status',t:'Status',l:1,f:r=>`<span class="pill ${r.status=='Paused'?'pi-dn':'pi-up'}">${r.status}</span>`},
      {k:'roas',t:'ROAS now',f:r=>f2(r.roas),cls:r=>'b '+(r.roas>=2?'g':r.roas>=1.25?'y':'r')},
      {k:'roas_1h',t:'Δ 1h',f:r=>chgPill(pct(r.roas,r.roas_1h))},
      {k:'roas_3h',t:'Δ 3h',f:r=>chgPill(pct(r.roas,r.roas_3h))},

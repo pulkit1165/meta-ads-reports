@@ -83,8 +83,9 @@ def main():
         alerting = bool(bkt is not None and spend_pct >= (30 if is_new else 50))
         d1 = pct(c['roas'], r1)
         trend = 'Improving' if (d1 and d1 > 1) else 'Declining' if (d1 and d1 < -1) else 'Stable'
+        status = c['status'] if 'status' in c.keys() and c['status'] else 'Active'
         rows.append([
-            c['campaign_name'], c['account_name'], c['objective'],
+            c['campaign_name'], c['account_name'], status, c['objective'],
             c['age_hours'], round(c['daily_budget']), round(c['spend']),
             round(spend_pct, 1), round(c['roas'], 2),
             round(d1, 1) if d1 is not None else '', round(pct(c['roas'], r3), 1) if pct(c['roas'], r3) is not None else '',
@@ -95,15 +96,16 @@ def main():
             if alerting else '',
         ])
     con.close()
-    rows.sort(key=lambda r: -(r[5] or 0))
+    rows.sort(key=lambda r: -(r[6] or 0))   # by Spend
 
-    header = ['Campaign', 'Account', 'Objective', 'Age(h)', 'Budget ₹', 'Spend ₹', 'Spend %',
+    header = ['Campaign', 'Account', 'Status', 'Objective', 'Age(h)', 'Budget ₹', 'Spend ₹', 'Spend %',
               'ROAS', 'Δ1h %', 'Δ3h %', 'DayStart ROAS', 'Revenue ₹', 'Orders',
               'CTR %', 'CPC ₹', 'CPM ₹', 'CPA ₹', 'Trend', 'Alert?', 'Alert Reason']
     updated = datetime.now(IST).strftime('%d %b %Y, %H:%M IST')
-    n_alert = sum(1 for r in rows if r[18] == 'YES')
-    top = [[f"📡 LIVE ROAS TRACKER — updated {updated} · {len(rows)} active campaigns · "
-            f"{n_alert} alerting · Meta pixel · auto-refresh hourly"]]
+    n_alert = sum(1 for r in rows if r[19] == 'YES')
+    n_paused = sum(1 for r in rows if r[2] == 'Paused')
+    top = [[f"📡 LIVE ROAS TRACKER — updated {updated} · {len(rows)} campaigns today "
+            f"({len(rows) - n_paused} active, {n_paused} paused) · {n_alert} alerting · Meta pixel · auto-refresh hourly"]]
     values = top + [header] + rows
 
     gc = gspread.service_account(filename=args.sa)
@@ -117,7 +119,7 @@ def main():
     # light formatting: bold header rows, freeze
     try:
         ws.freeze(rows=2)
-        ws.format('A1:T2', {'textFormat': {'bold': True}})
+        ws.format('A1:U2', {'textFormat': {'bold': True}})
     except Exception:
         pass
     print(f"wrote {len(rows)} campaigns to '{args.tab}' (slot {latest}, {n_alert} alerting)")

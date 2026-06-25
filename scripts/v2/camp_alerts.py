@@ -150,6 +150,8 @@ def main():
     rows = fetch_active_campaigns(tok, args.accounts, now=now)
     fired = 0
     for c in rows:
+        if c.get('status') != 'Active':
+            continue  # don't alert on campaigns already paused (even if they spent today)
         if not c['daily_budget']:
             continue
         spend_pct = c['spend'] / c['daily_budget'] * 100
