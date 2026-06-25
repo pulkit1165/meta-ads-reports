@@ -1,0 +1,85 @@
+name: Camp ROAS alert engine (every 15 min)
+
+# Every 15 min: evaluate alert conditions (New <24h: spend>=30% & low ROAS;
+# Mature >=24h: spend>=50% & ROAS<1.60) on live pixel data, dedup per ROAS
+# bucket per campaign per day, and email the recipient list. Reads "ROAS 1h ago"
+# from the snapshot DB. Shares the `camp-live` concurrency group with the hourly
+# snapshot job so DB writes (alert_log) never collide.
+#
+# Email stays DORMANT (evaluates + logs, but does not send) until the
+# GMAIL_USER + GMAIL_APP_PASSWORD secrets are set.
+on:
+  schedule:
+    - cron: "*/15 * * * *"     # GitHub cron is approximate (~±few min)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Evaluate + print only, never send/log"
+        type: boolean
+        default: false
+
+concurrency:
+  group: camp-live             # shared with camp-snapshots.yml
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  alerts:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      GMAIL_USER: ${{ secrets.GMAIL_USER }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      TZ: Asia/Kolkata
+      DB: state/camp_snapshots.db
+      SNAP_BRANCH: camp-snapshots
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+
+      - name: Restore snapshot DB from branch
+        run: |
+          set -e
+          mkdir -p state
+          if git ls-remote --exit-code --heads origin "$SNAP_BRANCH" >/dev/null 2>&1; then
+            git fetch --depth=1 origin "$SNAP_BRANCH:refs/remotes/origin/$SNAP_BRANCH"
+            if git cat-file -e "origin/$SNAP_BRANCH:camp_snapshots.db.gz" 2>/dev/null; then
+              git show "origin/$SNAP_BRANCH:camp_snapshots.db.gz" | gunzip > "$DB"
+            fi
+          fi
+
+      - name: Run alert engine
+        run: |
+          ARGS=""
+          [ "${{ inputs.dry_run }}" = "true" ] && ARGS="--dry-run"
+          python3 scripts/v2/camp_alerts.py --db "$DB" $ARGS
+
+      - name: Save alert_log to branch
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          set -e
+          [ -f "$DB" ] || { echo "no DB"; exit 0; }
+          git config user.name  "meta-ads-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          WT=.camp-wt; git worktree remove -f "$WT" 2>/dev/null || true; rm -rf "$WT"
+          if git ls-remote --exit-code --heads origin "$SNAP_BRANCH" >/dev/null 2>&1; then
+            git fetch --depth=1 origin "$SNAP_BRANCH:refs/remotes/origin/$SNAP_BRANCH"
+            git worktree add -f "$WT" "origin/$SNAP_BRANCH"
+          else
+            git worktree add -f --orphan -b "$SNAP_BRANCH" "$WT"; ( cd "$WT" && git rm -rf . 2>/dev/null || true )
+          fi
+          gzip -c "$DB" > "$WT/camp_snapshots.db.gz"
+          cd "$WT"; git add -A
+          if git diff --staged --quiet; then echo "no change"; exit 0; fi
+          git commit -m "camp-alerts log: $(date -u +%FT%TZ)"
+          for i in 1 2 3; do
+            git push origin "HEAD:$SNAP_BRANCH" && break
+            git fetch origin "$SNAP_BRANCH"; git reset --hard "origin/$SNAP_BRANCH"; gzip -c "../$DB" > camp_snapshots.db.gz; git add -A; git commit -m "overlay" || true
+          done
