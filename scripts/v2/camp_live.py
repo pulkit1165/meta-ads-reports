@@ -139,7 +139,8 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
                 age_h = None
             impr = int(r.get('impressions') or 0)
             clicks = int(r.get('clicks') or 0)
-            status = 'Active' if c.get('effective_status') == 'ACTIVE' else 'Paused'
+            # Active if Meta says ACTIVE, OR it actually delivered today (>1 impression)
+            status = 'Active' if (c.get('effective_status') == 'ACTIVE' or impr > 1) else 'Paused'
             out.append({
                 'account_id': aid, 'account_name': accts.get(aid, aid),
                 'campaign_id': cid, 'campaign_name': c.get('name', ''),
