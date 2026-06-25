@@ -49,6 +49,7 @@ def main():
     ap.add_argument('--db', default='state/camp_snapshots.db')
     ap.add_argument('--sheet', required=True)
     ap.add_argument('--tab', default='Live ROAS Tracker')
+    ap.add_argument('--matrix-tab', default='Hourly ROAS')
     ap.add_argument('--sa', default=os.environ.get('GOOGLE_SERVICE_ACCOUNT_FILE',
                                                    'google-service-account.json'))
     args = ap.parse_args()
@@ -95,7 +96,30 @@ def main():
             ('New' if is_new else 'Mature') + ': ' + (('ROAS=0' if bkt == 0 else 'ROAS<%.2f' % bkt) if alerting else '')
             if alerting else '',
         ])
+    # ── Hourly ROAS matrix (today): one row per campaign, one column per hour ──
+    day = latest[:10]
+    slots = [r[0] for r in con.execute(
+        "SELECT DISTINCT hour_slot FROM campaign_hourly_snapshots WHERE hour_slot LIKE ? "
+        "ORDER BY hour_slot", (day + '%',))]
+    mcamps = con.execute(
+        "SELECT campaign_id, campaign_name, account_name, MAX(spend) sp, MAX(status) st "
+        "FROM campaign_hourly_snapshots WHERE hour_slot LIKE ? GROUP BY campaign_id", (day + '%',)).fetchall()
+    grid = {}
+    for cid, slot, ro in con.execute(
+        "SELECT campaign_id, hour_slot, roas FROM campaign_hourly_snapshots WHERE hour_slot LIKE ?", (day + '%',)):
+        grid[(cid, slot)] = ro
     con.close()
+    mhdr = ['Campaign', 'Account', 'Status', 'Latest Spend ₹'] + [s[-5:] for s in slots]   # HH:00 cols
+    mrows = []
+    for r in mcamps:
+        cid = r['campaign_id']
+        mrows.append([r['campaign_name'], r['account_name'], r['st'] or '', round(r['sp'] or 0)]
+                     + [round(grid[(cid, s)], 2) if grid.get((cid, s)) is not None else '' for s in slots])
+    mrows.sort(key=lambda x: -(x[3] or 0))
+    mtop = [[f"⏱️ HOURLY ROAS — {day} (IST) · each column = the day's cumulative ROAS as of that hour · "
+             f"{len(mrows)} campaigns · Meta pixel · grows hourly"]]
+    mvalues = mtop + [mhdr] + mrows
+
     rows.sort(key=lambda r: -(r[6] or 0))   # by Spend
 
     header = ['Campaign', 'Account', 'Status', 'Objective', 'Age(h)', 'Budget ₹', 'Spend ₹', 'Spend %',
@@ -110,19 +134,24 @@ def main():
 
     gc = gspread.service_account(filename=args.sa)
     sh = gc.open_by_key(args.sheet)
-    try:
-        ws = sh.worksheet(args.tab)
-        ws.clear()
-    except gspread.WorksheetNotFound:
-        ws = sh.add_worksheet(title=args.tab, rows=max(len(values) + 20, 100), cols=len(header))
-    ws.update(range_name='A1', values=values)
-    # light formatting: bold header rows, freeze
-    try:
-        ws.freeze(rows=2)
-        ws.format('A1:U2', {'textFormat': {'bold': True}})
-    except Exception:
-        pass
-    print(f"wrote {len(rows)} campaigns to '{args.tab}' (slot {latest}, {n_alert} alerting)")
+
+    def write_tab(title, vals, ncols, bold_range):
+        try:
+            w = sh.worksheet(title)
+            w.clear()
+        except gspread.WorksheetNotFound:
+            w = sh.add_worksheet(title=title, rows=max(len(vals) + 20, 100), cols=max(ncols, 12))
+        w.update(range_name='A1', values=vals)
+        try:
+            w.freeze(rows=2)
+            w.format(bold_range, {'textFormat': {'bold': True}})
+        except Exception:
+            pass
+
+    write_tab(args.tab, values, len(header), 'A1:U2')
+    write_tab(args.matrix_tab, mvalues, len(mhdr), f'A1:{chr(65 + min(len(mhdr) - 1, 25))}2')
+    print(f"wrote {len(rows)} campaigns to '{args.tab}' + hourly matrix '{args.matrix_tab}' "
+          f"({len(slots)} hour-cols) (slot {latest}, {n_alert} alerting)")
 
 
 if __name__ == '__main__':
