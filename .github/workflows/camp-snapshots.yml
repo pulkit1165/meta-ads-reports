@@ -33,6 +33,16 @@ jobs:
         uses: actions/setup-python@v5
         with: { python-version: "3.11", cache: pip }
 
+      - name: Install gspread (for the Google Sheet push)
+        run: pip install gspread
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > google-service-account.json
+          chmod 600 google-service-account.json
+
       - name: Restore snapshot DB from branch
         run: |
           set -e
@@ -52,6 +62,15 @@ jobs:
 
       - name: Build live ROAS dashboard
         run: python3 scripts/v2/build_live_roas_dashboard.py --db "$DB" --out live-roas/index.html
+
+      - name: Push live tracker to Google Sheet
+        continue-on-error: true   # a sheet blip must never fail the snapshot/save
+        env:
+          GOOGLE_SERVICE_ACCOUNT_FILE: google-service-account.json
+        run: |
+          python3 scripts/v2/push_live_roas_to_sheet.py --db "$DB" \
+            --sheet 1eW2_qPdsKJ8zAV5-hsXA5HtfVH9NwDhQLyHYGKz5hXk \
+            --tab "Live ROAS Tracker"
 
       - name: Save DB + dashboard to branch
         run: |
