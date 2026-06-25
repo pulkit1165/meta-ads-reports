@@ -138,6 +138,13 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
             except Exception:
                 age_h = None
             impr = int(r.get('impressions') or 0)
+            # Only track campaigns that actually delivered today. Drops idle
+            # "ACTIVE" zombies (e.g. Credit Line 06, no impressions for days); any
+            # campaign auto-reappears the moment it incurs impressions. A campaign
+            # paused mid-day keeps showing all of today (today's impressions stay
+            # >0) with its ROAS frozen at the hour it went off.
+            if impr <= 0:
+                continue
             clicks = int(r.get('clicks') or 0)
             # Active if Meta says ACTIVE, OR it actually delivered today (>1 impression)
             status = 'Active' if (c.get('effective_status') == 'ACTIVE' or impr > 1) else 'Paused'
