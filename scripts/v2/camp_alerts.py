@@ -33,7 +33,7 @@ from camp_live import fetch_active_campaigns
 IST = timezone(timedelta(hours=5, minutes=30))
 
 RECIPIENTS = [
-    's.harpreetsahota@gmail.com', 'jagdeep.studdmuffyn@gmail.com',
+    's.harpreetsahota@gmail.com', 'yadavjagdeep.studdmuffyn@gmail.com',
     'navdeep.studdmuffyn@gmail.com', 'pulkit.studdmuffyn@gmail.com',
     'kindattitude@gmail.com', 'ankur.bhati2204@gmail.com',
 ]
