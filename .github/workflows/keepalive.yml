@@ -44,6 +44,10 @@ jobs:
           for i in 1 2 3 4 5; do
             code=$(dispatch v2-ingest.yml '{"ref":"main","inputs":{"source":"auto"}}')
             echo "tick $i/5 -> v2-ingest dispatched (HTTP $code) at $(date -u +%H:%M:%SZ)"
+            # Live ROAS alert engine on the same reliable 10-min heartbeat — its own
+            # cron was throttled to ~every 1.5-2h, defeating the 15-min/immediate rule.
+            acode=$(dispatch camp-alerts.yml '{"ref":"main"}')
+            echo "tick $i/5 -> camp-alerts dispatched (HTTP $acode)"
             if [ "$i" -lt 5 ]; then sleep 600; fi
           done
           # re-arm the chain so it continues without relying on GitHub's scheduler
