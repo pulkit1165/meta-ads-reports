@@ -146,8 +146,10 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
             if impr <= 0:
                 continue
             clicks = int(r.get('clicks') or 0)
-            # Active if Meta says ACTIVE, OR it actually delivered today (>1 impression)
-            status = 'Active' if (c.get('effective_status') == 'ACTIVE' or impr > 1) else 'Paused'
+            # Status = Meta's live state. A campaign you've paused reads "Paused"
+            # (with today's ROAS frozen at its last active hour) even though it
+            # delivered earlier today and so still appears (impr>0 inclusion above).
+            status = 'Active' if c.get('effective_status') == 'ACTIVE' else 'Paused'
             out.append({
                 'account_id': aid, 'account_name': accts.get(aid, aid),
                 'campaign_id': cid, 'campaign_name': c.get('name', ''),
