@@ -109,19 +109,22 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
                     cmeta[cid] = c
         if not cmeta:
             continue
-        # 3) ABO budget fallback: sum active adset budgets for campaigns w/ no campaign budget
+        # 3) ABO budget fallback: campaigns with no campaign-level (daily or lifetime)
+        # budget set it at the ADSET level. Fetch adsets PER-CAMPAIGN (only for the
+        # delivering ones that lack a campaign budget) — an account-wide adset pull
+        # gets truncated on big accounts and silently drops budgets, which would
+        # leave a campaign at budget=0 and make the alert engine MISS it.
         need_adset = [cid for cid, c in cmeta.items()
-                      if not (int(c.get('daily_budget') or 0) or int(c.get('lifetime_budget') or 0))]
-        adset_budget = {}
-        if need_adset:
+                      if cid in ins
+                      and not (int(c.get('daily_budget') or 0) or int(c.get('lifetime_budget') or 0))]
+        adset_daily, adset_life = {}, {}
+        for cid in need_adset:
             try:
-                for a in _paged(f"{aid}/adsets",
+                for a in _paged(f"{cid}/adsets",
                                 {'effective_status': "['ACTIVE']",
-                                 'fields': 'campaign_id,daily_budget,lifetime_budget',
-                                 'limit': 500}, token):
-                    cid = a.get('campaign_id')
-                    if cid in cmeta:
-                        adset_budget[cid] = adset_budget.get(cid, 0) + int(a.get('daily_budget') or 0)
+                                 'fields': 'daily_budget,lifetime_budget', 'limit': 200}, token):
+                    adset_daily[cid] = adset_daily.get(cid, 0) + int(a.get('daily_budget') or 0)
+                    adset_life[cid] = adset_life.get(cid, 0) + int(a.get('lifetime_budget') or 0)
             except Exception:
                 pass
         for cid, c in cmeta.items():
@@ -130,7 +133,11 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
             revenue = _action(r.get('action_values'), 'omni_purchase')
             orders = int(_action(r.get('actions'), 'omni_purchase'))
             roas = (revenue / spend) if spend else 0.0
-            db = int(c.get('daily_budget') or 0) or adset_budget.get(cid, 0)
+            # budget basis (paise): campaign daily → campaign lifetime → adset daily
+            # → adset lifetime. Ensures spend% is always computable so no campaign
+            # meeting the 30%/50% condition is skipped.
+            db = (int(c.get('daily_budget') or 0) or int(c.get('lifetime_budget') or 0)
+                  or adset_daily.get(cid, 0) or adset_life.get(cid, 0))
             ct = c.get('created_time', '')
             try:
                 cdt = datetime.fromisoformat(ct.replace('+0000', '+00:00'))
