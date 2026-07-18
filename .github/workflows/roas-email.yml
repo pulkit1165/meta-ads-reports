@@ -4,6 +4,10 @@ name: ROAS email (hourly)
 # once per IST hour. Read-only: it never pauses a campaign (that lives in
 # camp_closing.py, armed separately via AUTOPAUSE_LIVE).
 #
+# The page is rebuilt on EVERY run (every 5-10 min) with Meta spend and Shopify
+# orders both re-pulled live, so it is never showing stale data. The EMAIL is
+# separately gated to one send per IST hour.
+#
 # NOT MISSING AN HOUR is the whole design here. GitHub silently skips roughly a
 # third of scheduled cron ticks under load, so a single hourly cron would drop
 # hours with no warning. Instead we fire THREE times an hour and gate on a
@@ -16,7 +20,11 @@ name: ROAS email (hourly)
 # camp-snapshots or state branches.
 on:
   schedule:
-    - cron: "3,23,43 * * * *"
+    # Every 5 minutes. GitHub throttles and skips plenty of these, which is why
+    # keepalive.yml also dispatches this workflow on its own 10-minute heartbeat.
+    # Between the two, a build lands every 5-10 minutes in practice, so the page
+    # is never reading spend or sales more than a few minutes old.
+    - cron: "*/5 * * * *"
   workflow_dispatch:
     inputs:
       to:

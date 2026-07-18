@@ -18,6 +18,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import sqlite3
 import sys
 from datetime import datetime, timedelta, timezone
@@ -34,10 +35,10 @@ from camp_closing import build_first_activity, collect  # noqa: E402
 IST = timezone(timedelta(hours=5, minutes=30))
 WEBSITE = {'SM': 'Studd Muffyn', 'SML': 'SM Life', 'NBP': 'Nuskhe by Paras'}
 
-# The workflow cron is "3,23,43 * * * *" — and GitHub crons run in UTC. IST is
-# UTC+5:30, so those land at :33, :53 and :13 past the hour in IST. KEEP IN SYNC
-# with .github/workflows/roas-email.yml if that schedule changes.
-UPDATE_MINUTES_IST = (13, 33, 53)
+# The workflow cron is "*/5 * * * *" in UTC. IST is UTC+5:30, and 30 is a
+# multiple of 5, so the IST minutes land on the same 5-minute grid: :00, :05,
+# :10 ... KEEP IN SYNC with .github/workflows/roas-email.yml.
+UPDATE_MINUTES_IST = tuple(range(0, 60, 5))
 
 
 def next_update(now):
@@ -98,6 +99,12 @@ summary::after{content:'\25be';color:#aab4c0;font-size:11px}
 details[open] summary::after{content:'\25b4'}
 summary .m{font-weight:400;color:#7a8798;font-size:12px}
 .run{color:#0a7d3c;font-weight:700}
+.badge{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.06em;
+       padding:3px 9px;border-radius:11px;margin-right:8px;vertical-align:1px}
+.badge.live{background:#e3f5e9;color:#0a7d3c}
+.badge.warnb{background:#fff2d4;color:#8a6100}
+.badge.dead{background:#fdeae7;color:#b03024}
+#age{font-size:12px;color:#5a6b7d}
 .dot.stale{background:#e08a00}
 .warn{color:#b06800;font-weight:600;font-size:11px}
 .pulse{animation:pl 1.1s ease-in-out infinite}
@@ -215,10 +222,10 @@ def main():
          f'<title>ROAS {a["roas"]:.2f} — {day}</title>',
          f'<style>{CSS}</style></head><body><div class="wrap">',
          '<div class="bar"><h1>Blended ROAS &mdash; hourly</h1>',
-         f'<div class="stamp"><span class="dot{" stale" if data_age > 25 else ""}"></span>'
-         f'Data as of <b>{data_txt}</b>'
-         + (f' <span class="warn">{data_age} min old</span>' if data_age > 25 else '')
-         + f'<span class="nxt">Page built {stamp}</span>'
+         f'<div class="stamp">'
+         f'<span id="badge" class="badge live">&#9679; LIVE</span>'
+         f'<span id="age">data {data_age} min old &middot; {data_txt}</span>'
+         f'<span class="nxt" id="chk">checking\u2026</span>'
          f'<span class="nxt" id="nxt">Next update ~{nxt_txt}</span></div></div>']
 
     # hero
@@ -329,8 +336,43 @@ def main():
     # Live status: counts down to the next scheduled rebuild, flips to a pulsing
     # "Refreshing now" once due, then reloads to pick up the new deploy. Paced at
     # 45s so a late build (GitHub queueing) doesn't hammer the page.
+    # Liveness monitor. Polls status.json every 2 minutes (no-store, so never a
+    # cached answer) and reports whether the pipeline is actually alive rather
+    # than just when this HTML happened to be generated. If the poll comes back
+    # with a newer data_ts, the page reloads itself so what you are looking at
+    # is never behind what has been published.
+    #
+    # LIVE_MAX_MIN is 15 because that is the real floor: builds land roughly
+    # every 5-10 minutes (cron plus the keepalive heartbeat), so anything fresher
+    # than 15 minutes means the pipeline is keeping up. Past 25 it is degraded,
+    # past 45 something is broken.
     h.append(f'''<script>
-var NEXT={int(nxt.timestamp() * 1000)}, tried=0;
+var DATA_TS = "{snap_ts or ''}", POLL = 120000;
+function fmt(t){{ return t.toTimeString().slice(0,8); }}
+function paint(ageMin, checkedAt, ok){{
+  var b=document.getElementById('badge'), a=document.getElementById('age'),
+      c=document.getElementById('chk');
+  if(!b) return;
+  if(!ok){{ b.className='badge dead'; b.innerHTML='&#9679; CHECK FAILED'; }}
+  else if(ageMin>45){{ b.className='badge dead'; b.innerHTML='&#9679; NOT LIVE'; }}
+  else if(ageMin>25){{ b.className='badge warnb'; b.innerHTML='&#9679; DELAYED'; }}
+  else {{ b.className='badge live'; b.innerHTML='&#9679; LIVE'; }}
+  if(a) a.textContent='data '+ageMin+' min old';
+  if(c) c.textContent='live status checked '+fmt(checkedAt)+' \u00b7 rechecks every 2 min';
+}}
+function check(){{
+  fetch('status.json?t='+Date.now(), {{cache:'no-store'}})
+    .then(function(r){{ return r.json(); }})
+    .then(function(j){{
+      var age = Math.max(0, Math.round((Date.now()-new Date(j.data_ts).getTime())/60000));
+      paint(age, new Date(), true);
+      if(j.data_ts && DATA_TS && j.data_ts !== DATA_TS) location.reload();
+    }})
+    .catch(function(){{ paint(999, new Date(), false); }});
+}}
+check(); setInterval(check, POLL);
+
+var NEXT={int(nxt.timestamp() * 1000)};
 function tick(){{
   var el=document.getElementById('nxt'); if(!el) return;
   var d=NEXT-Date.now();
@@ -339,7 +381,6 @@ function tick(){{
     el.innerHTML='Next update ~'+(m>0?m+'m ':'')+('0'+s).slice(-2)+'s';
   }} else {{
     el.innerHTML='<span class="run pulse">&#9679; Refreshing now\u2026</span>';
-    if(Date.now()-NEXT>45000+tried*45000){{ tried++; location.reload(); }}
   }}
 }}
 tick(); setInterval(tick,1000);
@@ -349,6 +390,18 @@ tick(); setInterval(tick,1000);
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text('\n'.join(h), encoding='utf-8')
+
+    # Heartbeat the page polls every 2 minutes. Kept tiny and served no-store
+    # (see roas-live/vercel.json) so the check is cheap and never cached — the
+    # page can tell whether the pipeline is alive without reloading itself.
+    (out.parent / 'status.json').write_text(json.dumps({
+        'data_ts': snap_ts,
+        'data_age_min': data_age,
+        'built_ts': now.isoformat(timespec='seconds'),
+        'next_update_ts': nxt.isoformat(timespec='seconds'),
+        'roas': a['roas'], 'sales': a['rev'], 'spend': a['spend'],
+        'orders': a['orders'], 'products': a['products'],
+    }, indent=1), encoding='utf-8')
     print(f'wrote {out} — ROAS {a["roas"]:.2f}, {len(rows)} hour rows, '
           f'{len(arch)} archived days, {len(act)} decisions, stamp {stamp}, '
           f'next ~{nxt:%H:%M} IST')
