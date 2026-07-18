@@ -78,7 +78,7 @@ def _pct(cur, prev):
     return f'<span class="{cls}">{d:+.0f}%</span>'
 
 
-def build_html(day, rows, tot, closing, slot, lk16):
+def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date=''):
     latest = max((r['slot'] for r in rows if r['has_snap'] and r['ad_spend']), default=None)
     prev = max((r['slot'] for r in rows
                 if r['has_snap'] and r['ad_spend'] and r['slot'] < (latest or '')), default=None)
@@ -105,6 +105,15 @@ def build_html(day, rows, tot, closing, slot, lk16):
     h.append(f'<tr class="tot"><td>ALL</td><td>&#8377;{a["rev"]:,.0f}</td>'
              f'<td>&#8377;{a["spend"]:,.0f}</td><td>{a["roas"]:.2f}</td>'
              f'<td>{a["orders"]:,}</td><td>{a["products"]}</td></tr></table>')
+    if yday:
+        # Early in the IST day "today" is nearly empty, which makes the numbers
+        # above look alarming out of context. Yesterday's close is the yardstick.
+        y = yday['ALL']
+        h.append(f'<div class="note">Yesterday ({yday_date}) closed at '
+                 f'<b>{y["roas"]:.2f}</b> &mdash; &#8377;{y["rev"]:,.0f} on '
+                 f'&#8377;{y["spend"]:,.0f}'
+                 + ' &middot; ' + ' &middot; '.join(
+                     f'{p} {yday[p]["roas"]:.2f}' for p in PORTALS) + '</div>')
     h.append('<div class="note">Blended = <b>all</b> Shopify revenue over Meta spend, so it '
              'includes organic and repeat orders &mdash; it is a profitability read for the '
              'website, not a campaign metric. Products are counted per website.</div>')
@@ -187,6 +196,8 @@ def main():
     ap.add_argument('--day', default=None)
     ap.add_argument('--to', default=None, help='comma-separated override of RECIPIENTS')
     ap.add_argument('--dry-run', action='store_true', help='print, do not send')
+    ap.add_argument('--min-spend', type=float, default=2000,
+                    help='skip sending below this much ad spend today (default 2000)')
     args = ap.parse_args()
 
     day = args.day or today_ist()
@@ -200,13 +211,27 @@ def main():
     tot = summarise(portal_rows)
     rows = portal_rows + all_portal_rows(portal_rows)
 
+    # Just after IST midnight the day has almost no spend, so ROAS reads 0.00 and
+    # the mail is pure noise — three of them land before 01:30 every night.
+    if tot['ALL']['spend'] < args.min_spend:
+        print(f"today's spend Rs{tot['ALL']['spend']:,.0f} is below the "
+              f"Rs{args.min_spend:,.0f} floor — the day has barely started, not sending")
+        return
+
+    yday_date = (datetime.strptime(day, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
+    try:
+        yrows = build_rows(args.snap_db, args.ntn_db, yday_date)
+        yday = summarise(yrows) if yrows else None
+    except Exception:
+        yday = None
+
     con = sqlite3.connect(f'file:{args.snap_db}?mode=ro', uri=True)
     lk16, lk21 = build_both(args.snap_db, exclude_day=day)
     closing = collect(con, day, lk16, lk21, build_first_activity(con))
     con.close()
     slot = closing[0]['slot'] if closing else f'{day} 00:00'
 
-    html = build_html(day, rows, tot, closing, slot, lk16)
+    html = build_html(day, rows, tot, closing, slot, lk16, yday, yday_date)
     text = text_fallback(day, tot, closing, slot)
     a = tot['ALL']
     n_act = sum(1 for r in closing if r['verdict'] in ('PAUSE', 'REVIEW', 'WATCH'))
