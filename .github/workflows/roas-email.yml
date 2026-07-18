@@ -52,6 +52,12 @@ jobs:
       STATE_FILE: email-state/roas_email_sent.json
       GMAIL_USER: ${{ secrets.GMAIL_USER }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
+      SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+      SHOPIFY_STORE_URL_SML: ${{ secrets.SHOPIFY_STORE_URL_SML }}
+      SHOPIFY_ACCESS_TOKEN_SML: ${{ secrets.SHOPIFY_ACCESS_TOKEN_SML }}
+      SHOPIFY_STORE_URL_NBP: ${{ secrets.SHOPIFY_STORE_URL_NBP }}
+      SHOPIFY_ACCESS_TOKEN_NBP: ${{ secrets.SHOPIFY_ACCESS_TOKEN_NBP }}
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 1 }
@@ -102,7 +108,7 @@ jobs:
           PY
           )
           echo "newest snapshot is ${AGE} min old"
-          if [ "$AGE" -ge 12 ]; then
+          if [ "$AGE" -ge 5 ]; then
             python3 scripts/v2/camp_snapshot.py --db "$SNAP_DB"
             echo "SNAP_UPDATED=1" >> "$GITHUB_ENV"
           else
@@ -127,6 +133,17 @@ jobs:
             gzip -c "../$SNAP_DB" > camp_snapshots.db.gz
             git add -A && git commit -m "snapshot overlay" || true
           done
+
+      # v2-ingest runs every 10 minutes but its DB push lags, so the branch copy
+      # trailed live Shopify by ~20 minutes — Rs27,667 in the database against
+      # Rs34,805 actually taken. Pulling today's orders directly here means the
+      # sales figure matches what Shopify admin shows, instead of quietly
+      # under-reporting. Idempotent upsert, so it cannot double-count.
+      - name: Refresh today's Shopify orders
+        continue-on-error: true      # fall back to the branch copy if a store 500s
+        run: |
+          pip install --quiet requests python-dotenv
+          python3 scripts/v2/ingest_shopify.py --days 1 2>&1 | tail -6
 
       - name: Freshness check
         # Surfaces a stale feed in the job log instead of silently mailing old
