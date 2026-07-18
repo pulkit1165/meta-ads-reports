@@ -1,0 +1,4 @@
+# The page is unauthenticated by operator request, so at minimum keep it out of
+# search results — a public URL that is also indexed is a different exposure.
+User-agent: *
+Disallow: /

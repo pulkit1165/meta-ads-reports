@@ -150,6 +150,9 @@ def main():
     h = [f'<!doctype html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width,initial-scale=1">',
          '<meta http-equiv="refresh" content="600">',      # nudge the tab every 10 min
+         # No login gate (operator's call), so at least keep it out of search
+         # indexes — this page shows per-website revenue, spend and budgets.
+         '<meta name="robots" content="noindex,nofollow,noarchive">',
          f'<title>ROAS {a["roas"]:.2f} — {day}</title>',
          f'<style>{CSS}</style></head><body><div class="wrap">',
          '<div class="bar"><h1>Blended ROAS &mdash; hourly</h1>',
