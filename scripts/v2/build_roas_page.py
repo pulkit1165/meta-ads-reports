@@ -130,7 +130,7 @@ def rupee(v):
 
 HOUR_HEAD = ('<tr><th>Hour IST</th>'
              + ''.join(f'<th>{p}</th>' for p in PORTALS)
-             + '<th>Sales</th><th>Spend</th><th>ROAS</th>'
+             + '<th>Sales</th><th>Orders</th><th>Spend</th><th>ROAS</th>'
                '<th>Budget live</th><th>Budget closed</th><th>Products</th></tr>')
 
 
@@ -149,7 +149,7 @@ def hour_log(prows, arows, mark_last=False):
             continue
         if not a['has_snap']:
             out.append(f'<tr class="gap"><td>{slot[-5:]}</td>'
-                       f'<td colspan="9">no snapshot this hour</td></tr>')
+                       f'<td colspan="10">no snapshot this hour</td></tr>')
             continue
         if not (a['ad_spend'] or a['shopify_sale']):
             continue
@@ -159,12 +159,13 @@ def hour_log(prows, arows, mark_last=False):
             if c and (c['ad_spend'] or c['active_budget']):
                 cells += (f'<td>{c["roas"]:.2f}'
                           f'<span class="sub2">{rupee(c["active_budget"])} '
-                          f'&middot; {c["products"]}p</span></td>')
+                          f'&middot; {c["products"]}p &middot; {c["orders"]}o</span></td>')
             else:
                 cells += '<td class="mut">&mdash;</td>'
         out.append(
             f'<tr><td>{slot[-5:]}</td>{cells}'
-            f'<td>{rupee(a["shopify_sale"])}</td><td>{rupee(a["ad_spend"])}</td>'
+            f'<td>{rupee(a["shopify_sale"])}</td><td>{a["orders"]}</td>'
+            f'<td>{rupee(a["ad_spend"])}</td>'
             f'<td class="big">{a["roas"]:.2f}</td>'
             f'<td>{rupee(a["active_budget"])}</td>'
             f'<td class="mut">{rupee(a["closed_budget"])}</td>'
@@ -247,18 +248,20 @@ def main():
     # today by website
     if tot:
         h.append('<div class="card"><h2>Today by website</h2><div class="scroll"><table>')
-        h.append('<tr><th>Website</th><th>Sales</th><th>Spend</th><th>ROAS</th>'
-                 '<th>Yesterday</th><th>Budget live</th><th>Budget closed</th>'
-                 '<th>Products</th></tr>')
+        h.append('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
+                 '<th>ROAS</th><th>Yesterday</th><th>Budget live</th>'
+                 '<th>Budget closed</th><th>Products</th></tr>')
         for p in PORTALS:
             t = tot[p]
             yv = f'{yday[p]["roas"]:.2f}' if yday else '&mdash;'
             h.append(f'<tr><td class="site">{WEBSITE[p]}</td><td>{rupee(t["rev"])}</td>'
+                     f'<td>{t["orders"]:,}</td>'
                      f'<td>{rupee(t["spend"])}</td><td class="big">{t["roas"]:.2f}</td>'
                      f'<td class="mut">{yv}</td><td>{rupee(t["active_budget"])}</td>'
                      f'<td class="mut">{rupee(t["closed_budget"])}</td>'
                      f'<td>{t["products"]}</td></tr>')
         h.append(f'<tr class="tot"><td>All</td><td>{rupee(a["rev"])}</td>'
+                 f'<td>{a["orders"]:,}</td>'
                  f'<td>{rupee(a["spend"])}</td><td>{a["roas"]:.2f}</td><td></td>'
                  f'<td>{rupee(a["active_budget"])}</td>'
                  f'<td>{rupee(a["closed_budget"])}</td>'
@@ -270,7 +273,7 @@ def main():
     h.append('<div class="card"><h2>Hour by hour &mdash; today</h2><div class="scroll"><table>')
     h.append(HOUR_HEAD)
     h.append(''.join(rows) if rows else
-             '<tr><td colspan="10" class="mut">no hours recorded yet today</td></tr>')
+             '<tr><td colspan="11" class="mut">no hours recorded yet today</td></tr>')
     h.append('</table></div>')
     h.append('<div class="foot" style="text-align:left;padding-left:0">Each website cell shows '
              'that hour\'s ROAS, with active budget and live product count beneath.</div>')
@@ -300,8 +303,8 @@ def main():
             h.append(
                 f'<details><summary><span>{label}</span>'
                 f'<span class="m">ROAS {t["roas"]:.2f} &middot; {rupee(t["rev"])} on '
-                f'{rupee(t["spend"])} &middot; {per} &middot; '
-                f'{rupee(t["closed_budget"])} closed</span></summary>'
+                f'{rupee(t["spend"])} &middot; {t["orders"]:,} orders &middot; {per} '
+                f'&middot; {rupee(t["closed_budget"])} closed</span></summary>'
                 f'<div class="scroll"><table>{HOUR_HEAD}'
                 + ''.join(hour_log(pr, ar))
                 + '</table></div></details>')

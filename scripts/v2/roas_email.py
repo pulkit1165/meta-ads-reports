@@ -129,19 +129,22 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
 
     # ---- by website ----
     h.append('<div class="card"><h2>Today by website</h2><table>')
-    h.append('<tr><th>Website</th><th>Sales</th><th>Spend</th><th>ROAS</th>'
-             '<th>Budget live</th><th>Budget closed</th><th>Products</th></tr>')
+    h.append('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
+             '<th>ROAS</th><th>Budget live</th><th>Budget closed</th>'
+             '<th>Products</th></tr>')
     for p in PORTALS:
         t = tot[p]
         yv = (f'<div class="mut" style="font-size:11px">yest {yday[p]["roas"]:.2f}</div>'
               if yday else '')
         h.append(f'<tr><td class="site">{WEBSITE[p]}</td>'
-                 f'<td>&#8377;{t["rev"]:,.0f}</td><td>&#8377;{t["spend"]:,.0f}</td>'
+                 f'<td>&#8377;{t["rev"]:,.0f}</td><td>{t["orders"]:,}</td>'
+                 f'<td>&#8377;{t["spend"]:,.0f}</td>'
                  f'<td class="big">{t["roas"]:.2f}{yv}</td>'
                  f'<td>&#8377;{t["active_budget"]:,.0f}</td>'
                  f'<td class="mut">&#8377;{t["closed_budget"]:,.0f}</td>'
                  f'<td>{t["products"]}</td></tr>')
     h.append(f'<tr class="tot"><td>All</td><td>&#8377;{a["rev"]:,.0f}</td>'
+             f'<td>{a["orders"]:,}</td>'
              f'<td>&#8377;{a["spend"]:,.0f}</td><td>{a["roas"]:.2f}</td>'
              f'<td>&#8377;{a["active_budget"]:,.0f}</td>'
              f'<td>&#8377;{a["closed_budget"]:,.0f}</td>'
@@ -151,8 +154,8 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
     # ---- latest hour ----
     if latest:
         h.append(f'<div class="card"><h2>Latest hour &mdash; {latest[-5:]} IST</h2><table>')
-        h.append('<tr><th>Website</th><th>Sales</th><th>Spend</th><th>ROAS</th>'
-                 '<th>Budget live</th><th>Products</th></tr>')
+        h.append('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
+                 '<th>ROAS</th><th>Budget live</th><th>Products</th></tr>')
         for p in PORTALS:
             c = at(p, latest)
             if not c:
@@ -165,6 +168,7 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
                       else ' <span class="mut">&mdash;</span>')
             h.append(f'<tr><td class="site">{WEBSITE[p]}</td>'
                      f'<td>&#8377;{c["shopify_sale"]:,.0f}</td>'
+                     f'<td>{c["orders"]}</td>'
                      f'<td>&#8377;{c["ad_spend"]:,.0f}</td>'
                      f'<td class="big">{c["roas"]:.2f}</td>'
                      f'<td>&#8377;{c["active_budget"]:,.0f}</td>'
@@ -216,7 +220,7 @@ def text_fallback(day, tot, closing, slot):
     for p in PORTALS:
         t = tot[p]
         out.append(f'  {WEBSITE[p]:16} Rs{t["rev"]:>9,.0f} / Rs{t["spend"]:>9,.0f} = '
-                   f'{t["roas"]:.2f}  ({t["products"]} products, budget live '
+                   f'{t["roas"]:.2f}  ({t["orders"]} orders, {t["products"]} products, budget live '
                    f'Rs{t["active_budget"]:,.0f}, closed Rs{t["closed_budget"]:,.0f})')
     act = [r for r in closing if r['verdict'] in ('PAUSE', 'REVIEW', 'WATCH')]
     out += ['', f'NEEDS A DECISION: {len(act)}']
