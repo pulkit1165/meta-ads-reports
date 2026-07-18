@@ -33,7 +33,9 @@ on:
         default: false
 
 concurrency:
-  group: roas-email          # never two attempts racing the same hour's state
+  # camp-live is shared with camp-snapshots.yml / camp-alerts.yml because this
+  # workflow now also writes camp_snapshots.db when the snapshot has gone stale.
+  group: camp-live
   cancel-in-progress: false
 
 permissions:
@@ -78,6 +80,53 @@ jobs:
             echo '{"sent_hours":[]}' > "$STATE_FILE"
           fi
           echo "state: $(cat "$STATE_FILE" | head -c 300)"
+
+      # THE reason ROAS read wrong: GitHub was dropping two of camp-snapshots'
+      # three hourly ticks, so Meta spend sat frozen for up to an hour while
+      # Shopify kept ingesting every 10 minutes. Revenue ran ahead of spend and
+      # inflated ROAS (5.25 against a true 2.29 in one observed case). Taking our
+      # own snapshot when the last one is stale removes the dependency on that
+      # cron firing at all.
+      - name: Refresh Meta snapshot if stale
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+        run: |
+          AGE=$(python3 - <<'PY'
+          import sqlite3, os
+          from datetime import datetime, timezone, timedelta
+          IST = timezone(timedelta(hours=5, minutes=30))
+          r = sqlite3.connect(os.environ['SNAP_DB']).execute(
+              "SELECT MAX(ts) FROM campaign_hourly_snapshots").fetchone()[0]
+          print(int((datetime.now(IST) - datetime.fromisoformat(r)).total_seconds() // 60)
+                if r else 999)
+          PY
+          )
+          echo "newest snapshot is ${AGE} min old"
+          if [ "$AGE" -ge 12 ]; then
+            python3 scripts/v2/camp_snapshot.py --db "$SNAP_DB"
+            echo "SNAP_UPDATED=1" >> "$GITHUB_ENV"
+          else
+            echo "fresh enough — reusing it (no Meta call)"
+          fi
+
+      - name: Save refreshed snapshot to branch
+        if: ${{ env.SNAP_UPDATED == '1' }}
+        run: |
+          set -e
+          git config user.name  "meta-ads-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          WT=.snap-wt; git worktree remove -f "$WT" 2>/dev/null || true; rm -rf "$WT"
+          git worktree add -f "$WT" origin/camp-snapshots
+          gzip -c "$SNAP_DB" > "$WT/camp_snapshots.db.gz"
+          cd "$WT"; git add -A
+          if git diff --staged --quiet; then echo "no change"; exit 0; fi
+          git commit -m "snapshot via roas-email: $(date -u +%FT%TZ)"
+          for i in 1 2 3; do
+            git push origin HEAD:camp-snapshots && { echo pushed; break; }
+            git fetch origin camp-snapshots && git reset --hard origin/camp-snapshots
+            gzip -c "../$SNAP_DB" > camp_snapshots.db.gz
+            git add -A && git commit -m "snapshot overlay" || true
+          done
 
       - name: Freshness check
         # Surfaces a stale feed in the job log instead of silently mailing old

@@ -37,7 +37,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from portal_hourly import (  # noqa: E402
-    PORTALS, all_portal_rows, build_rows, summarise, today_ist,
+    PORTALS, all_portal_rows, build_rows, latest_snapshot_ts, summarise, today_ist,
 )
 from success_lookup import TARGET_ROAS, build_both  # noqa: E402
 from camp_closing import build_first_activity, collect  # noqa: E402
@@ -124,7 +124,7 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
         cls = 'up' if d > 0 else 'dn' if d < 0 else 'mut'
         h.append(f'<div class="vs">vs yesterday {y["roas"]:.2f} '
                  f'<span class="{cls}">{d:+.2f}</span></div>')
-    h.append(f'<div class="vs">{day} &middot; as of {slot[-5:]} IST</div>')
+    h.append(f'<div class="vs">{day} &middot; data as of {slot} IST</div>')
     h.append('</div>')
 
     # ---- by website ----
@@ -210,7 +210,7 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
 
 def text_fallback(day, tot, closing, slot):
     a = tot['ALL']
-    out = [f'BLENDED ROAS {a["roas"]:.2f} — {day} as of {slot[-5:]} IST',
+    out = [f'BLENDED ROAS {a["roas"]:.2f} — {day} data as of {slot} IST',
            f'Rs{a["rev"]:,.0f} sales / Rs{a["spend"]:,.0f} spend · {a["products"]} products live',
            f'Budget live Rs{a["active_budget"]:,.0f} · closed so far Rs{a["closed_budget"]:,.0f}', '']
     for p in PORTALS:
@@ -301,7 +301,12 @@ def main():
     lk16, lk21 = build_both(args.snap_db, exclude_day=day)
     closing = collect(con, day, lk16, lk21, build_first_activity(con))
     con.close()
-    slot = closing[0]['slot'] if closing else f'{day} 00:00'
+    # Report the moment spend was measured, not the hour bucket — an hour_slot
+    # of '01:00' can hold a snapshot taken at 01:22, and the gap is where a
+    # stale-looking ROAS hides.
+    snap_ts = latest_snapshot_ts(args.snap_db, day)
+    slot = (datetime.fromisoformat(snap_ts).strftime('%H:%M') if snap_ts
+            else (closing[0]['slot'][-5:] if closing else '00:00'))
 
     html = build_html(day, rows, tot, closing, slot, lk16, yday, yday_date, gap_note)
     text = text_fallback(day, tot, closing, slot)
@@ -309,7 +314,7 @@ def main():
     n_act = sum(1 for r in closing if r['verdict'] in ('PAUSE', 'REVIEW', 'WATCH'))
     subject = (f'ROAS {a["roas"]:.2f} · ₹{a["rev"]/100000:.1f}L sales / ₹{a["spend"]/100000:.1f}L '
                f'spend · {a["products"]} products'
-               + (f' · {n_act} need action' if n_act else '') + f' · {slot[-5:]} IST')
+               + (f' · {n_act} need action' if n_act else '') + f' · {slot} IST')
 
     to = [x.strip() for x in args.to.split(',')] if args.to else RECIPIENTS
     user = os.environ.get('GMAIL_USER')

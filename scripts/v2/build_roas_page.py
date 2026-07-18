@@ -26,7 +26,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from portal_hourly import (  # noqa: E402
-    PORTALS, all_portal_rows, build_rows, summarise,
+    PORTALS, all_portal_rows, build_rows, latest_snapshot_ts, summarise,
 )
 from success_lookup import TARGET_ROAS, build_both  # noqa: E402
 from camp_closing import build_first_activity, collect  # noqa: E402
@@ -98,6 +98,8 @@ summary::after{content:'\25be';color:#aab4c0;font-size:11px}
 details[open] summary::after{content:'\25b4'}
 summary .m{font-weight:400;color:#7a8798;font-size:12px}
 .run{color:#0a7d3c;font-weight:700}
+.dot.stale{background:#e08a00}
+.warn{color:#b06800;font-weight:600;font-size:11px}
 .pulse{animation:pl 1.1s ease-in-out infinite}
 @keyframes pl{0%,100%{opacity:1}50%{opacity:.35}}
 .act{padding:10px 0;border-bottom:1px solid #f0f3f7}
@@ -191,6 +193,16 @@ def main():
 
     a = tot['ALL'] if tot else {'roas': 0, 'rev': 0, 'spend': 0, 'orders': 0, 'products': 0}
     stamp = now.strftime('%d %b %Y, %H:%M IST')
+    # The number that matters is when META SPEND was last measured, not when
+    # this HTML was generated. Reporting build time as "last updated" made a
+    # 72-minute-old spend figure look current.
+    snap_ts = latest_snapshot_ts(args.snap_db, day)
+    if snap_ts:
+        sdt = datetime.fromisoformat(snap_ts)
+        data_age = int((now - sdt).total_seconds() // 60)
+        data_txt = f'{sdt:%d %b, %H:%M} IST'
+    else:
+        data_age, data_txt = 0, 'no snapshot yet'
     nxt = next_update(now)
     mins = max(1, round((nxt - now).total_seconds() / 60))
     nxt_txt = f'{nxt:%H:%M} IST &middot; in {mins} min'
@@ -203,7 +215,10 @@ def main():
          f'<title>ROAS {a["roas"]:.2f} — {day}</title>',
          f'<style>{CSS}</style></head><body><div class="wrap">',
          '<div class="bar"><h1>Blended ROAS &mdash; hourly</h1>',
-         f'<div class="stamp"><span class="dot"></span>Last updated <b>{stamp}</b>'
+         f'<div class="stamp"><span class="dot{" stale" if data_age > 25 else ""}"></span>'
+         f'Data as of <b>{data_txt}</b>'
+         + (f' <span class="warn">{data_age} min old</span>' if data_age > 25 else '')
+         + f'<span class="nxt">Page built {stamp}</span>'
          f'<span class="nxt" id="nxt">Next update ~{nxt_txt}</span></div></div>']
 
     # hero

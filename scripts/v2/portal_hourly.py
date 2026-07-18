@@ -208,20 +208,28 @@ def meta_hourly(con: sqlite3.Connection, day: str) -> dict:
     return out
 
 
-def shopify_hourly(con: sqlite3.Connection, day: str) -> dict:
+def shopify_hourly(con: sqlite3.Connection, day: str, cutoff: str | None = None) -> dict:
     """{(portal, 'YYYY-MM-DD HH:00'): {'rev': ₹, 'orders': n}} for `day`.
 
     created_at is stored ISO with a +05:30 offset, so substr gives the IST hour
     directly. Cancelled orders are excluded — the operator wants Shopify
     reality, and a cancelled order is not revenue.
+
+    `cutoff` (an ISO IST timestamp) drops orders newer than the most recent Meta
+    snapshot. Without it the ROAS is measured over mismatched windows: Shopify
+    is ingested every 10 minutes but Meta spend only lands hourly, so revenue
+    runs ahead of spend and inflates ROAS — badly when the snapshot cron skips
+    a tick (4.03 against a true 0.73 in one observed case).
     """
     out: dict = {}
     q = ("SELECT portal, substr(created_at,1,13), "
          "       SUM(COALESCE(total_price,0)), COUNT(*) "
          "FROM shopify_orders "
          "WHERE substr(created_at,1,10) = ? AND cancelled_at IS NULL "
-         "GROUP BY portal, substr(created_at,1,13)")
-    for portal, hour13, rev, orders in con.execute(q, (day,)):
+         + ("AND created_at <= ? " if cutoff else "")
+         + "GROUP BY portal, substr(created_at,1,13)")
+    params = (day, cutoff) if cutoff else (day,)
+    for portal, hour13, rev, orders in con.execute(q, params):
         if portal not in PORTALS:
             continue
         out[(portal, f"{hour13[:10]} {hour13[11:13]}:00")] = {
@@ -230,7 +238,19 @@ def shopify_hourly(con: sqlite3.Connection, day: str) -> dict:
     return out
 
 
-def build_rows(snap_db: str, ntn_db: str, day: str) -> list[dict]:
+def latest_snapshot_ts(snap_db: str, day: str) -> str | None:
+    """Wall-clock time of the newest snapshot for `day` — the moment Meta spend
+    was actually measured. This is the report's true 'as of', not the build time."""
+    con = sqlite3.connect(f'file:{snap_db}?mode=ro', uri=True)
+    try:
+        return con.execute(
+            "SELECT MAX(ts) FROM campaign_hourly_snapshots WHERE hour_slot LIKE ?",
+            (day + '%',)).fetchone()[0]
+    finally:
+        con.close()
+
+
+def build_rows(snap_db: str, ntn_db: str, day: str, align: bool = True) -> list[dict]:
     """One row per (hour, portal): portal | Shopify sale | ad spend | products.
 
     Hours run from the first slot with data up to the latest one, so a portal
@@ -245,9 +265,10 @@ def build_rows(snap_db: str, ntn_db: str, day: str) -> list[dict]:
     finally:
         con_s.close()
 
+    cutoff = latest_snapshot_ts(snap_db, day) if align else None
     con_n = sqlite3.connect(f'file:{ntn_db}?mode=ro', uri=True)
     try:
-        shop = shopify_hourly(con_n, day)
+        shop = shopify_hourly(con_n, day, cutoff)
     finally:
         con_n.close()
 
