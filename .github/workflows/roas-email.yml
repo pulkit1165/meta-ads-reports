@@ -98,6 +98,30 @@ jobs:
               print(f"  shopify {portal}: {ts} ({age:.1f}h old){'  <-- STALE' if age > 6 else ''}")
           PY
 
+      # The PAGE rebuilds on every attempt (3x/hour), unlike the email. Rebuilding
+      # is idempotent — there is no duplicate-send to protect against — so more
+      # attempts strictly means fresher numbers and a better chance of covering
+      # an hour where GitHub skipped a tick. The hour-by-hour table is
+      # reconstructed from the databases each time, so a missed build leaves no
+      # permanent hole: the next build fills it back in.
+      - name: Build ROAS page
+        run: |
+          python3 scripts/v2/build_roas_page.py \
+            --snap-db "$SNAP_DB" --ntn-db "$NTN_DB" \
+            --out roas-live/index.html --days 7
+
+      - name: Deploy page to Vercel
+        continue-on-error: true      # a deploy blip must never block the email
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: team_AocNAz8F008iWPSLVvar2Xb5
+          VERCEL_PROJECT_ID: ${{ vars.ROAS_PAGE_PROJECT_ID }}
+        run: |
+          if [ -z "$VERCEL_TOKEN" ]; then echo "no VERCEL_TOKEN — skipping deploy"; exit 0; fi
+          npx --yes vercel@latest deploy roas-live --prod --yes \
+            --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/vercel.log
+          echo "url: $(grep -oE 'https://[a-z0-9.-]+\.vercel\.app' /tmp/vercel.log | tail -1)"
+
       - name: Send ROAS email (once per IST hour)
         run: |
           ARGS="--state $STATE_FILE"
