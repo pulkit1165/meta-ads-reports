@@ -20,11 +20,11 @@ name: ROAS email (hourly)
 # camp-snapshots or state branches.
 on:
   schedule:
-    # Every 5 minutes. GitHub throttles and skips plenty of these, which is why
-    # keepalive.yml also dispatches this workflow on its own 10-minute heartbeat.
-    # Between the two, a build lands every 5-10 minutes in practice, so the page
-    # is never reading spend or sales more than a few minutes old.
-    - cron: "*/5 * * * *"
+    # Every 10 minutes, matching what antariksh already sustains on this Vercel
+    # account. */5 was too aggressive: ~288 deploys a day tripped Vercel's Attack
+    # Challenge Mode, which served a 403 JS challenge instead of the dashboard.
+    # keepalive.yml dispatches this too, so a build still lands every ~10 min.
+    - cron: "*/10 * * * *"
   workflow_dispatch:
     inputs:
       to:

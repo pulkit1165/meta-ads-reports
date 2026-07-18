@@ -35,10 +35,10 @@ from camp_closing import build_first_activity, collect  # noqa: E402
 IST = timezone(timedelta(hours=5, minutes=30))
 WEBSITE = {'SM': 'Studd Muffyn', 'SML': 'SM Life', 'NBP': 'Nuskhe by Paras'}
 
-# The workflow cron is "*/5 * * * *" in UTC. IST is UTC+5:30, and 30 is a
-# multiple of 5, so the IST minutes land on the same 5-minute grid: :00, :05,
-# :10 ... KEEP IN SYNC with .github/workflows/roas-email.yml.
-UPDATE_MINUTES_IST = tuple(range(0, 60, 5))
+# The workflow cron is "*/10 * * * *" in UTC. IST is UTC+5:30 and 30 is a
+# multiple of 10, so IST minutes land on the same grid: :00, :10, :20 ...
+# KEEP IN SYNC with .github/workflows/roas-email.yml.
+UPDATE_MINUTES_IST = tuple(range(0, 60, 10))
 
 
 def next_update(now):
