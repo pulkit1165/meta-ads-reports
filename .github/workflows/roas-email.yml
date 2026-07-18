@@ -114,12 +114,23 @@ jobs:
         continue-on-error: true      # a deploy blip must never block the email
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: team_AocNAz8F008iWPSLVvar2Xb5
-          VERCEL_PROJECT_ID: ${{ vars.ROAS_PAGE_PROJECT_ID }}
+          PROJ: ${{ vars.ROAS_PAGE_PROJECT_ID }}
         run: |
           if [ -z "$VERCEL_TOKEN" ]; then echo "no VERCEL_TOKEN — skipping deploy"; exit 0; fi
+          # Vercel rejects VERCEL_ORG_ID without VERCEL_PROJECT_ID, so on the
+          # very first deploy we pass neither and let it create the project.
+          # Set repo variable ROAS_PAGE_PROJECT_ID afterwards to pin it.
+          if [ -n "$PROJ" ]; then
+            export VERCEL_ORG_ID=team_AocNAz8F008iWPSLVvar2Xb5
+            export VERCEL_PROJECT_ID="$PROJ"
+            echo "deploying to pinned project $PROJ"
+          else
+            echo "no ROAS_PAGE_PROJECT_ID set — first deploy will create the project"
+          fi
           npx --yes vercel@latest deploy roas-live --prod --yes \
             --token="$VERCEL_TOKEN" 2>&1 | tee /tmp/vercel.log
+          [ -f roas-live/.vercel/project.json ] && \
+            echo "PROJECT_JSON $(cat roas-live/.vercel/project.json)"
           echo "url: $(grep -oE 'https://[a-z0-9.-]+\.vercel\.app' /tmp/vercel.log | tail -1)"
 
       - name: Send ROAS email (once per IST hour)
