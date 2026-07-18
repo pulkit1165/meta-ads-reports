@@ -99,7 +99,7 @@ def hour_log(day, prows, arows):
             continue
         if not a['has_snap']:
             out.append(f'<tr class="gap"><td>{slot[-5:]}</td>'
-                       f'<td colspan="7">no snapshot this hour</td></tr>')
+                       f'<td colspan="9">no snapshot this hour</td></tr>')
             continue
         if not (a['ad_spend'] or a['shopify_sale']):
             continue
@@ -111,7 +111,10 @@ def hour_log(day, prows, arows):
         out.append(
             f'<tr><td>{slot[-5:]}</td>{cells}'
             f'<td>{rupee(a["shopify_sale"])}</td><td>{rupee(a["ad_spend"])}</td>'
-            f'<td class="big">{a["roas"]:.2f}</td><td>{a["products"]}</td></tr>')
+            f'<td class="big">{a["roas"]:.2f}</td>'
+            f'<td>{rupee(a["active_budget"])}</td>'
+            f'<td class="mut">{rupee(a["closed_budget"])}</td>'
+            f'<td>{a["products"]}</td></tr>')
     if out:
         out[-1] = out[-1].replace('<tr>', '<tr class="now">', 1)
     return out
@@ -158,6 +161,8 @@ def main():
     h.append(f'<div class="sub">{rupee(a["rev"])} sales on {rupee(a["spend"])} spend '
              f'&nbsp;&middot;&nbsp; {a["orders"]:,} orders &nbsp;&middot;&nbsp; '
              f'{a["products"]} products live</div>')
+    h.append(f'<div class="vs">{rupee(a.get("active_budget", 0))} budget live '
+             f'&nbsp;&middot;&nbsp; {rupee(a.get("closed_budget", 0))} closed so far</div>')
     if yday:
         y = yday['ALL']
         d = a['roas'] - y['roas']
@@ -170,15 +175,20 @@ def main():
     if tot:
         h.append('<div class="card"><h2>Today by website</h2><div class="scroll"><table>')
         h.append('<tr><th>Website</th><th>Sales</th><th>Spend</th><th>ROAS</th>'
-                 '<th>Yesterday</th><th>Products</th></tr>')
+                 '<th>Yesterday</th><th>Budget live</th><th>Budget closed</th>'
+                 '<th>Products</th></tr>')
         for p in PORTALS:
             t = tot[p]
             yv = f'{yday[p]["roas"]:.2f}' if yday else '&mdash;'
             h.append(f'<tr><td class="site">{WEBSITE[p]}</td><td>{rupee(t["rev"])}</td>'
                      f'<td>{rupee(t["spend"])}</td><td class="big">{t["roas"]:.2f}</td>'
-                     f'<td class="mut">{yv}</td><td>{t["products"]}</td></tr>')
+                     f'<td class="mut">{yv}</td><td>{rupee(t["active_budget"])}</td>'
+                     f'<td class="mut">{rupee(t["closed_budget"])}</td>'
+                     f'<td>{t["products"]}</td></tr>')
         h.append(f'<tr class="tot"><td>All</td><td>{rupee(a["rev"])}</td>'
                  f'<td>{rupee(a["spend"])}</td><td>{a["roas"]:.2f}</td><td></td>'
+                 f'<td>{rupee(a["active_budget"])}</td>'
+                 f'<td>{rupee(a["closed_budget"])}</td>'
                  f'<td>{a["products"]}</td></tr>')
         h.append('</table></div></div>')
 
@@ -187,9 +197,10 @@ def main():
     h.append('<div class="card"><h2>Hour by hour &mdash; today</h2><div class="scroll"><table>')
     h.append('<tr><th>Hour IST</th>'
              + ''.join(f'<th>{p}</th>' for p in PORTALS)
-             + '<th>Sales</th><th>Spend</th><th>ROAS</th><th>Products</th></tr>')
+             + '<th>Sales</th><th>Spend</th><th>ROAS</th>'
+               '<th>Budget live</th><th>Budget closed</th><th>Products</th></tr>')
     h.append(''.join(rows) if rows else
-             '<tr><td colspan="8" class="mut">no hours recorded yet today</td></tr>')
+             '<tr><td colspan="10" class="mut">no hours recorded yet today</td></tr>')
     h.append('</table></div></div>')
 
     # previous days
@@ -206,12 +217,14 @@ def main():
     if arch:
         h.append('<div class="card"><h2>Previous days</h2><div class="scroll"><table>')
         h.append('<tr><th>Date</th>' + ''.join(f'<th>{p}</th>' for p in PORTALS)
-                 + '<th>Sales</th><th>Spend</th><th>ROAS</th></tr>')
+                 + '<th>Sales</th><th>Spend</th><th>ROAS</th>'
+                   '<th>Budget closed</th></tr>')
         for d, t, full in arch:
             cells = ''.join(f'<td>{full[p]["roas"]:.2f}</td>' for p in PORTALS)
             h.append(f'<tr><td>{datetime.strptime(d, "%Y-%m-%d").strftime("%a %d %b")}</td>'
                      f'{cells}<td>{rupee(t["rev"])}</td><td>{rupee(t["spend"])}</td>'
-                     f'<td class="big">{t["roas"]:.2f}</td></tr>')
+                     f'<td class="big">{t["roas"]:.2f}</td>'
+                     f'<td class="mut">{rupee(t["closed_budget"])}</td></tr>')
         h.append('</table></div></div>')
 
     # decisions

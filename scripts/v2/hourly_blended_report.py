@@ -41,7 +41,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 HEADER = ['Hour (IST)', 'Portal', 'Shopify Sale ₹', 'Ad Spend ₹',
           'Product Suggestions', 'Blended ROAS', 'Orders', 'Δ Products',
-          'Live Campaigns', 'Cum. Spend ₹']
+          'Active Budget ₹', 'Closed Budget ₹', 'Live Campaigns', 'Cum. Spend ₹']
 
 
 def with_deltas(rows: list[dict]) -> list[dict]:
@@ -78,8 +78,10 @@ def to_values(rows: list[dict]) -> list[list]:
             dp = ''
         out.append([
             r['hour'], r['portal'], round(r['shopify_sale']), spend,
-            products, roas, r['orders'], dp, camps,
-            round(r['cum_spend']) if r['has_snap'] else '',
+            products, roas, r['orders'], dp,
+            round(r['active_budget']) if r['has_snap'] else '',
+            round(r['closed_budget']) if r['has_snap'] else '',
+            camps, round(r['cum_spend']) if r['has_snap'] else '',
         ])
     return out
 
@@ -163,7 +165,7 @@ def main():
         w.update(range_name='A1', values=sheet_values)
         try:
             w.freeze(rows=2)
-            w.format('A1:J2', {'textFormat': {'bold': True}})
+            w.format('A1:L2', {'textFormat': {'bold': True}})
         except Exception:
             pass
         print(f"wrote '{args.tab}' ({len(values)} rows)")
@@ -175,23 +177,28 @@ def main():
 
         ws = wb.create_sheet('Hourly Blended ROAS')
         summary_hdr = ['Portal', 'Shopify Sale ₹', 'Ad Spend ₹', 'Blended ROAS',
-                       'Orders', 'Products Live']
+                       'Orders', 'Products Live', 'Active Budget ₹', 'Closed Budget ₹']
         summary = [[p, round(tot[p]['rev']), round(tot[p]['spend']), tot[p]['roas'],
-                    tot[p]['orders'], tot[p]['products']] for p in PORTALS]
+                    tot[p]['orders'], tot[p]['products'],
+                    round(tot[p]['active_budget']), round(tot[p]['closed_budget'])]
+                   for p in PORTALS]
         summary.append(['ALL', round(a['rev']), round(a['spend']), a['roas'],
-                        a['orders'], a['products']])
+                        a['orders'], a['products'],
+                        round(a['active_budget']), round(a['closed_budget'])])
         nxt = write_table(
             ws, f'⏱️ HOURLY BLENDED ROAS — {day} · updated {updated} · '
                 f'Shopify sales ÷ Meta spend per portal per hour',
             summary_hdr, summary, band='DAY TOTALS',
-            numfmt={2: '#,##0', 3: '#,##0', 4: '0.00'}, center_cols={1, 4, 5, 6})
+            numfmt={2: '#,##0', 3: '#,##0', 4: '0.00', 7: '#,##0', 8: '#,##0'},
+            center_cols={1, 4, 5, 6})
 
         write_table(
             ws, '', HEADER, values, start=nxt,
             band="BY HOUR — 'Product Suggestions' = distinct products live on ads that hour; "
                  "Δ Products is the change vs the previous hour",
-            numfmt={3: '#,##0', 4: '#,##0', 6: '0.00', 10: '#,##0'},
-            center_cols={1, 2, 5, 6, 7, 8, 9})
+            numfmt={3: '#,##0', 4: '#,##0', 6: '0.00', 9: '#,##0', 10: '#,##0',
+                    12: '#,##0'},
+            center_cols={1, 2, 5, 6, 7, 8, 11})
 
         Path(args.xlsx).parent.mkdir(parents=True, exist_ok=True)
         wb.save(args.xlsx)

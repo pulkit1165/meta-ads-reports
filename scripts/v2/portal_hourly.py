@@ -150,7 +150,7 @@ def meta_hourly(con: sqlite3.Connection, day: str) -> dict:
     """
     rows = con.execute(
         "SELECT hour_slot, account_name, campaign_id, campaign_name, "
-        "       COALESCE(spend,0), COALESCE(status,'Active') "
+        "       COALESCE(spend,0), COALESCE(status,'Active'), COALESCE(daily_budget,0) "
         "FROM campaign_hourly_snapshots WHERE hour_slot LIKE ? "
         "ORDER BY hour_slot", (day + '%',)).fetchall()
 
@@ -166,13 +166,24 @@ def meta_hourly(con: sqlite3.Connection, day: str) -> dict:
     for slot in slots:
         live_products = {p: set() for p in PORTALS}
         live_camps = {p: 0 for p in PORTALS}
-        for _s, acct, cid, cname, spend, status in by_slot[slot]:
+        # Budget still running vs budget already switched off, as at this hour.
+        # Point-in-time sums of daily_budget — NOT cumulative like spend — so a
+        # campaign that gets un-paused correctly moves back to active.
+        active_budget = {p: 0.0 for p in PORTALS}
+        closed_budget = {p: 0.0 for p in PORTALS}
+        for _s, acct, cid, cname, spend, status, budget in by_slot[slot]:
             portal = portal_of(acct)
             if portal is None:
                 continue
             key = (portal, cid)
             if spend > running.get(key, 0.0):
                 running[key] = spend
+            if status == 'Active':
+                active_budget[portal] += budget
+            else:
+                # Paused but it delivered today, so its budget was live earlier
+                # and has since been closed out.
+                closed_budget[portal] += budget
             if status == 'Active' and spend > 0:
                 live_camps[portal] += 1
                 prod = product_of(cname)
@@ -190,6 +201,8 @@ def meta_hourly(con: sqlite3.Connection, day: str) -> dict:
                 'products': len(live_products[p]),
                 'pset': live_products[p],
                 'campaigns': live_camps[p],
+                'active_budget': round(active_budget[p], 2),
+                'closed_budget': round(closed_budget[p], 2),
             }
             prev_cum[p] = cum[p]
     return out
@@ -265,6 +278,8 @@ def build_rows(snap_db: str, ntn_db: str, day: str) -> list[dict]:
                 'pset': m.get('pset', set()),
                 'campaigns': m.get('campaigns', 0),
                 'cum_spend': m.get('cum', 0.0),
+                'active_budget': m.get('active_budget', 0.0),
+                'closed_budget': m.get('closed_budget', 0.0),
             })
     return rows
 
@@ -298,13 +313,16 @@ def all_portal_rows(rows: list[dict]) -> list[dict]:
             'products': len(pset), 'pset': pset,
             'campaigns': sum(r['campaigns'] for r in group),
             'cum_spend': sum(r['cum_spend'] for r in group),
+            'active_budget': sum(r['active_budget'] for r in group),
+            'closed_budget': sum(r['closed_budget'] for r in group),
         })
     return out
 
 
 def summarise(rows: list[dict]) -> dict:
     """Day totals per portal + overall, for the header line and WhatsApp digest."""
-    tot = {p: {'rev': 0.0, 'spend': 0.0, 'orders': 0, 'products': 0} for p in PORTALS}
+    tot = {p: {'rev': 0.0, 'spend': 0.0, 'orders': 0, 'products': 0,
+               'active_budget': 0.0, 'closed_budget': 0.0} for p in PORTALS}
     for r in rows:
         t = tot[r['portal']]
         t['rev'] += r['shopify_sale']
@@ -318,6 +336,12 @@ def summarise(rows: list[dict]) -> dict:
         live = [r for r in ordered if r['portal'] == p and r['has_snap'] and r['products']]
         tot[p]['products'] = live[-1]['products'] if live else 0
         last_slot[p] = live[-1] if live else None
+        # Budgets are a state, not a running total: report them as at the most
+        # recent hour that actually has a snapshot.
+        snap = [r for r in ordered if r['portal'] == p and r['has_snap']]
+        if snap:
+            tot[p]['active_budget'] = snap[-1]['active_budget']
+            tot[p]['closed_budget'] = snap[-1]['closed_budget']
         tot[p]['roas'] = round(tot[p]['rev'] / tot[p]['spend'], 2) if tot[p]['spend'] else 0.0
     grand_rev = sum(tot[p]['rev'] for p in PORTALS)
     grand_spend = sum(tot[p]['spend'] for p in PORTALS)
@@ -326,6 +350,8 @@ def summarise(rows: list[dict]) -> dict:
         'orders': sum(tot[p]['orders'] for p in PORTALS),
         # Per-website: a product live on two sites counts twice.
         'products': sum(tot[p]['products'] for p in PORTALS),
+        'active_budget': sum(tot[p]['active_budget'] for p in PORTALS),
+        'closed_budget': sum(tot[p]['closed_budget'] for p in PORTALS),
         'roas': round(grand_rev / grand_spend, 2) if grand_spend else 0.0,
     }
     return tot
