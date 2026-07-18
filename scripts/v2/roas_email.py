@@ -24,6 +24,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import smtplib
 import sqlite3
@@ -54,19 +55,39 @@ RECIPIENTS = [
 WEBSITE = {'SM': 'Studd Muffyn', 'SML': 'SM Life', 'NBP': 'Nuskhe by Paras'}
 
 CSS = """
-body{font-family:-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;color:#1b2733;margin:0;padding:18px;background:#f6f8fb}
-h2{font-size:16px;margin:22px 0 8px;color:#12355b}
-h3{font-size:13px;margin:18px 0 6px;color:#5a6b7d;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
-table{border-collapse:collapse;width:100%;background:#fff;font-size:13px;margin-bottom:6px}
-th{background:#1f4e78;color:#fff;text-align:right;padding:7px 9px;font-weight:600;font-size:12px}
+body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1b2733;
+     margin:0;padding:0;background:#eef1f6}
+.wrap{max-width:680px;margin:0 auto;padding:20px 14px 34px}
+.card{background:#fff;border-radius:10px;padding:20px 22px;margin-bottom:14px;
+      box-shadow:0 1px 3px rgba(16,32,56,.09)}
+.hero{text-align:center;padding:26px 22px 22px}
+.roas{font-size:46px;font-weight:700;color:#12355b;line-height:1}
+.roas span{font-size:17px;font-weight:600;color:#7a8798;margin-left:6px}
+.sub{font-size:13px;color:#5a6b7d;margin-top:9px}
+.vs{font-size:12px;color:#8a97a5;margin-top:7px}
+h2{font-size:12px;margin:0 0 12px;color:#7a8798;font-weight:700;
+   text-transform:uppercase;letter-spacing:.07em}
+table{border-collapse:collapse;width:100%;font-size:14px}
+th{color:#8a97a5;text-align:right;padding:0 0 8px;font-weight:600;font-size:11px;
+   text-transform:uppercase;letter-spacing:.05em;border-bottom:1px solid #e6ecf3}
 th:first-child,td:first-child{text-align:left}
-td{padding:6px 9px;border-bottom:1px solid #e6ecf3;text-align:right}
-tr:nth-child(even) td{background:#f7fafd}
-.tot td{font-weight:700;background:#eef3f9!important;border-top:2px solid #1f4e78}
-.up{color:#0a7d3c}.dn{color:#c0392b}.mut{color:#8a97a5}
-.pause td{background:#fdeae7!important}.review td{background:#fff4d6!important}.watch td{background:#fffaea!important}
-.note{font-size:11px;color:#7a8798;margin:4px 0 16px;line-height:1.5}
-.big{font-size:22px;font-weight:700;color:#12355b}
+td{padding:10px 0;border-bottom:1px solid #f0f3f7;text-align:right}
+tr:last-child td{border-bottom:none}
+.site{font-weight:600;color:#1b2733}
+.tot td{font-weight:700;color:#12355b;border-top:2px solid #dde4ee;border-bottom:none;padding-top:11px}
+.up{color:#0a7d3c;font-weight:600}.dn{color:#c0392b;font-weight:600}.mut{color:#aab4c0}
+.big{font-weight:700;font-size:15px}
+.act{padding:11px 0;border-bottom:1px solid #f0f3f7}
+.act:last-child{border-bottom:none}
+.act .nm{font-size:13px;color:#1b2733;font-weight:600}
+.act .dt{font-size:12px;color:#7a8798;margin-top:3px}
+.tag{display:inline-block;font-size:10px;font-weight:700;padding:2px 7px;border-radius:3px;
+     letter-spacing:.05em;vertical-align:1px;margin-right:7px}
+.t-pause{background:#fdeae7;color:#b03024}
+.t-review{background:#fff2d4;color:#8a6100}
+.t-watch{background:#eef3f9;color:#4a6580}
+.foot{font-size:11px;color:#94a0ad;text-align:center;line-height:1.7;padding:0 8px}
+.ok{font-size:13px;color:#0a7d3c;font-weight:600}
 """
 
 
@@ -78,7 +99,7 @@ def _pct(cur, prev):
     return f'<span class="{cls}">{d:+.0f}%</span>'
 
 
-def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date=''):
+def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap_note=''):
     latest = max((r['slot'] for r in rows if r['has_snap'] and r['ad_spend']), default=None)
     prev = max((r['slot'] for r in rows
                 if r['has_snap'] and r['ad_spend'] and r['slot'] < (latest or '')), default=None)
@@ -87,42 +108,43 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date=''):
         return next((r for r in rows if r['portal'] == portal and r['slot'] == s), None)
 
     a = tot['ALL']
-    h = [f'<style>{CSS}</style>',
-         f'<div class="big">Blended ROAS {a["roas"]:.2f}</div>',
-         f'<div class="note">{day} &middot; as of {slot[-5:]} IST &middot; '
-         f'&#8377;{a["rev"]:,.0f} Shopify sales on &#8377;{a["spend"]:,.0f} Meta spend '
-         f'&middot; {a["products"]} products live</div>']
+    h = [f'<style>{CSS}</style><div class="wrap">']
 
-    # ---- section 1: day so far, per website ----
-    h.append('<h2>Today by website</h2>')
-    h.append('<table><tr><th>Website</th><th>Shopify Sale</th><th>Ad Spend</th>'
-             '<th>Blended ROAS</th><th>Orders</th><th>Products Live</th></tr>')
+    # ---- hero: the one number that matters ----
+    h.append('<div class="card hero">')
+    h.append(f'<div class="roas">{a["roas"]:.2f}<span>blended ROAS</span></div>')
+    h.append(f'<div class="sub">&#8377;{a["rev"]:,.0f} sales on &#8377;{a["spend"]:,.0f} '
+             f'spend &nbsp;&middot;&nbsp; {a["orders"]:,} orders &nbsp;&middot;&nbsp; '
+             f'{a["products"]} products live</div>')
+    if yday:
+        y = yday['ALL']
+        d = a['roas'] - y['roas']
+        cls = 'up' if d > 0 else 'dn' if d < 0 else 'mut'
+        h.append(f'<div class="vs">vs yesterday {y["roas"]:.2f} '
+                 f'<span class="{cls}">{d:+.2f}</span></div>')
+    h.append(f'<div class="vs">{day} &middot; as of {slot[-5:]} IST</div>')
+    h.append('</div>')
+
+    # ---- by website ----
+    h.append('<div class="card"><h2>Today by website</h2><table>')
+    h.append('<tr><th>Website</th><th>Sales</th><th>Spend</th><th>ROAS</th><th>Products</th></tr>')
     for p in PORTALS:
         t = tot[p]
-        h.append(f'<tr><td>{WEBSITE[p]} <span class="mut">({p})</span></td>'
+        yv = (f'<div class="mut" style="font-size:11px">yest {yday[p]["roas"]:.2f}</div>'
+              if yday else '')
+        h.append(f'<tr><td class="site">{WEBSITE[p]}</td>'
                  f'<td>&#8377;{t["rev"]:,.0f}</td><td>&#8377;{t["spend"]:,.0f}</td>'
-                 f'<td>{t["roas"]:.2f}</td><td>{t["orders"]:,}</td><td>{t["products"]}</td></tr>')
-    h.append(f'<tr class="tot"><td>ALL</td><td>&#8377;{a["rev"]:,.0f}</td>'
+                 f'<td class="big">{t["roas"]:.2f}{yv}</td><td>{t["products"]}</td></tr>')
+    h.append(f'<tr class="tot"><td>All</td><td>&#8377;{a["rev"]:,.0f}</td>'
              f'<td>&#8377;{a["spend"]:,.0f}</td><td>{a["roas"]:.2f}</td>'
-             f'<td>{a["orders"]:,}</td><td>{a["products"]}</td></tr></table>')
-    if yday:
-        # Early in the IST day "today" is nearly empty, which makes the numbers
-        # above look alarming out of context. Yesterday's close is the yardstick.
-        y = yday['ALL']
-        h.append(f'<div class="note">Yesterday ({yday_date}) closed at '
-                 f'<b>{y["roas"]:.2f}</b> &mdash; &#8377;{y["rev"]:,.0f} on '
-                 f'&#8377;{y["spend"]:,.0f}'
-                 + ' &middot; ' + ' &middot; '.join(
-                     f'{p} {yday[p]["roas"]:.2f}' for p in PORTALS) + '</div>')
-    h.append('<div class="note">Blended = <b>all</b> Shopify revenue over Meta spend, so it '
-             'includes organic and repeat orders &mdash; it is a profitability read for the '
-             'website, not a campaign metric. Products are counted per website.</div>')
+             f'<td>{a["products"]}</td></tr>')
+    h.append('</table></div>')
 
-    # ---- section 2: latest hour ----
+    # ---- latest hour ----
     if latest:
-        h.append(f'<h2>Latest hour &mdash; {latest[-5:]} IST</h2>')
-        h.append('<table><tr><th>Website</th><th>Sale</th><th>Spend</th><th>ROAS</th>'
-                 '<th>Products</th><th>vs prev hour</th></tr>')
+        h.append(f'<div class="card"><h2>Latest hour &mdash; {latest[-5:]} IST</h2><table>')
+        h.append('<tr><th>Website</th><th>Sales</th><th>Spend</th><th>ROAS</th>'
+                 '<th>Products</th></tr>')
         for p in PORTALS:
             c = at(p, latest)
             if not c:
@@ -131,44 +153,49 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date=''):
             dp = ''
             if pv is not None:
                 d = c['products'] - pv['products']
-                if d:
-                    dp = (f'<span class="{"dn" if d < 0 else "up"}">{d:+d} products</span>')
-                else:
-                    dp = '<span class="mut">no change</span>'
-            h.append(f'<tr><td>{WEBSITE[p]}</td><td>&#8377;{c["shopify_sale"]:,.0f}</td>'
-                     f'<td>&#8377;{c["ad_spend"]:,.0f}</td><td>{c["roas"]:.2f} '
-                     f'{_pct(c["roas"], pv["roas"]) if pv else ""}</td>'
-                     f'<td>{c["products"]}</td><td>{dp}</td></tr>')
-        h.append('</table>')
+                dp = (f' <span class="{"dn" if d < 0 else "up"}">{d:+d}</span>' if d
+                      else ' <span class="mut">&mdash;</span>')
+            h.append(f'<tr><td class="site">{WEBSITE[p]}</td>'
+                     f'<td>&#8377;{c["shopify_sale"]:,.0f}</td>'
+                     f'<td>&#8377;{c["ad_spend"]:,.0f}</td>'
+                     f'<td class="big">{c["roas"]:.2f}</td>'
+                     f'<td>{c["products"]}{dp}</td></tr>')
+        h.append('</table></div>')
 
-    # ---- section 3: campaigns needing a decision ----
+    # ---- decisions ----
     act = [r for r in closing if r['verdict'] in
            ('PAUSE', 'PAUSE (not whitelisted)', 'REVIEW', 'WATCH')]
-    h.append(f'<h2>Campaigns needing a decision &mdash; {len(act)}</h2>')
+    h.append('<div class="card">')
+    h.append(f'<h2>Needs a decision &mdash; {len(act)}</h2>')
     if not act:
-        h.append('<div class="note">Nothing over-spending below target right now.</div>')
+        h.append('<div class="ok">&#10003; Nothing over-spending below target.</div>')
     else:
-        h.append('<table><tr><th>Campaign</th><th>Site</th><th>Spend %</th><th>ROAS</th>'
-                 f'<th>Last 3h</th><th>Recover @{TARGET_ROAS}</th><th>Verdict</th></tr>')
-        for r in act[:25]:
-            cls = ('pause' if r['verdict'].startswith('PAUSE')
-                   else 'review' if r['verdict'] == 'REVIEW' else 'watch')
-            sr = f"{r['success_rate']}%" if r['success_rate'] is not None else '&mdash;'
-            mg = f"{r['marginal_3h']:.2f}" if r['marginal_3h'] is not None else '&mdash;'
-            h.append(f'<tr class="{cls}"><td>{r["campaign_name"][:52]}</td><td>{r["portal"]}</td>'
-                     f'<td>{r["spend_pct"]:.0f}%</td><td>{r["roas"]:.2f}</td><td>{mg}</td>'
-                     f'<td>{sr}</td><td><b>{r["verdict"]}</b></td></tr>')
-        h.append('</table>')
-        h.append('<div class="note">PAUSE = hit the kill matrix. REVIEW = matrix would keep it '
-                 'but history says campaigns in this state almost never reach target. '
-                 f'&ldquo;Recover&rdquo; = share of {lk16.n_camp_days} past campaign-days in the '
-                 'same spend&times;ROAS state that finished at or above '
-                 f'{TARGET_ROAS}. <b>Nothing is paused automatically.</b></div>')
+        for r in act[:12]:
+            v = r['verdict']
+            cls = ('t-pause' if v.startswith('PAUSE')
+                   else 't-review' if v == 'REVIEW' else 't-watch')
+            sr = (f", {r['success_rate']}% recover" if r['success_rate'] is not None else '')
+            mg = (f", 3h {r['marginal_3h']:.2f}" if r['marginal_3h'] is not None else '')
+            h.append(f'<div class="act"><div class="nm">'
+                     f'<span class="tag {cls}">{v.split(" ")[0]}</span>'
+                     f'{r["campaign_name"][:54]}</div>'
+                     f'<div class="dt">{r["portal"]} &middot; {r["spend_pct"]:.0f}% of budget '
+                     f'&middot; ROAS {r["roas"]:.2f}{mg}{sr}</div></div>')
+        if len(act) > 12:
+            h.append(f'<div class="dt" style="padding-top:9px">+{len(act) - 12} more '
+                     f'in the Camp Closing sheet</div>')
+    h.append('</div>')
 
     n_scale = sum(1 for r in closing if r['verdict'] == 'SCALE')
-    h.append(f'<div class="note">{len(closing)} campaigns tracked &middot; {n_scale} at '
-             f'ROAS &ge; 2.0 and past half their budget (scale candidates) &middot; '
-             f'campaign figures are Meta pixel-attributed.</div>')
+    foot = [f'{len(closing)} campaigns tracked &middot; {n_scale} scale candidates '
+            f'(ROAS &ge; 2.0 past half budget)',
+            'Blended ROAS counts <b>all</b> Shopify revenue, including organic and repeat &mdash; '
+            'a profitability read per website, not a campaign metric.',
+            'Campaign figures are Meta pixel-attributed. Nothing is paused automatically.']
+    if gap_note:
+        foot.insert(0, gap_note)
+    h.append('<div class="foot">' + '<br>'.join(foot) + '</div>')
+    h.append('</div>')
     return '\n'.join(h)
 
 
@@ -198,7 +225,29 @@ def main():
     ap.add_argument('--dry-run', action='store_true', help='print, do not send')
     ap.add_argument('--min-spend', type=float, default=2000,
                     help='skip sending below this much ad spend today (default 2000)')
+    ap.add_argument('--state', default=None,
+                    help='JSON file tracking which IST hours have been emailed')
+    ap.add_argument('--force', action='store_true',
+                    help='send even if this hour was already emailed')
     args = ap.parse_args()
+
+    # ── once-per-hour gate ────────────────────────────────────────────────
+    # GitHub skips roughly a third of cron ticks, so the workflow fires three
+    # times an hour and this gate keeps exactly one mail per IST hour. Missing
+    # two of three attempts still gets the hour delivered.
+    now = datetime.now(IST)
+    this_hour = now.strftime('%Y-%m-%d %H:00')
+    state, sent = None, []
+    if args.state:
+        state = Path(args.state)
+        if state.exists():
+            try:
+                sent = json.loads(state.read_text()).get('sent_hours', [])
+            except Exception:
+                sent = []
+        if this_hour in sent and not args.force:
+            print(f'{this_hour} IST already emailed — skipping (use --force to override)')
+            return
 
     day = args.day or today_ist()
     for p in (args.snap_db, args.ntn_db):
@@ -218,6 +267,18 @@ def main():
               f"Rs{args.min_spend:,.0f} floor — the day has barely started, not sending")
         return
 
+    # If earlier hours never went out (GitHub skipped all three attempts, or the
+    # run failed), say so rather than letting the reader assume continuous cover.
+    gap_note = ''
+    todays_sent = [h for h in sent if h.startswith(day)]
+    if todays_sent:
+        last = max(todays_sent)
+        missed = int(this_hour[11:13]) - int(last[11:13]) - 1
+        if missed > 0:
+            gap_note = (f'&#9888; No email went out for the previous '
+                        f'{missed} hour{"s" if missed > 1 else ""} '
+                        f'(last was {last[11:16]} IST).')
+
     yday_date = (datetime.strptime(day, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
     try:
         yrows = build_rows(args.snap_db, args.ntn_db, yday_date)
@@ -231,7 +292,7 @@ def main():
     con.close()
     slot = closing[0]['slot'] if closing else f'{day} 00:00'
 
-    html = build_html(day, rows, tot, closing, slot, lk16, yday, yday_date)
+    html = build_html(day, rows, tot, closing, slot, lk16, yday, yday_date, gap_note)
     text = text_fallback(day, tot, closing, slot)
     a = tot['ALL']
     n_act = sum(1 for r in closing if r['verdict'] in ('PAUSE', 'REVIEW', 'WATCH'))
@@ -263,7 +324,13 @@ def main():
         s.starttls()
         s.login(user, pw)
         s.sendmail(user, to, msg.as_string())
-    print(f'sent to {len(to)} recipients')
+    print(f'sent to {len(to)} recipients: {", ".join(to)}')
+
+    if state is not None:
+        sent.append(this_hour)
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps({'sent_hours': sorted(set(sent))[-72:]}, indent=1))
+        print(f'recorded {this_hour} in {state}')
 
 
 if __name__ == '__main__':

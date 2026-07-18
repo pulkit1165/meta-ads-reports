@@ -1,33 +1,43 @@
-name: ROAS email (every 40 min)
+name: ROAS email (hourly)
 
-# Emails blended portal ROAS + the camp-closing decision list to the ops list.
-# Read-only: it never pauses a campaign (that lives in camp_closing.py, armed
-# separately via AUTOPAUSE_LIVE).
+# Emails blended portal ROAS + the camp-closing decision list to the ops list,
+# once per IST hour. Read-only: it never pauses a campaign (that lives in
+# camp_closing.py, armed separately via AUTOPAUSE_LIVE).
+#
+# NOT MISSING AN HOUR is the whole design here. GitHub silently skips roughly a
+# third of scheduled cron ticks under load, so a single hourly cron would drop
+# hours with no warning. Instead we fire THREE times an hour and gate on a
+# state file listing which IST hours have already been mailed:
+#   * first attempt of the hour sends and records the hour
+#   * later attempts see the hour recorded and exit without sending
+#   * if GitHub skips one or two attempts, a later one still delivers the hour
+#   * if it skips all three, the next mail says so explicitly (gap_note)
+# State lives on its own `email-state` branch so it never contends with the
+# camp-snapshots or state branches.
 on:
   schedule:
-    # True 40-minute spacing needs a 2-hour cycle, because a single cron field
-    # can't express "every 40 minutes" (*/40 would fire at :00 and :40 only,
-    # leaving an uneven 40/20 gap). Two entries interleave to give
-    # :00, :40, 1:20, 2:00, 2:40, 3:20 ... — exactly 40 minutes apart.
-    - cron: "0,40 */2 * * *"
-    - cron: "20 1-23/2 * * *"
+    - cron: "3,23,43 * * * *"
   workflow_dispatch:
     inputs:
       to:
         description: "Override recipients (comma-separated). Blank = full ops list."
         type: string
         default: ""
+      force:
+        description: "Send even if this hour was already emailed"
+        type: boolean
+        default: false
       dry_run:
         description: "Build the mail but do not send"
         type: boolean
         default: false
 
 concurrency:
-  group: roas-email
-  cancel-in-progress: true      # a queued mail is stale; only the newest matters
+  group: roas-email          # never two attempts racing the same hour's state
+  cancel-in-progress: false
 
 permissions:
-  contents: read
+  contents: write            # only ever writes the email-state branch
 
 jobs:
   email:
@@ -37,6 +47,7 @@ jobs:
       TZ: Asia/Kolkata
       SNAP_DB: state/camp_snapshots.db
       NTN_DB: state/ntn.db
+      STATE_FILE: email-state/roas_email_sent.json
       GMAIL_USER: ${{ secrets.GMAIL_USER }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
     steps:
@@ -49,12 +60,24 @@ jobs:
       - name: Restore both databases
         run: |
           set -e
-          mkdir -p state
+          mkdir -p state email-state
           git fetch --depth=1 origin camp-snapshots:refs/remotes/origin/camp-snapshots
           git show origin/camp-snapshots:camp_snapshots.db.gz | gunzip > "$SNAP_DB"
           git fetch --depth=1 origin state:refs/remotes/origin/state
           git show origin/state:ntn.db.gz | gunzip > "$NTN_DB"
           echo "snapshots $(du -h "$SNAP_DB" | cut -f1) · ntn $(du -h "$NTN_DB" | cut -f1)"
+
+      - name: Restore email-send state
+        run: |
+          set -e
+          if git ls-remote --exit-code --heads origin email-state >/dev/null 2>&1; then
+            git fetch --depth=1 origin email-state:refs/remotes/origin/email-state
+            git show origin/email-state:roas_email_sent.json > "$STATE_FILE" 2>/dev/null \
+              || echo '{"sent_hours":[]}' > "$STATE_FILE"
+          else
+            echo '{"sent_hours":[]}' > "$STATE_FILE"
+          fi
+          echo "state: $(cat "$STATE_FILE" | head -c 300)"
 
       - name: Freshness check
         # Surfaces a stale feed in the job log instead of silently mailing old
@@ -72,13 +95,37 @@ jobs:
           print(f"now {now:%Y-%m-%d %H:%M} IST | latest snapshot slot: {s}")
           for portal, ts in o:
               age = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
-              flag = "  <-- STALE" if age > 6 else ""
-              print(f"  shopify {portal}: {ts} ({age:.1f}h old){flag}")
+              print(f"  shopify {portal}: {ts} ({age:.1f}h old){'  <-- STALE' if age > 6 else ''}")
           PY
 
-      - name: Send ROAS email
+      - name: Send ROAS email (once per IST hour)
         run: |
-          ARGS=""
-          [ -n "${{ github.event.inputs.to }}" ] && ARGS="--to ${{ github.event.inputs.to }}"
+          ARGS="--state $STATE_FILE"
+          [ -n "${{ github.event.inputs.to }}" ] && ARGS="$ARGS --to ${{ github.event.inputs.to }}"
+          [ "${{ github.event.inputs.force }}" = "true" ] && ARGS="$ARGS --force"
           [ "${{ github.event.inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
           python3 scripts/v2/roas_email.py --snap-db "$SNAP_DB" --ntn-db "$NTN_DB" $ARGS
+
+      - name: Save send state
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          set -e
+          git config user.name  "meta-ads-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          WT=.email-wt; git worktree remove -f "$WT" 2>/dev/null || true; rm -rf "$WT"
+          if git ls-remote --exit-code --heads origin email-state >/dev/null 2>&1; then
+            git worktree add -f "$WT" "origin/email-state"
+          else
+            git worktree add -f --orphan -b email-state "$WT"
+            ( cd "$WT" && git rm -rf . 2>/dev/null || true )
+          fi
+          cp "$STATE_FILE" "$WT/roas_email_sent.json"
+          cd "$WT"; git add -A
+          if git diff --staged --quiet; then echo "no new hour recorded"; exit 0; fi
+          git commit -m "roas-email: sent $(TZ=Asia/Kolkata date '+%F %H:00') IST"
+          for i in 1 2 3; do
+            git push origin "HEAD:email-state" && { echo pushed; break; }
+            git fetch origin email-state && git reset --hard origin/email-state
+            cp "../$STATE_FILE" roas_email_sent.json
+            git add -A && git commit -m "roas-email overlay" || true
+          done
