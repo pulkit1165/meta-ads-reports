@@ -81,9 +81,52 @@ except Exception:  # pragma: no cover — fall back to the raw catalogue
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
-    from classify_ads import extract_ntn_code
+    from classify_ads import extract_ntn_code, extract_product_slug
 except Exception:  # pragma: no cover
-    extract_ntn_code = lambda _t: None  # noqa: E731
+    extract_ntn_code = lambda _t: None            # noqa: E731
+    extract_product_slug = lambda _t: None        # noqa: E731
+
+# Noise tokens in a recovered slug: SKU codes, funnel/audience markers, price
+# points, pack sizes, dates, creative boilerplate. What survives is the product.
+_SLUG_DROP = re.compile(
+    r'^(ntn\d+|st\d+[a-f]?|dup|exc|ex|copy|sm|sml|smsk|smskin|adv|web|conv|'
+    r'rtg|retarget|sales?|reel|clp|mix|inde|paras|wanda|ant|creatives?|download|'
+    r'call|video|dimp|master|dv|app|gateway|camp|campaign|trishul|motion|static|'
+    r'partnership|ugc|installs?|boosterkit|trf|aarjav|oooh|june|loose|brand|'
+    r'single|high|potential|strong|explorer|testing|ab|a|b|v\d*|new|old|test|'
+    r'\d+|\d+dp|ex\d+dp|\d+d|\d+dimp|packof\d+|pack|set|combo\d+)$')
+
+# Campaigns that are not selling one identifiable product, whatever the slug
+# says: price-point collections, catalog/DPA, pure retargeting, explicit mixes.
+_NOT_A_PRODUCT = re.compile(
+    r'(\d+_?collection|_collection|catalog|best_?seller|imp_rtg|_rtg_\d+d|'
+    r'^imp_|_mix_|multi_cat|all_category|all_products|loose_\d+_\d+)', re.I)
+
+
+def _clean_slug(slug: str | None) -> str | None:
+    """'~ntn1678_unstoppable_499_ex30dp' -> 'Unstoppable'.
+
+    Note the leading '~' that extract_product_slug prepends — stripping it
+    matters, because '~ntn1678' does not match the NTN drop rule and the code
+    then leaks into the product name, splitting one product across every
+    campaign variant that sells it.
+    """
+    if not slug:
+        return None
+    parts = [t for t in re.split(r'[_\s]+', slug.lower().lstrip('~')) if t]
+    parts = [t for t in parts if not _SLUG_DROP.match(t)]
+    if not parts:
+        return None
+    # Two tokens is enough to name a product; more just re-introduces the
+    # campaign variant ('unstoppable' vs 'unstoppable ex30dp') as a fake second
+    # product, which would break one-product-many-campaigns counting.
+    return ' '.join(parts[:2]).title()
+
+
+# Generic catalogue buckets that are categories, not identifiable products.
+# Counting these as products both inflates the number and hides the real SKU,
+# so they fall through to the slug tier instead.
+_GENERIC = {'Jewellery', 'Offer/Combo', 'Peptide Products', 'Crystal', 'Combo'}
 
 _NON_PRODUCTS = {'Unmapped', 'Mix/Multiple', 'Multiple Products', ''}
 
@@ -115,20 +158,38 @@ def load_ntn_map(ntn_db: str) -> dict[str, str]:
 def product_of(campaign_name: str) -> str | None:
     """Distinct product a campaign is selling, or None if it isn't product-specific.
 
-    Order matters: the SKU code is the most reliable signal (it names a real
-    product), so it wins over the keyword catalogue. Price-point collections
-    ('299_collection_loose'), retargeting and mix campaigns legitimately return
-    None — they aren't selling one identifiable product.
+    Three tiers, most reliable first:
+      1. NTN code -> product_ntn_labels. Names a real SKU.
+      2. Keyword catalogue (wanda/astro-corrected).
+      3. Cleaned slug from the campaign name. This is the "map it by name" tier:
+         a campaign like 'ntn1678_Unstoppable_499_ex30dp_paras_single_100726'
+         carries a code that is missing from the SKU sheet AND matches no
+         keyword, so without this it counted as no product at all. Roughly half
+         of SM's spending campaigns were being dropped that way.
+
+    Generic catalogue buckets ('Jewellery', 'Offer/Combo') are pushed down to
+    tier 3 as well — they are categories, not products, and counting them both
+    inflated the total and hid the actual SKU.
+
+    Still returns None for things genuinely not selling one product: price-point
+    collections, retargeting, catalog and mix campaigns.
     """
     name = campaign_name or ''
+    if _NOT_A_PRODUCT.search(name):
+        return None
     code = extract_ntn_code(name)
     if code and code in _NTN_MAP:
         return _NTN_MAP[code]
     try:
         product, _cat = _classify(name)
     except Exception:
+        product = None
+    if product and product not in _NON_PRODUCTS and product not in _GENERIC:
+        return product
+    try:
+        return _clean_slug(extract_product_slug(name))
+    except Exception:
         return None
-    return None if product in _NON_PRODUCTS else product
 
 
 # ── hour helpers ──────────────────────────────────────────────────────────
