@@ -34,6 +34,25 @@ from camp_closing import build_first_activity, collect  # noqa: E402
 IST = timezone(timedelta(hours=5, minutes=30))
 WEBSITE = {'SM': 'Studd Muffyn', 'SML': 'SM Life', 'NBP': 'Nuskhe by Paras'}
 
+# The workflow cron is "3,23,43 * * * *" — and GitHub crons run in UTC. IST is
+# UTC+5:30, so those land at :33, :53 and :13 past the hour in IST. KEEP IN SYNC
+# with .github/workflows/roas-email.yml if that schedule changes.
+UPDATE_MINUTES_IST = (13, 33, 53)
+
+
+def next_update(now):
+    """Next scheduled rebuild, as (datetime, minutes_away).
+
+    Approximate on purpose: GitHub skips roughly a third of cron ticks, so this
+    is the next ATTEMPT, not a promise. The page says "~" for that reason.
+    """
+    for m in UPDATE_MINUTES_IST:
+        if m > now.minute:
+            return now.replace(minute=m, second=0, microsecond=0)
+    nxt = (now + timedelta(hours=1)).replace(
+        minute=UPDATE_MINUTES_IST[0], second=0, microsecond=0)
+    return nxt
+
 CSS = """
 *{box-sizing:border-box}
 body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#1b2733;
@@ -44,6 +63,8 @@ body{font-family:-apple-system,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;colo
 .bar h1{font-size:17px;margin:0;color:#12355b;font-weight:700}
 .stamp{font-size:12px;color:#64748b}
 .stamp b{color:#1b2733}
+.nxt{display:block;color:#94a0ad;font-size:11px;margin-top:3px}
+@media(min-width:641px){.stamp{text-align:right}}
 .dot{display:inline-block;width:7px;height:7px;border-radius:50%;background:#0a7d3c;margin-right:5px}
 .card{background:#fff;border-radius:10px;padding:18px 20px;margin-bottom:14px;
       box-shadow:0 1px 3px rgba(16,32,56,.09)}
@@ -146,6 +167,9 @@ def main():
 
     a = tot['ALL'] if tot else {'roas': 0, 'rev': 0, 'spend': 0, 'orders': 0, 'products': 0}
     stamp = now.strftime('%d %b %Y, %H:%M IST')
+    nxt = next_update(now)
+    mins = max(1, round((nxt - now).total_seconds() / 60))
+    nxt_txt = f'{nxt:%H:%M} IST &middot; in {mins} min'
 
     h = [f'<!doctype html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width,initial-scale=1">',
@@ -156,7 +180,8 @@ def main():
          f'<title>ROAS {a["roas"]:.2f} — {day}</title>',
          f'<style>{CSS}</style></head><body><div class="wrap">',
          '<div class="bar"><h1>Blended ROAS &mdash; hourly</h1>',
-         f'<div class="stamp"><span class="dot"></span>Last updated <b>{stamp}</b></div></div>']
+         f'<div class="stamp"><span class="dot"></span>Last updated <b>{stamp}</b>'
+         f'<span class="nxt">Next update ~{nxt_txt}</span></div></div>']
 
     # hero
     h.append('<div class="card hero">')
@@ -262,7 +287,8 @@ def main():
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text('\n'.join(h), encoding='utf-8')
     print(f'wrote {out} — ROAS {a["roas"]:.2f}, {len(rows)} hour rows, '
-          f'{len(arch)} archived days, {len(act)} decisions, stamp {stamp}')
+          f'{len(arch)} archived days, {len(act)} decisions, stamp {stamp}, '
+          f'next ~{nxt:%H:%M} IST')
 
 
 if __name__ == '__main__':
