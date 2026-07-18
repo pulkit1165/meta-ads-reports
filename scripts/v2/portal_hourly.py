@@ -441,3 +441,64 @@ def summarise(rows: list[dict]) -> dict:
 
 def today_ist() -> str:
     return datetime.now(IST).strftime('%Y-%m-%d')
+
+
+def closures(snap_db: str, day: str) -> list[dict]:
+    """Campaigns that went Active -> Paused during `day`, newest first.
+
+    Reconstructed from the snapshot history rather than logged as it happens,
+    so it is self-healing: a closure during an hour the page never rendered
+    still shows up on the next build.
+
+    The timestamp is the FIRST snapshot that saw the campaign paused, so the
+    real close happened somewhere between the previous snapshot and that one —
+    within about 10 minutes. Labelled '~' for that reason.
+
+    A campaign whose first snapshot of the day is already Paused was closed
+    before we started watching; it is reported with before=True rather than
+    given a false precise time.
+    """
+    con = sqlite3.connect(f'file:{snap_db}?mode=ro', uri=True)
+    try:
+        rows = con.execute(
+            "SELECT campaign_id, campaign_name, account_name, hour_slot, ts, "
+            "       COALESCE(status,'Active'), COALESCE(spend,0), "
+            "       COALESCE(daily_budget,0), COALESCE(roas,0) "
+            "FROM campaign_hourly_snapshots WHERE hour_slot LIKE ? "
+            "ORDER BY campaign_id, hour_slot", (day + '%',)).fetchall()
+    finally:
+        con.close()
+
+    seq: dict = {}
+    for cid, name, acct, slot, ts, status, spend, budget, roas in rows:
+        seq.setdefault(cid, []).append((slot, ts, status, name, acct, spend, budget, roas))
+
+    out = []
+    for cid, obs in seq.items():
+        obs.sort()
+        prev_status = None
+        for slot, ts, status, name, acct, spend, budget, roas in obs:
+            portal = portal_of(acct)
+            if portal is None:
+                break
+            if status != 'Active' and prev_status == 'Active':
+                out.append({
+                    'campaign_id': cid, 'campaign_name': name or '', 'portal': portal,
+                    'account_name': acct or '', 'closed_ts': ts, 'closed_slot': slot,
+                    'spend': spend, 'daily_budget': budget, 'roas': roas,
+                    'spend_pct': round(spend / budget * 100, 1) if budget else 0.0,
+                    'before': False,
+                })
+                break
+            if prev_status is None and status != 'Active':
+                out.append({
+                    'campaign_id': cid, 'campaign_name': name or '', 'portal': portal,
+                    'account_name': acct or '', 'closed_ts': ts, 'closed_slot': slot,
+                    'spend': spend, 'daily_budget': budget, 'roas': roas,
+                    'spend_pct': round(spend / budget * 100, 1) if budget else 0.0,
+                    'before': True,
+                })
+                break
+            prev_status = status
+    out.sort(key=lambda r: r['closed_ts'], reverse=True)
+    return out

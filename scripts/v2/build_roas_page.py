@@ -27,7 +27,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from portal_hourly import (  # noqa: E402
-    PORTALS, all_portal_rows, build_rows, latest_snapshot_ts, summarise,
+    PORTALS, all_portal_rows, build_rows, closures, latest_snapshot_ts, summarise,
 )
 from success_lookup import TARGET_ROAS, build_both  # noqa: E402
 from camp_closing import build_first_activity, collect  # noqa: E402
@@ -175,6 +175,26 @@ def hour_log(prows, arows, mark_last=False):
     return out
 
 
+CLOSE_HEAD = ('<tr><th>Closed at</th><th>Website</th><th>Campaign</th>'
+              '<th>Spend</th><th>% of budget</th><th>ROAS</th></tr>')
+
+
+def closure_rows(items):
+    """Newest closure first. '~' because we know the campaign was live at the
+    previous snapshot and paused at this one — the actual moment is inside that
+    ~10 minute window, not the timestamp itself."""
+    out = []
+    for r in items:
+        when = (f'<span class="mut">before {r["closed_ts"][11:16]}</span>'
+                if r['before'] else f'~{r["closed_ts"][11:16]}')
+        out.append(
+            f'<tr><td>{when}</td><td class="site">{r["portal"]}</td>'
+            f'<td style="text-align:left">{r["campaign_name"][:64]}</td>'
+            f'<td>{rupee(r["spend"])}</td><td>{r["spend_pct"]:.0f}%</td>'
+            f'<td class="big">{r["roas"]:.2f}</td></tr>')
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--snap-db', default='state/camp_snapshots.db')
@@ -307,7 +327,13 @@ def main():
                 f'&middot; {rupee(t["closed_budget"])} closed</span></summary>'
                 f'<div class="scroll"><table>{HOUR_HEAD}'
                 + ''.join(hour_log(pr, ar))
-                + '</table></div></details>')
+                + '</table></div>'
+                + (lambda cl: (f'<h2 style="margin-top:16px">Closed that day '
+                               f'({len(cl)})</h2><div class="scroll"><table>'
+                               + CLOSE_HEAD + ''.join(closure_rows(cl))
+                               + '</table></div>') if cl else '')(
+                      closures(args.snap_db, d))
+                + '</details>')
         h.append('</div>')
 
     # decisions
@@ -326,6 +352,23 @@ def main():
                  f'{v.split(" ")[0]}</span>{r["campaign_name"][:70]}</div>'
                  f'<div class="dt">{r["portal"]} &middot; {r["spend_pct"]:.0f}% of budget '
                  f'&middot; ROAS {r["roas"]:.2f}{mg}{sr}</div></div>')
+    h.append('</div>')
+
+    # Closed campaigns, newest first — reconstructed from the status history so
+    # a closure during an hour the page never rendered still appears.
+    closed_today = closures(args.snap_db, day)
+    h.append(f'<div class="card"><h2>Closed campaigns &mdash; today '
+             f'({len(closed_today)})</h2>')
+    if closed_today:
+        h.append('<div class="scroll"><table>' + CLOSE_HEAD
+                 + ''.join(closure_rows(closed_today)) + '</table></div>')
+        h.append('<div class="foot" style="text-align:left;padding-left:0">'
+                 'Time is the first snapshot that saw the campaign paused, so the '
+                 'close happened within about 10 minutes before it. '
+                 '&ldquo;before HH:MM&rdquo; means it was already off when we '
+                 'first saw it that day.</div>')
+    else:
+        h.append('<div class="ok">&#10003; Nothing closed yet today.</div>')
     h.append('</div>')
 
     n_scale = sum(1 for r in closing if r['verdict'] == 'SCALE')
