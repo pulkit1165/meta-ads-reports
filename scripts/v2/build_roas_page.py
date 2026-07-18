@@ -88,6 +88,18 @@ tr:last-child td{border-bottom:none}
 .scroll{overflow-x:auto}
 .now td{background:#f2f7ff}
 .gap td{color:#aab4c0;font-style:italic}
+.sub2{display:block;font-size:10px;color:#9aa6b2;font-weight:400;margin-top:2px}
+details{margin-top:10px;border-top:1px solid #f0f3f7;padding-top:10px}
+details:first-of-type{border-top:none}
+summary{cursor:pointer;font-size:13px;font-weight:600;color:#12355b;padding:6px 0;
+        list-style:none;display:flex;justify-content:space-between;gap:12px}
+summary::-webkit-details-marker{display:none}
+summary::after{content:'\25be';color:#aab4c0;font-size:11px}
+details[open] summary::after{content:'\25b4'}
+summary .m{font-weight:400;color:#7a8798;font-size:12px}
+.run{color:#0a7d3c;font-weight:700}
+.pulse{animation:pl 1.1s ease-in-out infinite}
+@keyframes pl{0%,100%{opacity:1}50%{opacity:.35}}
 .act{padding:10px 0;border-bottom:1px solid #f0f3f7}
 .act:last-child{border-bottom:none}
 .nm{font-size:13px;font-weight:600}
@@ -107,8 +119,16 @@ def rupee(v):
     return f'&#8377;{v:,.0f}'
 
 
-def hour_log(day, prows, arows):
-    """One row per hour: per-website ROAS, totals, products live."""
+HOUR_HEAD = ('<tr><th>Hour IST</th>'
+             + ''.join(f'<th>{p}</th>' for p in PORTALS)
+             + '<th>Sales</th><th>Spend</th><th>ROAS</th>'
+               '<th>Budget live</th><th>Budget closed</th><th>Products</th></tr>')
+
+
+def hour_log(prows, arows, mark_last=False):
+    """One row per hour. Each portal cell carries that hour's ROAS with its
+    active budget and live-product count underneath, so a single row answers
+    'what was every website doing at 14:00' without cross-referencing."""
     by = {}
     for r in prows + arows:
         by.setdefault(r['slot'], {})[r['portal']] = r
@@ -127,8 +147,12 @@ def hour_log(day, prows, arows):
         cells = ''
         for p in PORTALS:
             c = g.get(p)
-            cells += (f'<td>{c["roas"]:.2f}</td>' if c and c['ad_spend']
-                      else '<td class="mut">&mdash;</td>')
+            if c and (c['ad_spend'] or c['active_budget']):
+                cells += (f'<td>{c["roas"]:.2f}'
+                          f'<span class="sub2">{rupee(c["active_budget"])} '
+                          f'&middot; {c["products"]}p</span></td>')
+            else:
+                cells += '<td class="mut">&mdash;</td>'
         out.append(
             f'<tr><td>{slot[-5:]}</td>{cells}'
             f'<td>{rupee(a["shopify_sale"])}</td><td>{rupee(a["ad_spend"])}</td>'
@@ -136,7 +160,7 @@ def hour_log(day, prows, arows):
             f'<td>{rupee(a["active_budget"])}</td>'
             f'<td class="mut">{rupee(a["closed_budget"])}</td>'
             f'<td>{a["products"]}</td></tr>')
-    if out:
+    if out and mark_last:
         out[-1] = out[-1].replace('<tr>', '<tr class="now">', 1)
     return out
 
@@ -173,7 +197,6 @@ def main():
 
     h = [f'<!doctype html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width,initial-scale=1">',
-         '<meta http-equiv="refresh" content="600">',      # nudge the tab every 10 min
          # No login gate (operator's call), so at least keep it out of search
          # indexes — this page shows per-website revenue, spend and budgets.
          '<meta name="robots" content="noindex,nofollow,noarchive">',
@@ -181,7 +204,7 @@ def main():
          f'<style>{CSS}</style></head><body><div class="wrap">',
          '<div class="bar"><h1>Blended ROAS &mdash; hourly</h1>',
          f'<div class="stamp"><span class="dot"></span>Last updated <b>{stamp}</b>'
-         f'<span class="nxt">Next update ~{nxt_txt}</span></div></div>']
+         f'<span class="nxt" id="nxt">Next update ~{nxt_txt}</span></div></div>']
 
     # hero
     h.append('<div class="card hero">')
@@ -221,39 +244,46 @@ def main():
         h.append('</table></div></div>')
 
     # hourly log — the "saved every hour" section
-    rows = hour_log(day, prows, arows)
+    rows = hour_log(prows, arows, mark_last=True)
     h.append('<div class="card"><h2>Hour by hour &mdash; today</h2><div class="scroll"><table>')
-    h.append('<tr><th>Hour IST</th>'
-             + ''.join(f'<th>{p}</th>' for p in PORTALS)
-             + '<th>Sales</th><th>Spend</th><th>ROAS</th>'
-               '<th>Budget live</th><th>Budget closed</th><th>Products</th></tr>')
+    h.append(HOUR_HEAD)
     h.append(''.join(rows) if rows else
              '<tr><td colspan="10" class="mut">no hours recorded yet today</td></tr>')
-    h.append('</table></div></div>')
+    h.append('</table></div>')
+    h.append('<div class="foot" style="text-align:left;padding-left:0">Each website cell shows '
+             'that hour\'s ROAS, with active budget and live product count beneath.</div>')
+    h.append('</div>')
 
     # previous days
+    # Previous days keep their FULL hour-by-hour table, collapsed by date.
+    # Rebuilt from the databases every time, so a day the page never rendered
+    # live still appears here complete.
     arch = []
     for i in range(1, args.days + 1):
         d = (now - timedelta(days=i)).strftime('%Y-%m-%d')
         pr = build_rows(args.snap_db, args.ntn_db, d)
         if not pr:
             continue
-        t = summarise(pr)['ALL']
-        if not t['spend']:
+        full = summarise(pr)
+        if not full['ALL']['spend']:
             continue
-        arch.append((d, t, summarise(pr)))
+        arch.append((d, full, pr, all_portal_rows(pr)))
+
     if arch:
-        h.append('<div class="card"><h2>Previous days</h2><div class="scroll"><table>')
-        h.append('<tr><th>Date</th>' + ''.join(f'<th>{p}</th>' for p in PORTALS)
-                 + '<th>Sales</th><th>Spend</th><th>ROAS</th>'
-                   '<th>Budget closed</th></tr>')
-        for d, t, full in arch:
-            cells = ''.join(f'<td>{full[p]["roas"]:.2f}</td>' for p in PORTALS)
-            h.append(f'<tr><td>{datetime.strptime(d, "%Y-%m-%d").strftime("%a %d %b")}</td>'
-                     f'{cells}<td>{rupee(t["rev"])}</td><td>{rupee(t["spend"])}</td>'
-                     f'<td class="big">{t["roas"]:.2f}</td>'
-                     f'<td class="mut">{rupee(t["closed_budget"])}</td></tr>')
-        h.append('</table></div></div>')
+        h.append('<div class="card"><h2>Saved hours &mdash; previous days</h2>')
+        for d, full, pr, ar in arch:
+            t = full['ALL']
+            label = datetime.strptime(d, '%Y-%m-%d').strftime('%a %d %b %Y')
+            per = ' &middot; '.join(f'{p} {full[p]["roas"]:.2f}' for p in PORTALS)
+            h.append(
+                f'<details><summary><span>{label}</span>'
+                f'<span class="m">ROAS {t["roas"]:.2f} &middot; {rupee(t["rev"])} on '
+                f'{rupee(t["spend"])} &middot; {per} &middot; '
+                f'{rupee(t["closed_budget"])} closed</span></summary>'
+                f'<div class="scroll"><table>{HOUR_HEAD}'
+                + ''.join(hour_log(pr, ar))
+                + '</table></div></details>')
+        h.append('</div>')
 
     # decisions
     act = [r for r in closing if r['verdict'] in
@@ -281,6 +311,24 @@ def main():
              'a profitability read per website, not a campaign metric.<br>'
              'Campaign figures are Meta pixel-attributed. Nothing is paused automatically. '
              'Page rebuilds hourly.</div>')
+    # Live status: counts down to the next scheduled rebuild, flips to a pulsing
+    # "Refreshing now" once due, then reloads to pick up the new deploy. Paced at
+    # 45s so a late build (GitHub queueing) doesn't hammer the page.
+    h.append(f'''<script>
+var NEXT={int(nxt.timestamp() * 1000)}, tried=0;
+function tick(){{
+  var el=document.getElementById('nxt'); if(!el) return;
+  var d=NEXT-Date.now();
+  if(d>0){{
+    var m=Math.floor(d/60000), s=Math.floor(d%60000/1000);
+    el.innerHTML='Next update ~'+(m>0?m+'m ':'')+('0'+s).slice(-2)+'s';
+  }} else {{
+    el.innerHTML='<span class="run pulse">&#9679; Refreshing now\u2026</span>';
+    if(Date.now()-NEXT>45000+tried*45000){{ tried++; location.reload(); }}
+  }}
+}}
+tick(); setInterval(tick,1000);
+</script>''')
     h.append('</div></body></html>')
 
     out = Path(args.out)

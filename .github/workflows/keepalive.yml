@@ -48,6 +48,13 @@ jobs:
             # cron was throttled to ~every 1.5-2h, defeating the 15-min/immediate rule.
             acode=$(dispatch camp-alerts.yml '{"ref":"main"}')
             echo "tick $i/5 -> camp-alerts dispatched (HTTP $acode)"
+            # ROAS page + hourly email on the same 10-min heartbeat. Safe to fire
+            # this often: the page rebuild is idempotent (it just gets fresher)
+            # and the email is gated to one send per IST hour by its state file.
+            # This is what makes the hourly page effectively unmissable even when
+            # GitHub's own scheduler drops ticks.
+            rcode=$(dispatch roas-email.yml '{"ref":"main"}')
+            echo "tick $i/5 -> roas-email dispatched (HTTP $rcode)"
             if [ "$i" -lt 5 ]; then sleep 600; fi
           done
           # re-arm the chain so it continues without relying on GitHub's scheduler
