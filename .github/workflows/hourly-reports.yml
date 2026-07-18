@@ -1,0 +1,124 @@
+name: Hourly blended ROAS + camp closing
+
+# Two automated reports, both hourly:
+#   1. hourly_blended_report.py — portal | Shopify sale | ad spend | products live
+#      (needs BOTH databases: Meta spend from camp-snapshots, Shopify orders from state)
+#   2. camp_closing.py — kill matrix + 3h ROAS + success-rate-at-1.6, and the
+#      auto-pause actuator.
+#
+# AUTO-PAUSE IS OFF BY DEFAULT (dry-run). Set repository variable
+# AUTOPAUSE_LIVE=1 to arm it. Read docs/CAMP_CLOSING.md before you do — the
+# 22-day backtest in there shows the kill matrix is roughly break-even, so this
+# switch is deliberately not flipped for you.
+on:
+  schedule:
+    # Twice an hour: GitHub silently skips ~1/3 of cron ticks, and a missed run
+    # leaves a "no snapshot" hole in the hourly report.
+    - cron: "10,50 * * * *"
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Force dry-run (no Meta writes) even if AUTOPAUSE_LIVE=1"
+        type: boolean
+        default: true
+
+concurrency:
+  group: camp-live               # shared with camp-snapshots.yml / camp-alerts.yml
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  reports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+      TZ: Asia/Kolkata
+      SNAP_DB: state/camp_snapshots.db
+      NTN_DB: state/ntn.db
+      SNAP_BRANCH: camp-snapshots
+      STATE_BRANCH: state
+      SHEET_ID: 1eW2_qPdsKJ8zAV5-hsXA5HtfVH9NwDhQLyHYGKz5hXk
+      # WhatsApp — reports simply skip the send if these are unset.
+      WA_ACCESS_TOKEN: ${{ secrets.WA_ACCESS_TOKEN }}
+      WA_PHONE_NUMBER_ID: ${{ secrets.WA_PHONE_NUMBER_ID }}
+      WA_REPORT_RECIPIENTS: ${{ secrets.WA_REPORT_RECIPIENTS }}
+      WA_REPORT_TEMPLATE: ${{ secrets.WA_REPORT_TEMPLATE }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11", cache: pip }
+
+      - name: Install deps
+        run: pip install gspread requests python-dotenv
+
+      - name: Write Google service account file
+        env:
+          SA_JSON: ${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}
+        run: |
+          printf '%s' "$SA_JSON" > google-service-account.json
+          chmod 600 google-service-account.json
+
+      - name: Restore camp_snapshots.db (Meta hourly spend)
+        run: |
+          set -e
+          mkdir -p state
+          git fetch --depth=1 origin "$SNAP_BRANCH:refs/remotes/origin/$SNAP_BRANCH"
+          git show "origin/$SNAP_BRANCH:camp_snapshots.db.gz" | gunzip > "$SNAP_DB"
+          echo "snapshots: $(du -h "$SNAP_DB" | cut -f1)"
+
+      - name: Restore ntn.db (Shopify orders — read only)
+        run: |
+          set -e
+          git fetch --depth=1 origin "$STATE_BRANCH:refs/remotes/origin/$STATE_BRANCH"
+          git show "origin/$STATE_BRANCH:ntn.db.gz" | gunzip > "$NTN_DB"
+          echo "ntn: $(du -h "$NTN_DB" | cut -f1)"
+
+      - name: Report 1 — hourly blended ROAS
+        continue-on-error: true       # must never block the closing report
+        env:
+          GOOGLE_SERVICE_ACCOUNT_FILE: google-service-account.json
+        run: |
+          python3 scripts/v2/hourly_blended_report.py \
+            --snap-db "$SNAP_DB" --ntn-db "$NTN_DB" \
+            --sheet "$SHEET_ID" --tab "Hourly Blended ROAS" --whatsapp
+
+      - name: Report 2 — camp closing (+ auto-pause if armed)
+        env:
+          GOOGLE_SERVICE_ACCOUNT_FILE: google-service-account.json
+          AUTOPAUSE_LIVE: ${{ vars.AUTOPAUSE_LIVE }}
+          FORCE_DRY: ${{ github.event.inputs.dry_run }}
+        run: |
+          set -e
+          DRY="--dry-run"
+          if [ "$AUTOPAUSE_LIVE" = "1" ] && [ "$FORCE_DRY" != "true" ]; then
+            DRY=""
+            echo "::warning::auto-pause is ARMED — this run can pause live campaigns"
+          else
+            echo "auto-pause dry-run (set repo variable AUTOPAUSE_LIVE=1 to arm)"
+          fi
+          python3 scripts/v2/camp_closing.py --db "$SNAP_DB" \
+            --sheet "$SHEET_ID" --tab "Camp Closing" --whatsapp $DRY
+
+      - name: Save closing log back to branch
+        run: |
+          set -e
+          git config user.name  "meta-ads-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          WT=.camp-wt; git worktree remove -f "$WT" 2>/dev/null || true; rm -rf "$WT"
+          git worktree add -f "$WT" "origin/$SNAP_BRANCH"
+          gzip -c "$SNAP_DB" > "$WT/camp_snapshots.db.gz"
+          cd "$WT"; git add -A
+          if git diff --staged --quiet; then echo "no change"; exit 0; fi
+          git commit -m "camp-closing log: $(date -u +%FT%TZ)"
+          for i in 1 2 3; do
+            git push origin "HEAD:$SNAP_BRANCH" && { echo pushed; break; }
+            echo "retry $i"
+            git fetch origin "$SNAP_BRANCH"; git reset --hard "origin/$SNAP_BRANCH"
+            gzip -c "../$SNAP_DB" > camp_snapshots.db.gz
+            git add -A; git commit -m "camp-closing overlay $(date -u +%FT%TZ)" || true
+          done

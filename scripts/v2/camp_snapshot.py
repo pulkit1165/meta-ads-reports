@@ -17,7 +17,7 @@ import os
 import sqlite3
 from datetime import datetime, timezone, timedelta
 
-from camp_live import fetch_active_campaigns
+from camp_live import ACCOUNT_ERRORS, fetch_active_campaigns
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -105,6 +105,13 @@ def main():
     delivering = sum(1 for r in rows if r['spend'] > 0)
     print(f"[{hour_slot}] wrote {len(rows)} active campaigns ({delivering} delivering) | "
           f"DB now {tot} rows across {hrs} hourly slots")
+    if ACCOUNT_ERRORS:
+        # Loud, because a skipped account silently understates every downstream
+        # number — spend, blended ROAS, and the closing report's coverage.
+        print(f"WARNING: {len(ACCOUNT_ERRORS)} ad account(s) could not be read; their "
+              f"spend is MISSING from this snapshot:")
+        for aid, name, err in ACCOUNT_ERRORS:
+            print(f"  - {aid} ({name}): {err}")
 
 
 if __name__ == '__main__':

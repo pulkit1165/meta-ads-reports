@@ -1,0 +1,84 @@
+name: ROAS email (every 40 min)
+
+# Emails blended portal ROAS + the camp-closing decision list to the ops list.
+# Read-only: it never pauses a campaign (that lives in camp_closing.py, armed
+# separately via AUTOPAUSE_LIVE).
+on:
+  schedule:
+    # True 40-minute spacing needs a 2-hour cycle, because a single cron field
+    # can't express "every 40 minutes" (*/40 would fire at :00 and :40 only,
+    # leaving an uneven 40/20 gap). Two entries interleave to give
+    # :00, :40, 1:20, 2:00, 2:40, 3:20 ... — exactly 40 minutes apart.
+    - cron: "0,40 */2 * * *"
+    - cron: "20 1-23/2 * * *"
+  workflow_dispatch:
+    inputs:
+      to:
+        description: "Override recipients (comma-separated). Blank = full ops list."
+        type: string
+        default: ""
+      dry_run:
+        description: "Build the mail but do not send"
+        type: boolean
+        default: false
+
+concurrency:
+  group: roas-email
+  cancel-in-progress: true      # a queued mail is stale; only the newest matters
+
+permissions:
+  contents: read
+
+jobs:
+  email:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      TZ: Asia/Kolkata
+      SNAP_DB: state/camp_snapshots.db
+      NTN_DB: state/ntn.db
+      GMAIL_USER: ${{ secrets.GMAIL_USER }}
+      GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+
+      - name: Restore both databases
+        run: |
+          set -e
+          mkdir -p state
+          git fetch --depth=1 origin camp-snapshots:refs/remotes/origin/camp-snapshots
+          git show origin/camp-snapshots:camp_snapshots.db.gz | gunzip > "$SNAP_DB"
+          git fetch --depth=1 origin state:refs/remotes/origin/state
+          git show origin/state:ntn.db.gz | gunzip > "$NTN_DB"
+          echo "snapshots $(du -h "$SNAP_DB" | cut -f1) · ntn $(du -h "$NTN_DB" | cut -f1)"
+
+      - name: Freshness check
+        # Surfaces a stale feed in the job log instead of silently mailing old
+        # numbers — the snapshot cron and the Shopify ingest both skip sometimes.
+        run: |
+          python3 - <<'PY'
+          import sqlite3, os
+          from datetime import datetime, timezone, timedelta
+          IST = timezone(timedelta(hours=5, minutes=30))
+          now = datetime.now(IST)
+          s = sqlite3.connect(os.environ['SNAP_DB']).execute(
+              "SELECT MAX(hour_slot) FROM campaign_hourly_snapshots").fetchone()[0]
+          o = sqlite3.connect(os.environ['NTN_DB']).execute(
+              "SELECT portal, MAX(created_at) FROM shopify_orders GROUP BY portal").fetchall()
+          print(f"now {now:%Y-%m-%d %H:%M} IST | latest snapshot slot: {s}")
+          for portal, ts in o:
+              age = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
+              flag = "  <-- STALE" if age > 6 else ""
+              print(f"  shopify {portal}: {ts} ({age:.1f}h old){flag}")
+          PY
+
+      - name: Send ROAS email
+        run: |
+          ARGS=""
+          [ -n "${{ github.event.inputs.to }}" ] && ARGS="--to ${{ github.event.inputs.to }}"
+          [ "${{ github.event.inputs.dry_run }}" = "true" ] && ARGS="$ARGS --dry-run"
+          python3 scripts/v2/roas_email.py --snap-db "$SNAP_DB" --ntn-db "$NTN_DB" $ARGS

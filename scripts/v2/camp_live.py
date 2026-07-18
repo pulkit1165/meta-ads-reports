@@ -71,9 +71,22 @@ def _batch_ids(ids, fields, token):
         return d
 
 
+# Accounts the last fetch could not read, as [(account_id, name, error)]. An
+# account that 403s used to be skipped silently, which cost ~Rs1L/day of NBP
+# Skin spend without anything anywhere saying so. Callers should surface this.
+ACCOUNT_ERRORS = []
+
+
 def fetch_active_campaigns(token, account_ids=None, now=None):
-    """account_ids: list of 'act_<id>' (default = all accessible accounts)."""
+    """account_ids: list of 'act_<id>' (default = all accessible accounts).
+
+    Note: the default discovers accounts via me/adaccounts, which only lists
+    accounts the token's user actually has a role on. An account the business
+    hasn't granted ads_read on is invisible here AND 403s on direct access —
+    check ACCOUNT_ERRORS after calling.
+    """
     now = now or datetime.now(IST)
+    ACCOUNT_ERRORS.clear()
     if account_ids is None:
         accts = {f"act_{a['account_id']}": a['name'] for a in list_accounts(token)}
     else:
@@ -85,7 +98,14 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
         try:
             camps = _paged(f"{aid}/campaigns",
                            {'effective_status': "['ACTIVE']", 'fields': CFIELDS, 'limit': 500}, token)
-        except Exception:
+        except Exception as e:
+            msg = str(e)
+            try:                       # surface Meta's actual reason, not "HTTP Error 403"
+                msg = json.loads(e.read().decode()).get('error', {}).get('message', msg)
+            except Exception:
+                pass
+            ACCOUNT_ERRORS.append((aid, aname, msg[:200]))
+            print(f"  !! account {aid} ({aname}) unreadable — {msg[:140]}")
             continue
         cmeta = {c['id']: c for c in camps}
         # 2) today insights at campaign level
