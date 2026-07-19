@@ -16,8 +16,37 @@ import argparse
 import os
 import sqlite3
 from datetime import datetime, timezone, timedelta
+from pathlib import Path
+
+import re
 
 from camp_live import ACCOUNT_ERRORS, fetch_active_campaigns
+
+REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+
+
+def configured_accounts():
+    """Ad account ids from config/accounts.env.
+
+    Preferred over me/adaccounts discovery for two reasons. First, discovery is
+    broken for this business: Meta returns HTTP 500 paginating the account list
+    (75 accounts), and the first page alone silently truncates it. Second,
+    discovery only ever listed accounts the token had a role on — which is how
+    NBP Skin, ~Rs1L/day of spend, stayed invisible for weeks.
+
+    The configured list is the same one check_account_access.py audits, so a
+    blocked account is a loud failure rather than a silent omission.
+    """
+    out = []
+    for name in ('config/accounts.env', '.env'):
+        p = REPO_ROOT / name
+        if not p.exists():
+            continue
+        for line in p.read_text(errors='ignore').splitlines():
+            m = re.match(r'^\s*[A-Z][A-Z0-9_]*\s*=\s*(act_\d+)\s*$', line.strip())
+            if m and m.group(1) not in out:
+                out.append(m.group(1))
+    return out
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -76,7 +105,26 @@ def main():
     ts = now.isoformat(timespec='seconds')
     hour_slot = now.strftime('%Y-%m-%d %H:00')
 
-    rows = fetch_active_campaigns(tok, args.accounts, now=now)
+    accounts = args.accounts or configured_accounts() or None
+    print(f"accounts: {len(accounts) if accounts else 0} from config"
+          if accounts else "accounts: falling back to me/adaccounts discovery")
+    rows = fetch_active_campaigns(tok, accounts, now=now)
+
+    # A PARTIAL snapshot is worse than no snapshot. If some accounts errored
+    # transiently, the hour would be written looking complete while missing
+    # their spend — downstream everything (blended ROAS, budgets, the closing
+    # report) would treat the deflated number as authoritative. That is exactly
+    # how NBP Skin cost ~Rs1L/day undetected. Permission errors are excluded
+    # from this check: they are permanent and already known, so blocking on them
+    # would mean never writing a snapshot at all.
+    transient = [e for e in ACCOUNT_ERRORS if 'NOT grant' not in e[2]]
+    if transient:
+        print(f"ABORTING WRITE: {len(transient)} account(s) failed transiently — "
+              f"refusing to save a partial hour that would understate spend:")
+        for aid, name, err in transient:
+            print(f"  - {aid} ({name}): {err[:110]}")
+        print("previous snapshot left in place; the next run retries")
+        raise SystemExit(1)
 
     con = sqlite3.connect(args.db)
     con.executescript(SCHEMA)
