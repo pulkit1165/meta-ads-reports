@@ -518,3 +518,21 @@ def closures(snap_db: str, day: str) -> list[dict]:
             prev_status = status
     out.sort(key=lambda r: r['closed_ts'], reverse=True)
     return out
+
+
+def slot_times(snap_db: str, day: str) -> dict:
+    """{hour_slot: actual wall-clock time that slot was last measured}.
+
+    The slot is a label, not the measurement moment: a run at 12:08 writes slot
+    '12:00'. So the newest slot is nearly always a PARTIAL hour, and comparing
+    it against the previous one — which was measured near :58 — makes spend look
+    flat when only ten minutes have passed. Showing the real time removes that
+    illusion.
+    """
+    con = sqlite3.connect(f'file:{snap_db}?mode=ro', uri=True)
+    try:
+        return {slot: ts for slot, ts in con.execute(
+            "SELECT hour_slot, MAX(ts) FROM campaign_hourly_snapshots "
+            "WHERE hour_slot LIKE ? GROUP BY hour_slot", (day + '%',))}
+    finally:
+        con.close()

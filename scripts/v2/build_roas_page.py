@@ -27,7 +27,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from portal_hourly import (  # noqa: E402
-    PORTALS, all_portal_rows, build_rows, closures, latest_snapshot_ts, summarise,
+    PORTALS, all_portal_rows, build_rows, closures, latest_snapshot_ts,
+    slot_times, summarise,
 )
 from success_lookup import TARGET_ROAS, build_both  # noqa: E402
 from camp_closing import build_first_activity, collect  # noqa: E402
@@ -100,6 +101,7 @@ tr.p-NBP td:first-child{border-left-color:#d97706}
 .c-SM{background:#4f46e5}.c-SML{background:#0d9488}.c-NBP{background:#d97706}
 .hsum{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
 .hlabel{font-weight:700;color:#12355b;min-width:64px}
+.asof{font-size:11px;color:#94a0ad;margin-left:2px}
 .tot td{font-weight:700;color:#12355b;border-top:2px solid #dde4ee;border-bottom:none}
 .up{color:#0a7d3c;font-weight:600}.dn{color:#c0392b;font-weight:600}.mut{color:#aab4c0}
 .big{font-weight:700;font-size:15px}
@@ -152,7 +154,7 @@ HOUR_COLS = ('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
              '<th>Products</th></tr>')
 
 
-def hour_blocks(prows, arows, open_last=False):
+def hour_blocks(prows, arows, open_last=False, times=None, now=None):
     """One collapsible block per hour holding the full per-website breakdown,
     cumulative as at that hour.
 
@@ -196,10 +198,20 @@ def hour_blocks(prows, arows, open_last=False):
             f'<td>{rupee(a["closed_budget"])}</td><td>{a["products"]}</td></tr>')
 
         is_last = (i == len(slots) - 1)
+        # An hour labelled 12:00 but measured at 12:08 covers eight minutes, not
+        # sixty. Say so, otherwise it reads as "the numbers stopped moving".
+        ts = (times or {}).get(slot)
+        meas = ''
+        if ts:
+            hhmm = ts[11:16]
+            partial = is_last and now is not None and now.strftime('%Y-%m-%d %H:00') == slot
+            meas = (f'<span class="asof">as of {hhmm}'
+                    + (' &middot; hour still running' if partial else '')
+                    + '</span>')
         out.append(
             f'<details{" open" if (open_last and is_last) else ""}>'
             f'<summary><span class="hsum"><span class="hlabel">{slot[-5:]}</span>'
-            f'{chips}</span>'
+            f'{chips}{meas}</span>'
             f'<span class="m">ROAS {a["cum_roas"]:.2f} &middot; {rupee(a["cum_sales"])} on '
             f'{rupee(a["cum_spend"])} &middot; {a["products"]} products</span></summary>'
             f'<div class="scroll"><table>{HOUR_COLS}{body}</table></div></details>')
@@ -322,14 +334,16 @@ def main():
         h.append('</table></div></div>')
 
     # hourly log — the "saved every hour" section
-    rows = hour_blocks(prows, arows, open_last=True)
+    stimes = slot_times(args.snap_db, day)
+    rows = hour_blocks(prows, arows, open_last=True, times=stimes, now=now)
     h.append(f'<div class="card"><h2>Saved every hour &mdash; today ({len(rows)})</h2>')
     h.append(''.join(rows) if rows else
              '<div class="mut">no hours recorded yet today</div>')
     h.append('<div class="foot" style="text-align:left;padding-left:0">'
              'Every hour is saved with the same columns as Today by website, '
-             'cumulative to that point in the day. Open an hour to see the '
-             'full breakdown; the chips show each site\'s ROAS at a glance.</div>')
+             'cumulative to that point in the day. \u201cAs of\u201d is when the '
+             'numbers were actually pulled \u2014 the newest hour is normally only '
+             'part-way through, so it will look close to the one before it.</div>')
     h.append('</div>')
 
     # previous days
@@ -358,7 +372,7 @@ def main():
                 f'<span class="m">ROAS {t["roas"]:.2f} &middot; {rupee(t["rev"])} on '
                 f'{rupee(t["spend"])} &middot; {t["orders"]:,} orders &middot; {per} '
                 f'&middot; {rupee(t["closed_budget"])} closed</span></summary>'
-                + ''.join(hour_blocks(pr, ar))
+                + ''.join(hour_blocks(pr, ar, times=slot_times(args.snap_db, d)))
                 + (lambda cl: (f'<h2 style="margin-top:16px">Closed that day '
                                f'({len(cl)})</h2><div class="scroll"><table>'
                                + CLOSE_HEAD + ''.join(closure_rows(cl))
