@@ -334,10 +334,15 @@ def build_rows(snap_db: str, ntn_db: str, day: str, align: bool = True) -> list[
         con_n.close()
 
     # Union of hours seen in either source, so sales before the first ad-spend
-    # snapshot of the day are not dropped.
+    # snapshot of the day are not dropped. Running sales totals let each row
+    # carry the DAY-TO-DATE ROAS as well as that hour's — the day-to-date
+    # figure is what tells you how a website is actually tracking, since a
+    # single hour swings wildly on a few orders.
     snap_slots = set(slots)
     all_slots = sorted(snap_slots | {s for _p, s in shop})
     rows = []
+    run_sales = {p: 0.0 for p in PORTALS}
+    run_orders = {p: 0 for p in PORTALS}
     for slot in all_slots:
         # GitHub's cron skips hours under load, so an hour can have Shopify
         # sales but no Meta snapshot. Such an hour is UNKNOWN, not zero —
@@ -350,7 +355,13 @@ def build_rows(snap_db: str, ntn_db: str, day: str, align: bool = True) -> list[
             s = shop.get((p, slot), {})
             spend = m.get('delta', 0.0)
             rev = s.get('rev', 0.0)
+            run_sales[p] += rev
+            run_orders[p] += s.get('orders', 0)
+            cum_spend = m.get('cum', 0.0)
             rows.append({
+                'cum_sales': round(run_sales[p], 2),
+                'cum_orders': run_orders[p],
+                'cum_roas': round(run_sales[p] / cum_spend, 2) if cum_spend else 0.0,
                 'hour': slot[-5:], 'slot': slot, 'portal': p,
                 'has_snap': has_snap,
                 'shopify_sale': rev, 'orders': s.get('orders', 0),
@@ -395,6 +406,11 @@ def all_portal_rows(rows: list[dict]) -> list[dict]:
             'products': len(pset), 'pset': pset,
             'campaigns': sum(r['campaigns'] for r in group),
             'cum_spend': sum(r['cum_spend'] for r in group),
+            'cum_sales': sum(r['cum_sales'] for r in group),
+            'cum_orders': sum(r['cum_orders'] for r in group),
+            'cum_roas': (round(sum(r['cum_sales'] for r in group)
+                               / sum(r['cum_spend'] for r in group), 2)
+                         if sum(r['cum_spend'] for r in group) else 0.0),
             'active_budget': sum(r['active_budget'] for r in group),
             'closed_budget': sum(r['closed_budget'] for r in group),
         })

@@ -129,15 +129,22 @@ def rupee(v):
 
 
 HOUR_HEAD = ('<tr><th>Hour IST</th>'
-             + ''.join(f'<th>{p}</th>' for p in PORTALS)
-             + '<th>Sales</th><th>Orders</th><th>Spend</th><th>ROAS</th>'
+             + ''.join(f'<th>{p} day ROAS</th>' for p in PORTALS)
+             + '<th>Sales (hr)</th><th>Orders (hr)</th><th>Spend (hr)</th>'
+               '<th>ROAS (hr)</th>'
+               '<th>Sales (day)</th><th>Spend (day)</th><th>ROAS (day)</th>'
                '<th>Budget live</th><th>Budget closed</th><th>Products</th></tr>')
 
 
 def hour_log(prows, arows, mark_last=False):
-    """One row per hour. Each portal cell carries that hour's ROAS with its
-    active budget and live-product count underneath, so a single row answers
-    'what was every website doing at 14:00' without cross-referencing."""
+    """One row per hour.
+
+    The headline number in each portal cell is the DAY-TO-DATE ROAS as at that
+    hour — "how is this website tracking so far" — because a single hour swings
+    wildly on a handful of orders (00:00 read 4.49 on three orders while the day
+    was tracking 1.21). That hour's own ROAS sits underneath alongside active
+    budget, live products and orders.
+    """
     by = {}
     for r in prows + arows:
         by.setdefault(r['slot'], {})[r['portal']] = r
@@ -149,7 +156,7 @@ def hour_log(prows, arows, mark_last=False):
             continue
         if not a['has_snap']:
             out.append(f'<tr class="gap"><td>{slot[-5:]}</td>'
-                       f'<td colspan="10">no snapshot this hour</td></tr>')
+                       f'<td colspan="13">no snapshot this hour</td></tr>')
             continue
         if not (a['ad_spend'] or a['shopify_sale']):
             continue
@@ -157,16 +164,19 @@ def hour_log(prows, arows, mark_last=False):
         for p in PORTALS:
             c = g.get(p)
             if c and (c['ad_spend'] or c['active_budget']):
-                cells += (f'<td>{c["roas"]:.2f}'
-                          f'<span class="sub2">{rupee(c["active_budget"])} '
-                          f'&middot; {c["products"]}p &middot; {c["orders"]}o</span></td>')
+                cells += (f'<td><b>{c["cum_roas"]:.2f}</b>'
+                          f'<span class="sub2">hr {c["roas"]:.2f} &middot; '
+                          f'{rupee(c["active_budget"])} &middot; '
+                          f'{c["products"]}p &middot; {c["orders"]}o</span></td>')
             else:
                 cells += '<td class="mut">&mdash;</td>'
         out.append(
             f'<tr><td>{slot[-5:]}</td>{cells}'
             f'<td>{rupee(a["shopify_sale"])}</td><td>{a["orders"]}</td>'
             f'<td>{rupee(a["ad_spend"])}</td>'
-            f'<td class="big">{a["roas"]:.2f}</td>'
+            f'<td>{a["roas"]:.2f}</td>'
+            f'<td>{rupee(a["cum_sales"])}</td><td>{rupee(a["cum_spend"])}</td>'
+            f'<td class="big">{a["cum_roas"]:.2f}</td>'
             f'<td>{rupee(a["active_budget"])}</td>'
             f'<td class="mut">{rupee(a["closed_budget"])}</td>'
             f'<td>{a["products"]}</td></tr>')
@@ -293,10 +303,13 @@ def main():
     h.append('<div class="card"><h2>Hour by hour &mdash; today</h2><div class="scroll"><table>')
     h.append(HOUR_HEAD)
     h.append(''.join(rows) if rows else
-             '<tr><td colspan="11" class="mut">no hours recorded yet today</td></tr>')
+             '<tr><td colspan="14" class="mut">no hours recorded yet today</td></tr>')
     h.append('</table></div>')
-    h.append('<div class="foot" style="text-align:left;padding-left:0">Each website cell shows '
-             'that hour\'s ROAS, with active budget and live product count beneath.</div>')
+    h.append('<div class="foot" style="text-align:left;padding-left:0">'
+             'Website columns show the <b>day-to-date</b> ROAS as at that hour \u2014 how the '
+             'site is tracking, not a single hour\'s swing. Beneath each: that hour\'s own '
+             'ROAS, active budget, live products and orders. The (hr) columns are that hour '
+             'alone; the (day) columns are cumulative from midnight.</div>')
     h.append('</div>')
 
     # previous days
