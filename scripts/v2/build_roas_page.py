@@ -35,6 +35,12 @@ from camp_closing import build_first_activity, collect  # noqa: E402
 IST = timezone(timedelta(hours=5, minutes=30))
 WEBSITE = {'SM': 'Studd Muffyn', 'SML': 'SM Life', 'NBP': 'Nuskhe by Paras'}
 
+# One colour per website, used for the dot, the row accent and the hour-summary
+# chips. Chosen to stay distinguishable for the common forms of colour blindness
+# (blue / teal / amber differ in lightness as well as hue, so they do not rely on
+# red-green discrimination).
+PORTAL_COLOR = {'SM': '#4f46e5', 'SML': '#0d9488', 'NBP': '#d97706'}
+
 # The workflow cron is "*/10 * * * *" in UTC. IST is UTC+5:30 and 30 is a
 # multiple of 10, so IST minutes land on the same grid: :00, :10, :20 ...
 # KEEP IN SYNC with .github/workflows/roas-email.yml.
@@ -83,6 +89,17 @@ th:first-child,td:first-child{text-align:left}
 td{padding:9px 6px;border-bottom:1px solid #f0f3f7;text-align:right;white-space:nowrap}
 tr:last-child td{border-bottom:none}
 .site{font-weight:600}
+.pdot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:8px;
+      vertical-align:1px}
+tr.prow td:first-child{border-left:3px solid transparent;padding-left:10px}
+tr.p-SM  td:first-child{border-left-color:#4f46e5}
+tr.p-SML td:first-child{border-left-color:#0d9488}
+tr.p-NBP td:first-child{border-left-color:#d97706}
+.chip{display:inline-block;font-size:11px;font-weight:600;padding:2px 8px;
+      border-radius:10px;margin-right:6px;color:#fff}
+.c-SM{background:#4f46e5}.c-SML{background:#0d9488}.c-NBP{background:#d97706}
+.hsum{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.hlabel{font-weight:700;color:#12355b;min-width:64px}
 .tot td{font-weight:700;color:#12355b;border-top:2px solid #dde4ee;border-bottom:none}
 .up{color:#0a7d3c;font-weight:600}.dn{color:#c0392b;font-weight:600}.mut{color:#aab4c0}
 .big{font-weight:700;font-size:15px}
@@ -128,60 +145,64 @@ def rupee(v):
     return f'&#8377;{v:,.0f}'
 
 
-HOUR_HEAD = ('<tr><th>Hour IST</th>'
-             + ''.join(f'<th>{p} day ROAS</th>' for p in PORTALS)
-             + '<th>Sales (hr)</th><th>Orders (hr)</th><th>Spend (hr)</th>'
-               '<th>ROAS (hr)</th>'
-               '<th>Sales (day)</th><th>Spend (day)</th><th>ROAS (day)</th>'
-               '<th>Budget live</th><th>Budget closed</th><th>Products</th></tr>')
+# Each saved hour repeats the same columns as "Today by website", so the two
+# read identically — the hourly block is that table frozen at that hour.
+HOUR_COLS = ('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
+             '<th>ROAS</th><th>Budget live</th><th>Budget closed</th>'
+             '<th>Products</th></tr>')
 
 
-def hour_log(prows, arows, mark_last=False):
-    """One row per hour.
+def hour_blocks(prows, arows, open_last=False):
+    """One collapsible block per hour holding the full per-website breakdown,
+    cumulative as at that hour.
 
-    The headline number in each portal cell is the DAY-TO-DATE ROAS as at that
-    hour — "how is this website tracking so far" — because a single hour swings
-    wildly on a handful of orders (00:00 read 4.49 on three orders while the day
-    was tracking 1.21). That hour's own ROAS sits underneath alongside active
-    budget, live products and orders.
+    Values are DAY-TO-DATE, not that hour in isolation: a single hour swings on
+    a handful of orders (00:00 read 4.49 on three orders while the day tracked
+    1.21), so the saved snapshot answers "where did the day stand at 07:00",
+    which is the question worth asking of an archive.
     """
     by = {}
     for r in prows + arows:
         by.setdefault(r['slot'], {})[r['portal']] = r
-    out = []
-    for slot in sorted(by):
+
+    out, slots = [], sorted(by)
+    for i, slot in enumerate(slots):
         g = by[slot]
         a = g.get('ALL')
-        if not a:
+        if not a or not a['has_snap'] or not (a['cum_spend'] or a['cum_sales']):
             continue
-        if not a['has_snap']:
-            out.append(f'<tr class="gap"><td>{slot[-5:]}</td>'
-                       f'<td colspan="13">no snapshot this hour</td></tr>')
-            continue
-        if not (a['ad_spend'] or a['shopify_sale']):
-            continue
-        cells = ''
+        chips = ''.join(
+            f'<span class="chip c-{p}">{p} {g[p]["cum_roas"]:.2f}</span>'
+            for p in PORTALS if g.get(p) and g[p]['cum_spend'])
+        body = ''
         for p in PORTALS:
             c = g.get(p)
-            if c and (c['ad_spend'] or c['active_budget']):
-                cells += (f'<td><b>{c["cum_roas"]:.2f}</b>'
-                          f'<span class="sub2">hr {c["roas"]:.2f} &middot; '
-                          f'{rupee(c["active_budget"])} &middot; '
-                          f'{c["products"]}p &middot; {c["orders"]}o</span></td>')
-            else:
-                cells += '<td class="mut">&mdash;</td>'
+            if not c or not (c['cum_spend'] or c['active_budget']):
+                continue
+            body += (
+                f'<tr class="prow p-{p}"><td class="site">'
+                f'<span class="pdot" style="background:{PORTAL_COLOR[p]}"></span>'
+                f'{WEBSITE[p]}</td>'
+                f'<td>{rupee(c["cum_sales"])}</td><td>{c["cum_orders"]:,}</td>'
+                f'<td>{rupee(c["cum_spend"])}</td>'
+                f'<td class="big">{c["cum_roas"]:.2f}</td>'
+                f'<td>{rupee(c["active_budget"])}</td>'
+                f'<td class="mut">{rupee(c["closed_budget"])}</td>'
+                f'<td>{c["products"]}</td></tr>')
+        body += (
+            f'<tr class="tot"><td>All</td><td>{rupee(a["cum_sales"])}</td>'
+            f'<td>{a["cum_orders"]:,}</td><td>{rupee(a["cum_spend"])}</td>'
+            f'<td>{a["cum_roas"]:.2f}</td><td>{rupee(a["active_budget"])}</td>'
+            f'<td>{rupee(a["closed_budget"])}</td><td>{a["products"]}</td></tr>')
+
+        is_last = (i == len(slots) - 1)
         out.append(
-            f'<tr><td>{slot[-5:]}</td>{cells}'
-            f'<td>{rupee(a["shopify_sale"])}</td><td>{a["orders"]}</td>'
-            f'<td>{rupee(a["ad_spend"])}</td>'
-            f'<td>{a["roas"]:.2f}</td>'
-            f'<td>{rupee(a["cum_sales"])}</td><td>{rupee(a["cum_spend"])}</td>'
-            f'<td class="big">{a["cum_roas"]:.2f}</td>'
-            f'<td>{rupee(a["active_budget"])}</td>'
-            f'<td class="mut">{rupee(a["closed_budget"])}</td>'
-            f'<td>{a["products"]}</td></tr>')
-    if out and mark_last:
-        out[-1] = out[-1].replace('<tr>', '<tr class="now">', 1)
+            f'<details{" open" if (open_last and is_last) else ""}>'
+            f'<summary><span class="hsum"><span class="hlabel">{slot[-5:]}</span>'
+            f'{chips}</span>'
+            f'<span class="m">ROAS {a["cum_roas"]:.2f} &middot; {rupee(a["cum_sales"])} on '
+            f'{rupee(a["cum_spend"])} &middot; {a["products"]} products</span></summary>'
+            f'<div class="scroll"><table>{HOUR_COLS}{body}</table></div></details>')
     return out
 
 
@@ -284,7 +305,9 @@ def main():
         for p in PORTALS:
             t = tot[p]
             yv = f'{yday[p]["roas"]:.2f}' if yday else '&mdash;'
-            h.append(f'<tr><td class="site">{WEBSITE[p]}</td><td>{rupee(t["rev"])}</td>'
+            h.append(f'<tr class="prow p-{p}"><td class="site">'
+                     f'<span class="pdot" style="background:{PORTAL_COLOR[p]}"></span>'
+                     f'{WEBSITE[p]}</td><td>{rupee(t["rev"])}</td>'
                      f'<td>{t["orders"]:,}</td>'
                      f'<td>{rupee(t["spend"])}</td><td class="big">{t["roas"]:.2f}</td>'
                      f'<td class="mut">{yv}</td><td>{rupee(t["active_budget"])}</td>'
@@ -299,17 +322,14 @@ def main():
         h.append('</table></div></div>')
 
     # hourly log — the "saved every hour" section
-    rows = hour_log(prows, arows, mark_last=True)
-    h.append('<div class="card"><h2>Hour by hour &mdash; today</h2><div class="scroll"><table>')
-    h.append(HOUR_HEAD)
+    rows = hour_blocks(prows, arows, open_last=True)
+    h.append(f'<div class="card"><h2>Saved every hour &mdash; today ({len(rows)})</h2>')
     h.append(''.join(rows) if rows else
-             '<tr><td colspan="14" class="mut">no hours recorded yet today</td></tr>')
-    h.append('</table></div>')
+             '<div class="mut">no hours recorded yet today</div>')
     h.append('<div class="foot" style="text-align:left;padding-left:0">'
-             'Website columns show the <b>day-to-date</b> ROAS as at that hour \u2014 how the '
-             'site is tracking, not a single hour\'s swing. Beneath each: that hour\'s own '
-             'ROAS, active budget, live products and orders. The (hr) columns are that hour '
-             'alone; the (day) columns are cumulative from midnight.</div>')
+             'Every hour is saved with the same columns as Today by website, '
+             'cumulative to that point in the day. Open an hour to see the '
+             'full breakdown; the chips show each site\'s ROAS at a glance.</div>')
     h.append('</div>')
 
     # previous days
@@ -338,9 +358,7 @@ def main():
                 f'<span class="m">ROAS {t["roas"]:.2f} &middot; {rupee(t["rev"])} on '
                 f'{rupee(t["spend"])} &middot; {t["orders"]:,} orders &middot; {per} '
                 f'&middot; {rupee(t["closed_budget"])} closed</span></summary>'
-                f'<div class="scroll"><table>{HOUR_HEAD}'
-                + ''.join(hour_log(pr, ar))
-                + '</table></div>'
+                + ''.join(hour_blocks(pr, ar))
                 + (lambda cl: (f'<h2 style="margin-top:16px">Closed that day '
                                f'({len(cl)})</h2><div class="scroll"><table>'
                                + CLOSE_HEAD + ''.join(closure_rows(cl))
