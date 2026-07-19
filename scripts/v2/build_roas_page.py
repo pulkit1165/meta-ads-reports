@@ -42,24 +42,28 @@ WEBSITE = {'SM': 'Studd Muffyn', 'SML': 'SM Life', 'NBP': 'Nuskhe by Paras'}
 # red-green discrimination).
 PORTAL_COLOR = {'SM': '#4f46e5', 'SML': '#0d9488', 'NBP': '#d97706'}
 
-# The workflow cron is "*/10 * * * *" in UTC. IST is UTC+5:30 and 30 is a
-# multiple of 10, so IST minutes land on the same grid: :00, :10, :20 ...
-# KEEP IN SYNC with .github/workflows/roas-email.yml.
-UPDATE_MINUTES_IST = tuple(range(0, 60, 10))
+# Minimum gap between Meta/Shopify pulls, matching MIN_GAP in
+# .github/workflows/roas-email.yml. The workflow still runs every ~10 minutes
+# but only calls the APIs once this much time has passed, so the data refreshes
+# roughly hourly. KEEP THE TWO IN SYNC.
+MIN_PULL_GAP_MIN = 55
+
+# Liveness thresholds follow from that gap: anything under ~70 minutes means a
+# pull is landing on schedule. Tighter values would read DELAYED permanently.
+LIVE_MAX_MIN = 70
+DELAYED_MAX_MIN = 95
 
 
-def next_update(now):
-    """Next scheduled rebuild, as (datetime, minutes_away).
+def next_update(now, last_pull=None):
+    """When the next API pull is due — last pull + the minimum gap.
 
-    Approximate on purpose: GitHub skips roughly a third of cron ticks, so this
-    is the next ATTEMPT, not a promise. The page says "~" for that reason.
+    Approximate: the workflow runs every ~10 minutes and pulls on the first run
+    past the gap, and GitHub skips ticks, so this is the earliest it can happen
+    rather than a promise. The page shows "~" accordingly.
     """
-    for m in UPDATE_MINUTES_IST:
-        if m > now.minute:
-            return now.replace(minute=m, second=0, microsecond=0)
-    nxt = (now + timedelta(hours=1)).replace(
-        minute=UPDATE_MINUTES_IST[0], second=0, microsecond=0)
-    return nxt
+    if last_pull is not None:
+        return last_pull + timedelta(minutes=MIN_PULL_GAP_MIN)
+    return now + timedelta(minutes=MIN_PULL_GAP_MIN)
 
 CSS = """
 *{box-sizing:border-box}
@@ -274,9 +278,12 @@ def main():
         data_txt = f'{sdt:%d %b, %H:%M} IST'
     else:
         data_age, data_txt = 0, 'no snapshot yet'
-    nxt = next_update(now)
-    mins = max(1, round((nxt - now).total_seconds() / 60))
-    nxt_txt = f'{nxt:%H:%M} IST &middot; in {mins} min'
+    nxt = next_update(now, sdt if snap_ts else None)
+    mins = round((nxt - now).total_seconds() / 60)
+    # Once a pull is overdue, printing its scheduled time reads as a time in the
+    # past. Say how late it is instead — that is the useful signal.
+    nxt_txt = (f'{nxt:%H:%M} IST &middot; in {mins} min' if mins > 0
+               else f'due now &middot; {abs(mins)} min overdue')
 
     h = [f'<!doctype html><html lang="en"><head><meta charset="utf-8">',
          '<meta name="viewport" content="width=device-width,initial-scale=1">',
@@ -289,6 +296,8 @@ def main():
          f'<div class="stamp">'
          f'<span id="badge" class="badge live">&#9679; LIVE</span>'
          f'<span id="age">data {data_age} min old &middot; {data_txt}</span>'
+         f'<span class="nxt">APIs are pulled once an hour &mdash; '
+         f'at least {MIN_PULL_GAP_MIN} min between pulls</span>'
          f'<span class="nxt" id="chk">checking\u2026</span>'
          f'<span class="nxt" id="nxt">Next update ~{nxt_txt}</span></div></div>']
 
@@ -423,7 +432,8 @@ def main():
              'Blended ROAS counts <b>all</b> Shopify revenue including organic and repeat &mdash; '
              'a profitability read per website, not a campaign metric.<br>'
              'Campaign figures are Meta pixel-attributed. Nothing is paused automatically. '
-             'Page rebuilds hourly.</div>')
+             f'Meta and Shopify are pulled once an hour ({MIN_PULL_GAP_MIN} min minimum '
+             'gap), so figures between pulls are up to an hour old.</div>')
     # Live status: counts down to the next scheduled rebuild, flips to a pulsing
     # "Refreshing now" once due, then reloads to pick up the new deploy. Paced at
     # 45s so a late build (GitHub queueing) doesn't hammer the page.
@@ -438,15 +448,16 @@ def main():
     # than 15 minutes means the pipeline is keeping up. Past 25 it is degraded,
     # past 45 something is broken.
     h.append(f'''<script>
-var DATA_TS = "{snap_ts or ''}", POLL = 120000;
+var DATA_TS = "{snap_ts or ''}", POLL = 120000,
+    LIVE_MAX = {LIVE_MAX_MIN}, DELAYED_MAX = {DELAYED_MAX_MIN};
 function fmt(t){{ return t.toTimeString().slice(0,8); }}
 function paint(ageMin, checkedAt, ok){{
   var b=document.getElementById('badge'), a=document.getElementById('age'),
       c=document.getElementById('chk');
   if(!b) return;
   if(!ok){{ b.className='badge dead'; b.innerHTML='&#9679; CHECK FAILED'; }}
-  else if(ageMin>45){{ b.className='badge dead'; b.innerHTML='&#9679; NOT LIVE'; }}
-  else if(ageMin>25){{ b.className='badge warnb'; b.innerHTML='&#9679; DELAYED'; }}
+  else if(ageMin>DELAYED_MAX){{ b.className='badge dead'; b.innerHTML='&#9679; NOT LIVE'; }}
+  else if(ageMin>LIVE_MAX){{ b.className='badge warnb'; b.innerHTML='&#9679; DELAYED'; }}
   else {{ b.className='badge live'; b.innerHTML='&#9679; LIVE'; }}
   if(a) a.textContent='data '+ageMin+' min old';
   if(c) c.textContent='live status checked '+fmt(checkedAt)+' \u00b7 rechecks every 2 min';
@@ -469,9 +480,11 @@ function tick(){{
   var d=NEXT-Date.now();
   if(d>0){{
     var m=Math.floor(d/60000), s=Math.floor(d%60000/1000);
-    el.innerHTML='Next update ~'+(m>0?m+'m ':'')+('0'+s).slice(-2)+'s';
+    el.innerHTML='Next pull ~'+(m>0?m+'m ':'')+('0'+s).slice(-2)+'s';
   }} else {{
-    el.innerHTML='<span class="run pulse">&#9679; Refreshing now\u2026</span>';
+    var late=Math.floor((Date.now()-NEXT)/60000);
+    el.innerHTML='<span class="run pulse">&#9679; Pull due'
+                 +(late>2?' \u00b7 '+late+'m overdue':'\u2026')+'</span>';
   }}
 }}
 tick(); setInterval(tick,1000);

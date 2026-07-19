@@ -95,12 +95,19 @@ jobs:
           fi
           echo "state: $(cat "$STATE_FILE" | head -c 300)"
 
-      # THE reason ROAS read wrong: GitHub was dropping two of camp-snapshots'
-      # three hourly ticks, so Meta spend sat frozen for up to an hour while
-      # Shopify kept ingesting every 10 minutes. Revenue ran ahead of spend and
-      # inflated ROAS (5.25 against a true 2.29 in one observed case). Taking our
-      # own snapshot when the last one is stale removes the dependency on that
-      # cron firing at all.
+      # ONE API PULL PER HOUR, by operator request: at least 55 minutes between
+      # Meta pulls. The workflow still runs every ~10 minutes (it rebuilds the
+      # page, checks the email gate and watches freshness), but it only calls
+      # Meta when the newest snapshot is 55+ minutes old.
+      #
+      # Consequence to be aware of: between pulls the numbers are up to an hour
+      # old. That is the trade for a single clean measurement per hour rather
+      # than a partial one every ten minutes.
+      #
+      # Shopify is gated on the SAME decision below, deliberately. If Shopify
+      # kept ingesting every 10 minutes while Meta went hourly, revenue would run
+      # ahead of spend and inflate ROAS — the exact fault that had this reading
+      # 5.25 against a true 2.29.
       - name: Refresh Meta snapshot if stale
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
@@ -115,12 +122,13 @@ jobs:
                 if r else 999)
           PY
           )
-          echo "newest snapshot is ${AGE} min old"
-          if [ "$AGE" -ge 5 ]; then
+          MIN_GAP=55
+          echo "newest snapshot is ${AGE} min old (minimum gap ${MIN_GAP} min)"
+          if [ "$AGE" -ge "$MIN_GAP" ]; then
             python3 scripts/v2/camp_snapshot.py --db "$SNAP_DB"
             echo "SNAP_UPDATED=1" >> "$GITHUB_ENV"
           else
-            echo "fresh enough — reusing it (no Meta call)"
+            echo "within the ${MIN_GAP}-minute window — no Meta call this run"
           fi
 
       - name: Save refreshed snapshot to branch
@@ -142,12 +150,12 @@ jobs:
             git add -A && git commit -m "snapshot overlay" || true
           done
 
-      # v2-ingest runs every 10 minutes but its DB push lags, so the branch copy
-      # trailed live Shopify by ~20 minutes — Rs27,667 in the database against
-      # Rs34,805 actually taken. Pulling today's orders directly here means the
-      # sales figure matches what Shopify admin shows, instead of quietly
-      # under-reporting. Idempotent upsert, so it cannot double-count.
+      # Pulled on the same schedule as Meta so the two always describe the same
+      # moment. v2-ingest still ingests Shopify every 10 minutes for the rest of
+      # the pipeline; this call exists so the report's sales figure matches
+      # Shopify admin at the instant spend was measured.
       - name: Refresh today's Shopify orders
+        if: ${{ env.SNAP_UPDATED == '1' }}
         continue-on-error: true      # fall back to the branch copy if a store 500s
         run: |
           pip install --quiet requests python-dotenv
