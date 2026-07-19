@@ -125,8 +125,14 @@ jobs:
           MIN_GAP=55
           echo "newest snapshot is ${AGE} min old (minimum gap ${MIN_GAP} min)"
           if [ "$AGE" -ge "$MIN_GAP" ]; then
-            python3 scripts/v2/camp_snapshot.py --db "$SNAP_DB"
-            echo "SNAP_UPDATED=1" >> "$GITHUB_ENV"
+            # A transient Meta 5xx must not take down the page rebuild and the
+            # email with it. On failure we keep the previous snapshot, the page
+            # shows the data ageing, and the next run retries.
+            if python3 scripts/v2/camp_snapshot.py --db "$SNAP_DB"; then
+              echo "SNAP_UPDATED=1" >> "$GITHUB_ENV"
+            else
+              echo "::warning::Meta pull failed — keeping the previous snapshot"
+            fi
           else
             echo "within the ${MIN_GAP}-minute window — no Meta call this run"
           fi

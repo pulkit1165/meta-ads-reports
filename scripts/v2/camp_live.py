@@ -14,17 +14,38 @@ fetch_active_campaigns(token, account_ids=None) -> list[dict] with keys:
   orders, impressions, clicks, ctr (%), cpc (₹), cpm (₹), cpa (₹)
 """
 import json
-import urllib.request
+import time
+import urllib.error
 import urllib.parse
+import urllib.request
 from datetime import datetime, timezone, timedelta
 
 API = "https://graph.facebook.com/v19.0/"
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-def _get(url):
-    with urllib.request.urlopen(url, timeout=60) as r:
-        return json.load(r)
+def _get(url, retries=3):
+    """GET with backoff on transient failures.
+
+    Meta returns 500/503 sporadically — one such blip took down a whole report
+    run. 4xx is not retried: those are permission or request errors and will
+    fail identically on the next attempt.
+    """
+    delay = 2
+    for attempt in range(retries):
+        try:
+            with urllib.request.urlopen(url, timeout=60) as r:
+                return json.load(r)
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or attempt == retries - 1:
+                raise
+            print(f"  meta {e.code} — retry {attempt + 1}/{retries - 1} in {delay}s")
+        except (urllib.error.URLError, TimeoutError) as e:
+            if attempt == retries - 1:
+                raise
+            print(f"  meta network error ({e}) — retry {attempt + 1}/{retries - 1} in {delay}s")
+        time.sleep(delay)
+        delay *= 3
 
 
 def _paged(path, params, token, cap=2000):
