@@ -24,14 +24,17 @@ API = "https://graph.facebook.com/v19.0/"
 IST = timezone(timedelta(hours=5, minutes=30))
 
 
-def _get(url, retries=3):
+def _get(url, retries=6):
     """GET with backoff on transient failures.
 
     Meta returns 500/503 sporadically — one such blip took down a whole report
-    run. 4xx is not retried: those are permission or request errors and will
-    fail identically on the next attempt.
+    run. Their `code: 2 / is_transient: true` errors can persist for a couple
+    of minutes, so back off up to ~2.5 min total before giving up; 3 quick
+    tries (the old behaviour) failed the whole hourly run over an 8s wobble.
+    4xx is not retried: those are permission or request errors and will fail
+    identically on the next attempt.
     """
-    delay = 2
+    delay = 3
     for attempt in range(retries):
         try:
             with urllib.request.urlopen(url, timeout=60) as r:
@@ -45,7 +48,7 @@ def _get(url, retries=3):
                 raise
             print(f"  meta network error ({e}) — retry {attempt + 1}/{retries - 1} in {delay}s")
         time.sleep(delay)
-        delay *= 3
+        delay = min(delay * 3, 60)
 
 
 def _paged(path, params, token, cap=2000):
@@ -72,7 +75,15 @@ def _action(rows, atype):
 
 
 def list_accounts(token):
-    return _paged('me/adaccounts', {'fields': 'account_id,name', 'limit': 500}, token)
+    """All ad accounts the token can see.
+
+    limit=25, not 500. Meta returns a hard HTTP 500 on me/adaccounts at large
+    page sizes for this business (75 accounts) — every time, not occasionally —
+    while limit=25 succeeds. The error even reports is_transient=true, so it
+    looks like a blip and retries never help. _paged follows paging.next, so a
+    smaller page size costs a few extra requests and nothing else.
+    """
+    return _paged('me/adaccounts', {'fields': 'account_id,name', 'limit': 25}, token)
 
 
 def _batch_ids(ids, fields, token):
