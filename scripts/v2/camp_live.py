@@ -122,7 +122,17 @@ def fetch_active_campaigns(token, account_ids=None, now=None):
     if account_ids is None:
         accts = {f"act_{a['account_id']}": a['name'] for a in list_accounts(token)}
     else:
-        accts = {a: a for a in account_ids}  # names filled below if missing
+        # Resolve the real names. Using the id as the name looks harmless but
+        # breaks every downstream portal roll-up: portal_of() matches on the
+        # friendly name ("NBP Skin" -> NBP), so "act_1505319823511657" maps to
+        # no portal and its budgets and products silently drop to zero.
+        accts = {}
+        for i in range(0, len(account_ids), 25):
+            chunk = list(account_ids)[i:i + 25]
+            meta = _batch_ids(chunk, 'name', token)
+            for aid in chunk:
+                got = meta.get(aid) if isinstance(meta, dict) else None
+                accts[aid] = (got or {}).get('name') or aid
     out = []
     for aid, aname in accts.items():
         # 1) active campaigns: budget / created / objective / status
