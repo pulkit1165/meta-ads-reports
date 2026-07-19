@@ -73,6 +73,14 @@ jobs:
       - uses: actions/setup-python@v5
         with: { python-version: "3.11" }
 
+      # Install BEFORE anything imports. classify_ads -> _utils needs requests
+      # and dotenv; when these were installed only inside the (conditional)
+      # Shopify step, the product classifier silently lost two of its three
+      # tiers on any run that skipped it — SM read 1 product against Rs93,000
+      # of live budget.
+      - name: Install dependencies
+        run: pip install --quiet requests python-dotenv gspread
+
       - name: Restore both databases
         run: |
           set -e
@@ -163,9 +171,7 @@ jobs:
       - name: Refresh today's Shopify orders
         if: ${{ env.SNAP_UPDATED == '1' }}
         continue-on-error: true      # fall back to the branch copy if a store 500s
-        run: |
-          pip install --quiet requests python-dotenv
-          python3 scripts/v2/ingest_shopify.py --days 1 2>&1 | tail -6
+        run: python3 scripts/v2/ingest_shopify.py --days 1 2>&1 | tail -6
 
       - name: Freshness check
         # Surfaces a stale feed in the job log instead of silently mailing old

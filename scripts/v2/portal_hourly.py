@@ -74,17 +74,28 @@ def portal_of(account_name: str | None) -> str | None:
 
 
 # ── product classification ────────────────────────────────────────────────
+_CLASSIFIER_WARNINGS = []
+
 try:
     from active_budget_by_product import classify_corrected as _classify
-except Exception:  # pragma: no cover — fall back to the raw catalogue
+except Exception as _e:  # pragma: no cover — fall back to the raw catalogue
+    _CLASSIFIER_WARNINGS.append(f'active_budget_by_product unavailable ({_e})')
     from product_catalogue import derive_product_and_category as _classify
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 try:
     from classify_ads import extract_ntn_code, extract_product_slug
-except Exception:  # pragma: no cover
+except Exception as _e:  # pragma: no cover
+    # Losing these silently costs two of the three classification tiers and
+    # roughly two thirds of the product count, with no error anywhere. Shout.
+    _CLASSIFIER_WARNINGS.append(
+        f'classify_ads unavailable ({_e}) — SKU-code and name-slug tiers are DEAD, '
+        f'product counts will be badly under-reported')
     extract_ntn_code = lambda _t: None            # noqa: E731
     extract_product_slug = lambda _t: None        # noqa: E731
+
+for _w in _CLASSIFIER_WARNINGS:
+    print(f'  !! PRODUCT CLASSIFIER DEGRADED: {_w}')
 
 # Noise tokens in a recovered slug: SKU codes, funnel/audience markers, price
 # points, pack sizes, dates, creative boilerplate. What survives is the product.
