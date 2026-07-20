@@ -116,22 +116,20 @@ jobs:
       # kept ingesting every 10 minutes while Meta went hourly, revenue would run
       # ahead of spend and inflate ROAS — the exact fault that had this reading
       # 5.25 against a true 2.29.
-      - name: Pull Meta at :55 (fresh for the top of the hour)
+      - name: Pull Meta at the top of the hour
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
         run: |
-          # Pull ALIGNED TO :55, not "55 minutes since the last pull". The old
-          # gate drifted later every cycle (6:39 -> 7:34 -> 8:29), so the top of
-          # the hour was never guaranteed fresh. Now one pull lands each hour in
-          # the :55 window, so by HH:00 the just-finished hour is complete and
-          # the report is live.
+          # Pull ONCE PER HOUR, at the top of the hour (:00), so each hour is
+          # CAPTURED COMPLETE — a 6:00 pull holds the full 5:00-5:59 hour, unlike
+          # a :55 pull that missed the final five minutes. A run fires at IST :00
+          # (the */10 UTC cron lands on IST :00), so the pull takes ~2 min and the
+          # board is live just after the hour turns.
           #
-          # DECISION (prints PULL or SKIP):
-          #   after :55  -> pull if we have not already pulled since this hour's
-          #                 :55 mark
-          #   before :55 -> normally SKIP, but if the :55 window was missed
-          #                 entirely (GitHub dropped every run in it) the most
-          #                 recent :55 mark is still unsatisfied, so we catch up
+          # DECISION (prints PULL or SKIP): pull on the first run at/after this
+          # hour's :00 mark, i.e. whenever the newest snapshot is from before it.
+          # If GitHub drops the :00 run, the next run (:10) still sees the mark
+          # unsatisfied and pulls — so an hour is never skipped.
           DECISION=$(python3 - <<'PY'
           import sqlite3, os
           from datetime import datetime, timezone, timedelta
@@ -140,9 +138,7 @@ jobs:
           r = sqlite3.connect(os.environ['SNAP_DB']).execute(
               "SELECT MAX(ts) FROM campaign_hourly_snapshots").fetchone()[0]
           latest = datetime.fromisoformat(r) if r else None
-          mark = now.replace(minute=55, second=0, microsecond=0)
-          if now.minute < 55:
-              mark -= timedelta(hours=1)          # most recent :55 that has passed
+          mark = now.replace(minute=0, second=0, microsecond=0)   # top of THIS hour
           print("PULL" if (latest is None or latest < mark) else "SKIP")
           PY
           )
@@ -157,7 +153,7 @@ jobs:
               echo "::warning::Meta pull failed — keeping the previous snapshot"
             fi
           else
-            echo "not in the :55 pull window — reusing the current snapshot"
+            echo "already pulled this hour — reusing the current snapshot"
           fi
 
       - name: Save refreshed snapshot to branch

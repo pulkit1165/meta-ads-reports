@@ -54,17 +54,15 @@ LIVE_MAX_MIN = 70
 DELAYED_MAX_MIN = 95
 
 
-# Pulls are pinned to :55 IST so the top of each hour is fresh — see the
-# "Pull Meta at :55" step in .github/workflows/roas-email.yml.
-PULL_MINUTE = 55
+# Pulls happen at the top of each hour (:00) so every hour is captured
+# complete — see the "Pull Meta at the top of the hour" step in
+# .github/workflows/roas-email.yml.
+PULL_MINUTE = 0
 
 
 def next_update(now, last_pull=None):
-    """The next :55 pull. Approximate — GitHub skips ticks — so shown with "~"."""
-    nxt = now.replace(minute=PULL_MINUTE, second=0, microsecond=0)
-    if now.minute >= PULL_MINUTE:
-        nxt += timedelta(hours=1)
-    return nxt
+    """The next top-of-hour pull. Approximate (GitHub skips ticks) so shown "~"."""
+    return now.replace(minute=0, second=0, microsecond=0) + timedelta(hours=1)
 
 CSS = """
 *{box-sizing:border-box}
@@ -297,7 +295,7 @@ def main():
          f'<div class="stamp">'
          f'<span id="badge" class="badge live">&#9679; LIVE</span>'
          f'<span id="age">data {data_age} min old &middot; {data_txt}</span>'
-         f'<span class="nxt">Pulled at :55 each hour, so the top of the hour is live</span>'
+         f'<span class="nxt">Pulled at the top of each hour &mdash; a full hour, live ~2 min later</span>'
          f'<span class="nxt" id="chk">checking\u2026</span>'
          f'<span class="nxt" id="nxt">Next update ~{nxt_txt}</span></div></div>']
 
@@ -432,8 +430,8 @@ def main():
              'Blended ROAS counts <b>all</b> Shopify revenue including organic and repeat &mdash; '
              'a profitability read per website, not a campaign metric.<br>'
              'Campaign figures are Meta pixel-attributed. Nothing is paused automatically. '
-             'Meta and Shopify are pulled at :55 each hour, so figures are complete '
-             'for the hour by the time it turns over.</div>')
+             'Meta and Shopify are pulled at the top of each hour, so each hour is '
+             'captured complete and the board is live within a couple of minutes.</div>')
     # Live status: counts down to the next scheduled rebuild, flips to a pulsing
     # "Refreshing now" once due, then reloads to pick up the new deploy. Paced at
     # 45s so a late build (GitHub queueing) doesn't hammer the page.
