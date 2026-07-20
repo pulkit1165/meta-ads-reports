@@ -116,33 +116,48 @@ jobs:
       # kept ingesting every 10 minutes while Meta went hourly, revenue would run
       # ahead of spend and inflate ROAS — the exact fault that had this reading
       # 5.25 against a true 2.29.
-      - name: Refresh Meta snapshot if stale
+      - name: Pull Meta at :55 (fresh for the top of the hour)
         env:
           META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
         run: |
-          AGE=$(python3 - <<'PY'
+          # Pull ALIGNED TO :55, not "55 minutes since the last pull". The old
+          # gate drifted later every cycle (6:39 -> 7:34 -> 8:29), so the top of
+          # the hour was never guaranteed fresh. Now one pull lands each hour in
+          # the :55 window, so by HH:00 the just-finished hour is complete and
+          # the report is live.
+          #
+          # DECISION (prints PULL or SKIP):
+          #   after :55  -> pull if we have not already pulled since this hour's
+          #                 :55 mark
+          #   before :55 -> normally SKIP, but if the :55 window was missed
+          #                 entirely (GitHub dropped every run in it) the most
+          #                 recent :55 mark is still unsatisfied, so we catch up
+          DECISION=$(python3 - <<'PY'
           import sqlite3, os
           from datetime import datetime, timezone, timedelta
           IST = timezone(timedelta(hours=5, minutes=30))
+          now = datetime.now(IST)
           r = sqlite3.connect(os.environ['SNAP_DB']).execute(
               "SELECT MAX(ts) FROM campaign_hourly_snapshots").fetchone()[0]
-          print(int((datetime.now(IST) - datetime.fromisoformat(r)).total_seconds() // 60)
-                if r else 999)
+          latest = datetime.fromisoformat(r) if r else None
+          mark = now.replace(minute=55, second=0, microsecond=0)
+          if now.minute < 55:
+              mark -= timedelta(hours=1)          # most recent :55 that has passed
+          print("PULL" if (latest is None or latest < mark) else "SKIP")
           PY
           )
-          MIN_GAP=55
-          echo "newest snapshot is ${AGE} min old (minimum gap ${MIN_GAP} min)"
-          if [ "$AGE" -ge "$MIN_GAP" ]; then
+          echo "pull decision: $DECISION (IST $(date '+%H:%M'))"
+          if [ "$DECISION" = "PULL" ]; then
             # A transient Meta 5xx must not take down the page rebuild and the
-            # email with it. On failure we keep the previous snapshot, the page
-            # shows the data ageing, and the next run retries.
+            # email with it. On failure we keep the previous snapshot; the next
+            # run retries.
             if python3 scripts/v2/camp_snapshot.py --db "$SNAP_DB"; then
               echo "SNAP_UPDATED=1" >> "$GITHUB_ENV"
             else
               echo "::warning::Meta pull failed — keeping the previous snapshot"
             fi
           else
-            echo "within the ${MIN_GAP}-minute window — no Meta call this run"
+            echo "not in the :55 pull window — reusing the current snapshot"
           fi
 
       - name: Save refreshed snapshot to branch
