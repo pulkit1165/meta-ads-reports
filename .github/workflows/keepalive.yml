@@ -34,11 +34,23 @@ jobs:
             exit 0
           fi
           dispatch() {
-            curl -s -o /dev/null -w "%{http_code}" -X POST \
-              -H "Authorization: Bearer $PAT" \
-              -H "Accept: application/vnd.github+json" \
-              "https://api.github.com/repos/$REPO/actions/workflows/$1/dispatches" \
-              -d "$2"
+            # Retry transient GitHub failures (5xx / 429). A single 503 on the
+            # re-arm call once killed the whole self-perpetuating chain, freezing
+            # every downstream workflow for hours. 4xx is returned as-is — a 422
+            # ("workflow does not have workflow_dispatch") is permanent.
+            local code
+            for attempt in 1 2 3 4; do
+              code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
+                -H "Authorization: Bearer $PAT" \
+                -H "Accept: application/vnd.github+json" \
+                "https://api.github.com/repos/$REPO/actions/workflows/$1/dispatches" \
+                -d "$2")
+              case "$code" in
+                5*|429) sleep $((attempt * 5)); continue ;;
+                *) break ;;
+              esac
+            done
+            echo "$code"
           }
           # 5 ticks x 10 min = ~50 min of coverage this run
           for i in 1 2 3 4 5; do
@@ -55,8 +67,28 @@ jobs:
             # GitHub's own scheduler drops ticks.
             rcode=$(dispatch roas-email.yml '{"ref":"main"}')
             echo "tick $i/5 -> roas-email dispatched (HTTP $rcode)"
+            # Live-ROAS dashboard snapshots on alternate ticks (~every 20 min):
+            # its own 3x/hour cron was down to ~4 honored ticks in 15h, leaving
+            # the dashboard hours stale. Upserts by hour-slot, so extra runs are
+            # idempotent; alternate ticks keep Meta API load at the designed rate.
+            if [ $((i % 2)) -eq 1 ]; then
+              scode=$(dispatch camp-snapshots.yml '{"ref":"main"}')
+              echo "tick $i/5 -> camp-snapshots dispatched (HTTP $scode)"
+            fi
             if [ "$i" -lt 5 ]; then sleep 600; fi
           done
-          # re-arm the chain so it continues without relying on GitHub's scheduler
-          code=$(dispatch keepalive.yml '{"ref":"main"}')
-          echo "re-armed keepalive (HTTP $code)"
+          # Re-arm the chain. This is the single point of failure for the whole
+          # heartbeat, so it retries hard — if it does not land, nothing runs
+          # until GitHub's own cron happens to fire. The schedule: below is the
+          # backstop for exactly that case.
+          code=""
+          for attempt in 1 2 3 4 5 6; do
+            code=$(dispatch keepalive.yml '{"ref":"main"}')
+            echo "re-arm attempt $attempt -> HTTP $code"
+            case "$code" in 2*) break ;; esac
+            sleep $((attempt * 10))
+          done
+          case "$code" in
+            2*) echo "re-armed OK" ;;
+            *)  echo "::warning::re-arm failed after retries (HTTP $code) — relying on cron backstop" ;;
+          esac
