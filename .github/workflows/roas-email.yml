@@ -57,6 +57,7 @@ jobs:
       TZ: Asia/Kolkata
       SNAP_DB: state/camp_snapshots.db
       NTN_DB: state/ntn.db
+      FINALS: state/daily_finals.json
       STATE_FILE: email-state/roas_email_sent.json
       GMAIL_USER: ${{ secrets.GMAIL_USER }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
@@ -89,6 +90,9 @@ jobs:
           git show origin/camp-snapshots:camp_snapshots.db.gz | gunzip > "$SNAP_DB"
           git fetch --depth=1 origin state:refs/remotes/origin/state
           git show origin/state:ntn.db.gz | gunzip > "$NTN_DB"
+          # Frozen end-of-day finals live on the camp-snapshots branch.
+          git show origin/camp-snapshots:daily_finals.json > "$FINALS" 2>/dev/null \
+            || echo '{}' > "$FINALS"
           echo "snapshots $(du -h "$SNAP_DB" | cut -f1) · ntn $(du -h "$NTN_DB" | cut -f1)"
 
       - name: Restore email-send state
@@ -184,6 +188,38 @@ jobs:
         continue-on-error: true      # fall back to the branch copy if a store 500s
         run: python3 scripts/v2/ingest_shopify.py --days 1 2>&1 | tail -6
 
+      # Freeze each completed day once (Meta final daily spend + all-day Shopify
+      # sales), so "yesterday" and the archive show the true full-day ROAS
+      # instead of a snapshot that stops a few minutes into the last hour.
+      - name: Freeze completed days
+        continue-on-error: true      # a Meta blip here must not fail the report
+        env:
+          META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}
+        run: |
+          BEFORE=$(md5sum "$FINALS" 2>/dev/null | cut -d' ' -f1)
+          python3 scripts/v2/daily_finals.py --store "$FINALS" --ntn-db "$NTN_DB" --days 8
+          AFTER=$(md5sum "$FINALS" 2>/dev/null | cut -d' ' -f1)
+          [ "$BEFORE" != "$AFTER" ] && echo "FINALS_UPDATED=1" >> "$GITHUB_ENV" || true
+
+      - name: Save finals to branch
+        if: ${{ env.FINALS_UPDATED == '1' }}
+        run: |
+          set -e
+          git config user.name  "meta-ads-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          WT=.finals-wt; git worktree remove -f "$WT" 2>/dev/null || true; rm -rf "$WT"
+          git worktree add -f "$WT" origin/camp-snapshots
+          cp "$FINALS" "$WT/daily_finals.json"
+          cd "$WT"; git add -A
+          if git diff --staged --quiet; then echo "no change"; exit 0; fi
+          git commit -m "daily finals: $(date -u +%FT%TZ)"
+          for i in 1 2 3; do
+            git push origin HEAD:camp-snapshots && { echo pushed; break; }
+            git fetch origin camp-snapshots && git reset --hard origin/camp-snapshots
+            cp "../$FINALS" daily_finals.json
+            git add -A && git commit -m "finals overlay" || true
+          done
+
       - name: Freshness check
         # Surfaces a stale feed in the job log instead of silently mailing old
         # numbers — the snapshot cron and the Shopify ingest both skip sometimes.
@@ -212,7 +248,7 @@ jobs:
       - name: Build ROAS page
         run: |
           python3 scripts/v2/build_roas_page.py \
-            --snap-db "$SNAP_DB" --ntn-db "$NTN_DB" \
+            --snap-db "$SNAP_DB" --ntn-db "$NTN_DB" --finals "$FINALS" \
             --out roas-live/index.html --days 7
 
       - name: Deploy page to Vercel

@@ -41,6 +41,7 @@ from portal_hourly import (  # noqa: E402
 )
 from success_lookup import TARGET_ROAS, build_both  # noqa: E402
 from camp_closing import build_first_activity, collect  # noqa: E402
+from daily_finals import load as load_finals, finals_for  # noqa: E402
 
 IST = timezone(timedelta(hours=5, minutes=30))
 
@@ -238,6 +239,8 @@ def main():
     ap.add_argument('--day', default=None)
     ap.add_argument('--to', default=None, help='comma-separated override of RECIPIENTS')
     ap.add_argument('--dry-run', action='store_true', help='print, do not send')
+    ap.add_argument('--finals', default='state/daily_finals.json',
+                    help='frozen end-of-day totals for completed days')
     ap.add_argument('--min-spend', type=float, default=2000,
                     help='skip sending below this much ad spend today (default 2000)')
     ap.add_argument('--state', default=None,
@@ -295,11 +298,15 @@ def main():
                         f'(last was {last[11:16]} IST).')
 
     yday_date = (datetime.strptime(day, '%Y-%m-%d') - timedelta(days=1)).strftime('%Y-%m-%d')
-    try:
-        yrows = build_rows(args.snap_db, args.ntn_db, yday_date)
-        yday = summarise(yrows) if yrows else None
-    except Exception:
-        yday = None
+    # Frozen full-day finals (Meta final spend / all-day sales); snapshot only if
+    # not yet frozen.
+    yday = finals_for(load_finals(args.finals), yday_date)
+    if yday is None:
+        try:
+            yrows = build_rows(args.snap_db, args.ntn_db, yday_date)
+            yday = summarise(yrows) if yrows else None
+        except Exception:
+            yday = None
 
     con = sqlite3.connect(f'file:{args.snap_db}?mode=ro', uri=True)
     lk16, lk21 = build_both(args.snap_db, exclude_day=day)

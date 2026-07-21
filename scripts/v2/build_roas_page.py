@@ -32,6 +32,7 @@ from portal_hourly import (  # noqa: E402
 )
 from success_lookup import TARGET_ROAS, build_both  # noqa: E402
 from camp_closing import build_first_activity, collect  # noqa: E402
+from daily_finals import load as load_finals, finals_for  # noqa: E402
 
 IST = timezone(timedelta(hours=5, minutes=30))
 WEBSITE = {'SM': 'Studd Muffyn', 'SML': 'SM Life', 'NBP': 'Nuskhe by Paras'}
@@ -247,6 +248,8 @@ def main():
     ap.add_argument('--ntn-db', default='state/ntn.db')
     ap.add_argument('--out', default='roas-live/index.html')
     ap.add_argument('--days', type=int, default=7, help='days of archive below today')
+    ap.add_argument('--finals', default='state/daily_finals.json',
+                    help='frozen end-of-day totals for completed days')
     args = ap.parse_args()
 
     now = datetime.now(IST)
@@ -256,9 +259,16 @@ def main():
     tot = summarise(prows) if prows else None
     arows = all_portal_rows(prows) if prows else []
 
+    # Yesterday and older days use FROZEN finals (all-day Shopify sales / Meta's
+    # final daily spend), not the snapshot sum — the last snapshot of a day is
+    # short, badly so now that pulls land at the top of the hour. Falls back to
+    # the snapshot computation only if a day hasn't been frozen yet.
+    finals = load_finals(args.finals)
     yday_date = (now - timedelta(days=1)).strftime('%Y-%m-%d')
-    yrows = build_rows(args.snap_db, args.ntn_db, yday_date)
-    yday = summarise(yrows) if yrows else None
+    yday = finals_for(finals, yday_date)
+    if yday is None:
+        yrows = build_rows(args.snap_db, args.ntn_db, yday_date)
+        yday = summarise(yrows) if yrows else None
 
     con = sqlite3.connect(f'file:{args.snap_db}?mode=ro', uri=True)
     lk16, _ = build_both(args.snap_db, exclude_day=day)
@@ -363,7 +373,13 @@ def main():
         pr = build_rows(args.snap_db, args.ntn_db, d)
         if not pr:
             continue
+        # Day totals: sales/spend/ROAS/orders from the frozen finals (accurate),
+        # budgets kept from the snapshot (finals don't carry a budget state).
         full = summarise(pr)
+        fin = finals_for(finals, d)
+        if fin:
+            for k in list(PORTALS) + ['ALL']:
+                full[k].update({m: fin[k][m] for m in ('rev', 'spend', 'roas', 'orders')})
         if not full['ALL']['spend']:
             continue
         arch.append((d, full, pr, all_portal_rows(pr)))
