@@ -36,7 +36,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from portal_hourly import PORTALS, portal_of  # noqa: E402
+from portal_hourly import PORTALS, SALES_FILTER, portal_of  # noqa: E402
 
 IST = timezone(timedelta(hours=5, minutes=30))
 API = 'https://graph.facebook.com/v19.0'
@@ -103,8 +103,8 @@ def shopify_daily(ntn_db: str, date: str) -> dict:
     try:
         for portal, sales, orders in con.execute(
                 "SELECT portal, SUM(COALESCE(total_price,0)), COUNT(*) "
-                "FROM shopify_orders WHERE substr(created_at,1,10)=? "
-                "AND cancelled_at IS NULL GROUP BY portal", (date,)):
+                "FROM shopify_orders WHERE substr(created_at,1,10)=? AND "
+                + SALES_FILTER + " GROUP BY portal", (date,)):
             if portal in out:
                 out[portal] = {'sales': round(float(sales or 0), 2), 'orders': int(orders or 0)}
     finally:

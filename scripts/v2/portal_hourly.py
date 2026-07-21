@@ -34,6 +34,13 @@ sys.path.insert(0, str(REPO_ROOT / 'scripts'))
 
 PORTALS = ('SM', 'SML', 'NBP')
 
+# "Sales" = REALISED revenue: not cancelled, and payment actually taken. Pending
+# (unpaid / COD-not-confirmed), voided, refunded and expired orders are excluded
+# because they are not money in — this is what the operator's Shopify sale report
+# counts, and counting pending inflated blended ROAS.
+SALES_FILTER = ("cancelled_at IS NULL AND "
+                "COALESCE(financial_status,'') NOT IN ('pending','voided','refunded','expired')")
+
 # Friendly account names as they appear in campaign_hourly_snapshots.account_name,
 # mirroring _utils.PORTAL_ACCOUNTS. Accounts outside these three portals
 # (TransfersX, read-only mirrors) are deliberately excluded — they have no
@@ -297,7 +304,7 @@ def shopify_hourly(con: sqlite3.Connection, day: str, cutoff: str | None = None)
     q = ("SELECT portal, substr(created_at,1,13), "
          "       SUM(COALESCE(total_price,0)), COUNT(*) "
          "FROM shopify_orders "
-         "WHERE substr(created_at,1,10) = ? AND cancelled_at IS NULL "
+         "WHERE substr(created_at,1,10) = ? AND " + SALES_FILTER + " "
          + ("AND created_at <= ? " if cutoff else "")
          + "GROUP BY portal, substr(created_at,1,13)")
     params = (day, cutoff) if cutoff else (day,)
