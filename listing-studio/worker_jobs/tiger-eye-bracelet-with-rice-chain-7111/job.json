@@ -1,0 +1,38 @@
+{
+  "slug": "tiger-eye-bracelet-with-rice-chain-7111",
+  "name": "tiger eye bracelet with rice chain",
+  "category": "Jewellery",
+  "price": "",
+  "mrp": "",
+  "sku": "",
+  "variants": "",
+  "details": "Product Description\nAdd a bold yet elegant touch to your everyday style with this Tiger Eye bracelet. Designed with glossy natural stone beads and a sleek gold-tone link chain, this bracelet gives a classy, premium look that feels both modern and meaningful. Perfect for daily wear or gifting.\n\nBracelet Details\nTiger Eye Energy:\nTiger Eye is known for confidence, focus, courage, grounding, and strong decision-making energy.\n\nMetallic Accent Beads:\nThe metallic accent beads add a balanced, powerful look and enhance the bracelet’s bold styling.\n\nGold-Tone Link Chain:\nThe bracelet features a premium gold-tone elongated link chain that gives it a stylish and polished finish.\n\nAdjustable Closure:\nDesigned with an adjustable clasp and extension chain for a comfortable and secure fit.\n\nWhy You’ll Love It\n\nStylish everyday bracelet\nPremium unisex design\nElegant mix of stone beads and gold-tone chain\nEasy to pair with casual and festive outfits\nIdeal for gifting\n\nSpecifications\n\nNet Quantity: 1 Bracelet\nSuitable For: Men & Women\nStyle: Unisex Stone Bracelet\nMain Stone: Tiger Eye\nAccent Beads: Metallic finish beads\nChain Type: Gold-tone elongated link chain\nClosure Type: Lobster clasp with extension chain\nFit Type: Adjustable\nFinish: Glossy and polished",
+  "notes": "",
+  "ref_urls": [
+    "https://studdmuffyn.com/products/tiger-eye-obsidian-protection-bracelet?_pos=25&_sid=5109b010d&_ss=r"
+  ],
+  "inputs": {
+    "raw": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/raw/WhatsApp_Image_2026-07-07_at_4.18.10_PM__1_-6f8mFZPkwQxMHKQyaQMZV8vH52VToc.jpeg",
+        "name": "WhatsApp_Image_2026-07-07_at_4.18.10_PM__1_.jpeg"
+      }
+    ],
+    "refs": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/refs/AmbitionProtectionBracelet-5-p8uHzUUSnCb94K7jXAwzyk3T3gJUb0.webp",
+        "name": "AmbitionProtectionBracelet-5.webp"
+      }
+    ],
+    "labels": []
+  },
+  "status": "generating_content",
+  "error": "",
+  "log": [
+    "2026-07-07T11:44:47.111Z created",
+    "2026-07-07T12:13:39.697Z queued content",
+    "2026-07-07T12:13:51.666Z worker picked up content"
+  ],
+  "created": 1783424687111,
+  "updated": 1783426431666
+}

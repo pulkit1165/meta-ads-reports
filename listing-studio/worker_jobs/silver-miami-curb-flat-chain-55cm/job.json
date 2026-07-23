@@ -1,0 +1,52 @@
+{
+  "slug": "silver-miami-curb-flat-chain-55cm",
+  "name": "Silver Miami Curb Flat Chain [ 55cm ]",
+  "category": "Crystal Jewellery",
+  "vendor": "Studd Muffyn",
+  "price": "699",
+  "mrp": "",
+  "sku": "",
+  "variants": "",
+  "jewellery_finish": "",
+  "jewellery_type": "Chain",
+  "theme_mood": "",
+  "text_style": "Normal",
+  "color_theme": "",
+  "background_style": "",
+  "model_pref": "Women",
+  "hero_types": [
+    "normal",
+    "offer"
+  ],
+  "hero_custom": "",
+  "crystal_name": "",
+  "crystal_benefit": "",
+  "offer": "699",
+  "details": "",
+  "notes": "",
+  "ref_urls": [],
+  "inputs": {
+    "raw": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/raw/IMG_1720-kCROIWeaueAqlGKEml3l7L6CWPVhBy.JPEG",
+        "name": "IMG_1720.JPEG"
+      },
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/raw/IMG_1721-qmfoMo0VCSCJrzCZOMzh2jVAqKvSG0.JPEG",
+        "name": "IMG_1721.JPEG"
+      }
+    ],
+    "crystal": [],
+    "refs": [],
+    "labels": []
+  },
+  "status": "generating_content",
+  "error": "",
+  "log": [
+    "2026-07-17T16:19:53.021Z created",
+    "2026-07-17T16:23:37.965Z queued content",
+    "2026-07-17T17:52:55.409Z worker picked up content"
+  ],
+  "created": 1784305193021,
+  "updated": 1784310775409
+}

@@ -1,0 +1,7 @@
+jobs/
+__pycache__/
+.secret_key
+listings.db
+tunnel_url.txt
+*.log
+.vercel

@@ -1,0 +1,68 @@
+[
+  {
+    "slot": 1,
+    "file": "images/slot1_01-hero-crystal-callout.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100234_bc80fffb-bd9c-40ce-b972-507ee3f903e8.png",
+    "generation_id": "bc80fffb-bd9c-40ce-b972-507ee3f903e8"
+  },
+  {
+    "slot": 2,
+    "file": "images/slot2_02-usp-details.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100241_e769b9f2-f2a1-4788-93f9-b8ced8250e01.png",
+    "generation_id": "e769b9f2-f2a1-4788-93f9-b8ced8250e01"
+  },
+  {
+    "slot": 3,
+    "file": "images/slot3_03-breakdown-material.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100246_5a6fb7fe-79b0-46b9-be7e-abbb01649429.png",
+    "generation_id": "5a6fb7fe-79b0-46b9-be7e-abbb01649429"
+  },
+  {
+    "slot": 4,
+    "file": "images/slot4_04-quality.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100253_48bfd2e6-80d0-48c7-bcdc-d4e57501127e.png",
+    "generation_id": "48bfd2e6-80d0-48c7-bcdc-d4e57501127e"
+  },
+  {
+    "slot": 5,
+    "file": "images/slot5_05-closeup.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100257_e4b8390f-4a0f-4b18-b68f-a72fe5d4c51a.png",
+    "generation_id": "e4b8390f-4a0f-4b18-b68f-a72fe5d4c51a"
+  },
+  {
+    "slot": 6,
+    "file": "images/slot6_06-durability.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100304_deadbaa1-5e96-45f8-9a25-80aff747cf9b.png",
+    "generation_id": "deadbaa1-5e96-45f8-9a25-80aff747cf9b"
+  },
+  {
+    "slot": 7,
+    "file": "images/slot7_07-faq.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100311_638af9dc-2063-4a82-b4bf-1d0134f0d284.png",
+    "generation_id": "638af9dc-2063-4a82-b4bf-1d0134f0d284"
+  },
+  {
+    "slot": 8,
+    "file": "images/slot8_08-measurement.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100315_4deabf2a-3f0c-45bb-bf66-a7956f610c5f.png",
+    "generation_id": "4deabf2a-3f0c-45bb-bf66-a7956f610c5f"
+  },
+  {
+    "slot": 9,
+    "file": "images/slot9_09-on-model.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100320_5b5ac167-dfd9-433d-bc9b-1ea198292081.png",
+    "generation_id": "5b5ac167-dfd9-433d-bc9b-1ea198292081"
+  },
+  {
+    "slot": 10,
+    "file": "images/slot10_10-reviews.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100327_741908a2-34bf-4a8b-be6d-c137bfeeaabb.png",
+    "generation_id": "741908a2-34bf-4a8b-be6d-c137bfeeaabb"
+  },
+  {
+    "slot": 11,
+    "file": "images/slot11_11-product-shots.png",
+    "url": "https://d8j0ntlcm91z4.cloudfront.net/user_3D6yi5UfpdQHCWziPTohbvt7CRe/hf_20260715_100330_fbb9f090-240e-4593-803b-f763413a47a2.png",
+    "generation_id": "fbb9f090-240e-4593-803b-f763413a47a2"
+  }
+]

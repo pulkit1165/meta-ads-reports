@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Order placed — Studd Muffyn</title>
+  <style>
+    body { margin: 0; font-family: -apple-system, sans-serif; background: #fff; color: #121212; }
+    .wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 92vh; gap: 14px; padding: 28px; text-align: center; }
+    .tick { width: 72px; height: 72px; border-radius: 50%; background: #c79353; color: #fcf4ee; font-size: 38px; display: flex; align-items: center; justify-content: center; }
+    h1 { font-family: Georgia, serif; font-size: 26px; margin: 6px 0 0; font-weight: 600; }
+    p { color: rgba(18,18,18,0.62); font-size: 14.5px; line-height: 1.6; max-width: 34ch; margin: 0; }
+    .oid { font-size: 12.5px; color: rgba(18,18,18,0.45); }
+    a.btn { margin-top: 10px; background: linear-gradient(120deg, #d3a262, #c79353 55%, #ba823c); color: #fcf4ee; text-decoration: none; font-weight: 700; letter-spacing: 0.05em; padding: 14px 30px; border-radius: 999px; font-size: 14px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="tick">✓</div>
+    <h1 id="title">Order placed!</h1>
+    <p id="sub">Thank you for shopping with Studd Muffyn. You'll get a confirmation on WhatsApp / SMS shortly.</p>
+    <div class="oid" id="oid"></div>
+    <a class="btn" href="https://studdmuffyn.com/pages/track-order">TRACK MY ORDER</a>
+  </div>
+  <script>
+    var p = new URLSearchParams(location.search);
+    var ost = (p.get('ost') || '').toUpperCase();
+    var oid = p.get('oid');
+    if (oid) document.getElementById('oid').textContent = 'Reference: ' + oid;
+    if (ost && ost !== 'SUCCESS') {
+      document.getElementById('title').textContent = 'Checkout not completed';
+      document.getElementById('sub').textContent = 'Your order was not placed. You can go back to the app and try again — your bag is saved.';
+      document.querySelector('.tick').textContent = '!';
+    }
+  </script>
+</body>
+</html>

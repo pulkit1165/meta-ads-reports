@@ -1,0 +1,116 @@
+{
+  "version": 2,
+  "note": "Mirrors studdmuffyn.com's live homepage section-by-section (mobile theme). Edit here — order of sections = order on screen.",
+  "announcement": {
+    "messages": [
+      "❤️ Get Additional 30% off on your first App order ❤️",
+      "FREE SHIPPING ON PREPAID ORDERS"
+    ]
+  },
+  "sections": [
+    {
+      "type": "iconRow",
+      "items": [
+        { "image": "https://studdmuffyn.com/cdn/shop/files/chains.png?v=1783672176&width=400", "handle": "gold-plated-chain" },
+        { "image": "https://studdmuffyn.com/cdn/shop/files/2_chains.png?v=1783672176&width=400", "handle": "buy-1-get-1-free" },
+        { "image": "https://studdmuffyn.com/cdn/shop/files/Pick_any_Pendent.png?v=1783672176&width=400", "handle": "gold-pendent" },
+        { "image": "https://studdmuffyn.com/cdn/shop/files/Pick_any_pendent_with_any_chains.png?v=1783672176&width=400", "handle": "gold-pendent-1" },
+        { "image": "https://studdmuffyn.com/cdn/shop/files/gold_tone_bracelets.png?v=1783672176&width=400", "handle": "gold-tone-bracelet" },
+        { "image": "https://studdmuffyn.com/cdn/shop/files/crystal_IN_Bracelets.png?v=1783672176&width=400", "handle": "gold-plated-bracelet" }
+      ]
+    },
+    {
+      "type": "categoryGrid",
+      "aspect": 1,
+      "showLabel": false,
+      "items": [
+        { "title": "Skin Care", "handle": "skin-care-bestsellers", "image": "https://studdmuffyn.com/cdn/shop/files/SKIN_CARE_catagory_jpg.jpg?v=1782909405&width=600" },
+        { "title": "Hair Care", "handle": "hair-care-bestsellers", "image": "https://studdmuffyn.com/cdn/shop/files/WhatsApp_Image_2026-07-01_at_18.23.48_1.jpg?v=1782910501&width=600" },
+        { "title": "Perfumes", "handle": "perfume-best-sellers", "image": "https://studdmuffyn.com/cdn/shop/files/Perfume_.jpg_1.jpg?v=1782909999&width=600" },
+        { "title": "Nutraceuticals", "handle": "nutraceuticals" }
+      ]
+    },
+    {
+      "type": "logoStrip",
+      "height": 56,
+      "images": [
+        "https://studdmuffyn.com/cdn/shop/files/prepaid.jpg?v=1781804579&width=400",
+        "https://studdmuffyn.com/cdn/shop/files/premium-Q.jpg?v=1781804579&width=400",
+        "https://studdmuffyn.com/cdn/shop/files/tarnish-free.jpg?v=1781804579&width=400"
+      ]
+    },
+    {
+      "type": "imageBanner",
+      "aspect": 10.26,
+      "image": "https://studdmuffyn.com/cdn/shop/files/The_Global_Jewellery_Edit_-_2_jpg_5fa48b9f-9384-4523-92dc-5f33b0b27aad.jpg?v=1783577661&width=1200",
+      "url": "/collections/global-jewellery"
+    },
+    {
+      "type": "categoryGrid",
+      "aspect": 0.9,
+      "showLabel": true,
+      "items": [
+        { "title": "The Italy Edit", "handle": "the-italy-edit", "image": "https://studdmuffyn.com/cdn/shop/files/The_Edit_City_with_jewellery_-7.jpg?v=1783496683&width=600" },
+        { "title": "The Japan Edit", "handle": "the-japan-edit", "image": "https://studdmuffyn.com/cdn/shop/files/The_Edit_City_with_jewellery_-5.jpg?v=1783496803&width=600" },
+        { "title": "The Greece Edit", "handle": "the-greece-edit", "image": "https://studdmuffyn.com/cdn/shop/files/The_Edit_City_with_jewellery_-4.jpg?v=1783496984&width=600" },
+        { "title": "The India Edit", "handle": "the-india-edit", "image": "https://studdmuffyn.com/cdn/shop/files/The_Edit_City_with_jewellery_-3.jpg?v=1783497241&width=600" }
+      ]
+    },
+    {
+      "type": "logoStrip",
+      "height": 44,
+      "images": [
+        "https://studdmuffyn.com/cdn/shop/files/Myntra_logo.png?v=1782906474&width=320",
+        "https://studdmuffyn.com/cdn/shop/files/flipkart_3.png?v=1782906256&width=320",
+        "https://studdmuffyn.com/cdn/shop/files/vecteezy_amazon-logo-png-amazon-icon-transparent-png_19766240.png?v=1782906080&width=320"
+      ]
+    },
+    { "type": "productRail", "title": "Gold Plated Chain", "handle": "gold-plated-chain" },
+    { "type": "productRail", "title": "Premium Gold Chains ✨", "subtitle": "Buy 2 Chains @ ₹699", "handle": "buy-1-get-1-free" },
+    {
+      "type": "logoStrip",
+      "height": 120,
+      "images": [
+        "https://studdmuffyn.com/cdn/shop/files/11_e4fd8c54-0ff5-4083-9639-5f1626315533.jpg?v=1782214133&width=600",
+        "https://studdmuffyn.com/cdn/shop/files/10_c28eb275-cbd2-4e87-8592-6226e03458ce.jpg?v=1782214226&width=600",
+        "https://studdmuffyn.com/cdn/shop/files/9_7467431c-6c58-4c5c-bb61-2a168c3d64ed.jpg?v=1782214226&width=600"
+      ]
+    },
+    { "type": "productRail", "title": "Crystal Infused Gold Tone Bracelet", "handle": "gold-plated-bracelet" },
+    {
+      "type": "imageBanner",
+      "aspect": 14.55,
+      "image": "https://studdmuffyn.com/cdn/shop/files/get1P1C-799.jpg?v=1782146353&width=1200",
+      "url": "/collections/gold-plated-chain-pendent-799"
+    },
+    { "type": "productRail", "title": "Gold Plated Chain & Pendent @ ₹799", "handle": "gold-plated-chain-pendent-799" },
+    {
+      "type": "imageBanner",
+      "aspect": 14.55,
+      "image": "https://studdmuffyn.com/cdn/shop/files/WhatsApp_Image_2026-06-20_at_18.56.40.jpg?v=1782111444&width=1200",
+      "url": "/collections/3-at-just-999"
+    },
+    { "type": "productRail", "title": "3 at Just ₹999", "handle": "3-at-just-999" },
+    {
+      "type": "imageBanner",
+      "aspect": 3.42,
+      "image": "https://studdmuffyn.com/cdn/shop/files/WhatsApp_Image_2026-06-20_at_18.42.20_1_1.webp?v=1782450151&width=1200",
+      "url": "/collections/studd-muffyn-deals"
+    },
+    { "type": "productRail", "title": "Studd Muffyn Deals", "handle": "studd-muffyn-deals" },
+    {
+      "type": "imageBanner",
+      "aspect": 3.4,
+      "image": "https://studdmuffyn.com/cdn/shop/files/Banner-for-new-theme-BRACELETS_f386b349-049b-4573-a441-b46a5bacee44.jpg?v=1778307078&width=1200",
+      "url": "/collections/crystal-bracelet"
+    },
+    { "type": "productRail", "title": "Pyrite & Crystal Bracelet", "handle": "pyrite-crystal-bracelet" },
+    { "type": "productRail", "title": "Best Selling Nutraceuticals", "handle": "best-selling-nutraceuticals" },
+    {
+      "type": "imageBanner",
+      "aspect": 3.83,
+      "image": "https://studdmuffyn.com/cdn/shop/files/Founder-message_1.jpg?v=1777465904&width=1200"
+    },
+    { "type": "recentlyViewed", "title": "Recently Viewed" }
+  ]
+}

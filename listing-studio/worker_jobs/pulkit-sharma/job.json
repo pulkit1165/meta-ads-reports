@@ -1,0 +1,48 @@
+{
+  "slug": "pulkit-sharma",
+  "name": "Pulkit Sharma",
+  "category": "Gold Jewellery",
+  "vendor": "Studd Muffyn",
+  "price": "33",
+  "mrp": "333",
+  "sku": "333",
+  "variants": "333",
+  "jewellery_finish": "Crystal Infused",
+  "jewellery_type": "",
+  "theme_mood": "Premium, jewllery themed",
+  "text_style": "Luxury",
+  "color_theme": "",
+  "background_style": "",
+  "model_pref": "Women",
+  "hero_types": [
+    "normal",
+    "offer"
+  ],
+  "hero_custom": "",
+  "crystal_name": "Pyrite, black obsidian",
+  "crystal_benefit": "",
+  "offer": "pack of 2 499",
+  "details": "",
+  "notes": "",
+  "ref_urls": [],
+  "inputs": {
+    "raw": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/raw/hf_20260716_052736_b7fd693d-c27d-4140-ada7-c1a8d585ab26-FhEZHjwUy7AUoDFQPj2KJVCpun7r62.png",
+        "name": "hf_20260716_052736_b7fd693d-c27d-4140-ada7-c1a8d585ab26.png"
+      }
+    ],
+    "crystal": [],
+    "refs": [],
+    "labels": []
+  },
+  "status": "generating_content",
+  "error": "",
+  "log": [
+    "2026-07-17T11:38:17.966Z created",
+    "2026-07-17T11:38:26.492Z queued content",
+    "2026-07-17T11:38:35.331Z worker picked up content"
+  ],
+  "created": 1784288297966,
+  "updated": 1784288315331
+}

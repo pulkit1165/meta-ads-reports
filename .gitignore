@@ -32,3 +32,13 @@ out/*
 !out/.gitkeep
 .claude/
 antariksh/paras_videos.json
+
+# JS/app build artifacts & caches (listing-studio*, studd-muffyn-app)
+node_modules/
+.expo/
+.next/
+dist/
+build/
+.turbo/
+*.tsbuildinfo
+.vercel/

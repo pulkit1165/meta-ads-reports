@@ -1,0 +1,129 @@
+{
+  "title": "Tiger Eye Rice Chain Bracelet — Gold-Tone Stone Bracelet",
+  "handle": "tiger-eye-rice-chain-bracelet",
+  "product_type": "Bracelet",
+  "vendor": "Studd Muffyn",
+  "short_description": "Glossy natural Tiger Eye beads meet a sleek gold-tone rice link chain in this bold, unisex bracelet — the stone of confidence, focus and courage, styled for every day.",
+  "body_html": "<p>Add a bold yet elegant touch to your everyday style with the <strong>Tiger Eye Rice Chain Bracelet</strong>. Glossy natural Tiger Eye stone beads sit on a sleek gold-tone elongated rice link chain, creating a look that feels premium, modern and meaningful — perfect for daily wear or gifting.</p><p><strong>Tiger Eye Energy</strong><br>Tiger Eye is known for confidence, focus, courage, grounding and strong decision-making energy — a stone for people who move with intent.</p><p><strong>Design Details</strong></p><ul><li><strong>Natural Tiger Eye beads</strong> with a glossy, polished finish and rich golden-brown bands</li><li><strong>Gold-tone rice link chain</strong> — elongated links for a stylish, polished look</li><li><strong>Lobster clasp with extension chain</strong> for an adjustable, secure and comfortable fit</li><li><strong>Unisex styling</strong> — designed for both men and women</li></ul><p><strong>Why You'll Love It</strong></p><ul><li>Stylish everyday bracelet with a premium half-stone, half-chain design</li><li>Pairs effortlessly with casual, office and festive outfits</li><li>Meaningful stone energy in a modern silhouette</li><li>Ideal for gifting — birthdays, festivals or a confidence boost for someone you love</li></ul><p><strong>Specifications</strong></p><ul><li>Net Quantity: 1 Bracelet</li><li>Suitable For: Men &amp; Women</li><li>Main Stone: Tiger Eye</li><li>Chain Type: Gold-tone elongated rice link chain</li><li>Closure: Lobster clasp with extension chain</li><li>Fit: Adjustable</li><li>Finish: Glossy and polished</li></ul>",
+  "seo_title": "Tiger Eye Rice Chain Bracelet | Gold-Tone Unisex",
+  "seo_description": "Natural Tiger Eye bead bracelet with gold-tone rice link chain. Stone of confidence & focus. Adjustable unisex fit. Ships in 24 hrs, COD available.",
+  "tags": [
+    "tiger eye bracelet",
+    "tiger eye stone bracelet",
+    "tigers eye bracelet",
+    "tiger's eye bracelet",
+    "tiger eye braclet",
+    "tiger eye bracelate",
+    "tiger ay bracelet",
+    "rice chain bracelet",
+    "gold tone bracelet",
+    "crystal bracelet",
+    "natural stone bracelet",
+    "confidence bracelet",
+    "focus bracelet",
+    "courage stone",
+    "grounding bracelet",
+    "unisex bracelet",
+    "bracelet for men",
+    "bracelet for women",
+    "gemstone bracelet",
+    "healing crystal bracelet",
+    "adjustable bracelet",
+    "gift bracelet",
+    "tiger eye jewellery",
+    "chain bead bracelet"
+  ],
+  "collections": [
+    "Bracelets",
+    "Crystal Jewellery",
+    "Tiger Eye",
+    "Gifts",
+    "Unisex Jewellery"
+  ],
+  "variants": [
+    {
+      "title": "Default",
+      "sku": "SM-TE-RICE-BR",
+      "price": 599,
+      "compare_at_price": 1299,
+      "grams": 20
+    }
+  ],
+  "metafields": {
+    "highlights": "Natural glossy Tiger Eye beads · Gold-tone rice link chain · Adjustable lobster clasp with extension chain · Unisex design for men & women · Stone of confidence, focus and courage",
+    "material_or_ingredients": "Natural Tiger Eye stone beads with gold-tone alloy rice link chain and lobster clasp closure",
+    "care_or_directions": "Keep away from water, perfume and sweat to protect the gold-tone finish. Wipe gently with a soft dry cloth after wear and store in a dry pouch.",
+    "shipping": "Ships in 24 hrs · COD available · Free shipping over ₹499",
+    "returns": "7-day easy replacement for manufacturing defects"
+  },
+  "faqs": [
+    {
+      "q": "Is this real Tiger Eye stone?",
+      "a": "Yes. The bracelet is made with natural Tiger Eye beads, each with its own golden-brown banding — so no two pieces look exactly alike."
+    },
+    {
+      "q": "Can both men and women wear it?",
+      "a": "Absolutely. It's a unisex design — the mix of stone beads and a slim gold-tone chain works equally well on men's and women's wrists."
+    },
+    {
+      "q": "Will it fit my wrist?",
+      "a": "Yes. It closes with a lobster clasp and an extension chain, so you can adjust the fit to your comfort."
+    },
+    {
+      "q": "What is Tiger Eye known for?",
+      "a": "Tiger Eye is traditionally associated with confidence, focus, courage, grounding and clear decision-making — a popular everyday stone for people who want to stay sharp and steady."
+    },
+    {
+      "q": "How do I keep the gold-tone chain shiny?",
+      "a": "Avoid water, perfume and sweat contact, wipe with a soft dry cloth after wearing, and store it in a dry pouch. With basic care the finish stays bright for a long time."
+    },
+    {
+      "q": "Is it a good gifting option?",
+      "a": "Yes — it comes across as premium and meaningful, making it a great gift for birthdays, festivals or anyone starting something new."
+    }
+  ],
+  "image_plan": [
+    {
+      "slot": 1,
+      "role": "hero",
+      "filename": "01-hero.jpg",
+      "alt": "Tiger Eye rice chain bracelet with gold-tone chain on premium background",
+      "prompt": "Premium e-commerce hero shot of the exact bracelet in the reference photo: seven glossy natural Tiger Eye round beads with golden-brown banding on one half, and a gold-tone elongated rice link chain with lobster clasp and extension chain on the other half. Bracelet laid in a perfect circle on softly draped champagne satin fabric, warm studio lighting, subtle reflection, shallow depth of field. The generated bracelet must match the referenced real product exactly — same bead count, colours, chain style and clasp — and follow the brand's bright premium style. PRODUCT LOCK (mandatory): reproduce the product EXACTLY as in the reference photo — identical design, pattern, weave/links, texture, clasp, stones, charms, engraving, thickness, proportions, color and finish. NEGATIVE PROMPT — strictly avoid ALL of the following: redesigned product, altered shape, different clasp, added or removed elements, extra charms or pendants, changed bead count or size, color shift, thicker or thinner chain, different weave pattern, stylized or 'improved' product, fantasy version of the product. Only the scene around the product (background, surface, lighting, props, model, camera angle) may differ from the reference photo."
+    },
+    {
+      "slot": 2,
+      "role": "craftsmanship close-up",
+      "filename": "02-closeup.jpg",
+      "alt": "Close-up of natural Tiger Eye beads and gold-tone rice link chain",
+      "prompt": "Extreme macro close-up of the exact bracelet from the reference photo, focused on the junction where the glossy Tiger Eye beads meet the gold-tone elongated rice link chain. Show the natural golden-brown chatoyant banding inside the stones and the polished facets of the chain links. Dark warm gradient background, crisp studio light, luxury jewellery photography. The generated item must match the referenced real product exactly — identical beads, chain and finish — and follow the brand's bright premium style. PRODUCT LOCK (mandatory): reproduce the product EXACTLY as in the reference photo — identical design, pattern, weave/links, texture, clasp, stones, charms, engraving, thickness, proportions, color and finish. NEGATIVE PROMPT — strictly avoid ALL of the following: redesigned product, altered shape, different clasp, added or removed elements, extra charms or pendants, changed bead count or size, color shift, thicker or thinner chain, different weave pattern, stylized or 'improved' product, fantasy version of the product. Only the scene around the product (background, surface, lighting, props, model, camera angle) may differ from the reference photo."
+    },
+    {
+      "slot": 3,
+      "role": "on-model men",
+      "filename": "03-model-men.jpg",
+      "alt": "Man wearing Tiger Eye rice chain bracelet with rolled-up sleeve",
+      "prompt": "Lifestyle shot of a stylish Indian man's wrist wearing the exact bracelet from the reference photo — Tiger Eye beads facing up, gold-tone rice link chain visible. Rolled-up beige linen sleeve, hand relaxed over a wooden café table, warm natural daylight, premium editorial feel. The bracelet must match the referenced real product exactly — same beads, chain, clasp and proportions — and follow the brand's bright premium style. PRODUCT LOCK (mandatory): reproduce the product EXACTLY as in the reference photo — identical design, pattern, weave/links, texture, clasp, stones, charms, engraving, thickness, proportions, color and finish. NEGATIVE PROMPT — strictly avoid ALL of the following: redesigned product, altered shape, different clasp, added or removed elements, extra charms or pendants, changed bead count or size, color shift, thicker or thinner chain, different weave pattern, stylized or 'improved' product, fantasy version of the product. Only the scene around the product (background, surface, lighting, props, model, camera angle) may differ from the reference photo."
+    },
+    {
+      "slot": 4,
+      "role": "on-model women styling",
+      "filename": "04-model-women.jpg",
+      "alt": "Woman wearing Tiger Eye bracelet styled with minimal gold jewellery",
+      "prompt": "Lifestyle shot of an elegant Indian woman's wrist wearing the exact bracelet from the reference photo, lightly stacked with one thin plain gold bangle. Soft cream outfit, hand gently holding a coffee cup, bright airy daylight, clean premium D2C aesthetic. The bracelet must match the referenced real product exactly — same Tiger Eye beads and gold-tone rice link chain — and follow the brand's bright premium style. PRODUCT LOCK (mandatory): reproduce the product EXACTLY as in the reference photo — identical design, pattern, weave/links, texture, clasp, stones, charms, engraving, thickness, proportions, color and finish. NEGATIVE PROMPT — strictly avoid ALL of the following: redesigned product, altered shape, different clasp, added or removed elements, extra charms or pendants, changed bead count or size, color shift, thicker or thinner chain, different weave pattern, stylized or 'improved' product, fantasy version of the product. Only the scene around the product (background, surface, lighting, props, model, camera angle) may differ from the reference photo."
+    },
+    {
+      "slot": 5,
+      "role": "benefits infographic",
+      "filename": "05-benefits.jpg",
+      "alt": "Tiger Eye bracelet benefits infographic — confidence, focus, courage, grounding",
+      "prompt": "Clean premium infographic featuring the exact bracelet from the reference photo centered on a bright ivory background, with four minimal icon callouts around it labelled: 'Confidence', 'Focus', 'Courage', 'Grounding'. Add small labels pointing to 'Natural Tiger Eye beads', 'Gold-tone rice link chain' and 'Adjustable clasp'. Elegant serif typography, gold accent lines. The bracelet render must match the referenced real product exactly and follow the brand's bright premium style. PRODUCT LOCK (mandatory): reproduce the product EXACTLY as in the reference photo — identical design, pattern, weave/links, texture, clasp, stones, charms, engraving, thickness, proportions, color and finish. NEGATIVE PROMPT — strictly avoid ALL of the following: redesigned product, altered shape, different clasp, added or removed elements, extra charms or pendants, changed bead count or size, color shift, thicker or thinner chain, different weave pattern, stylized or 'improved' product, fantasy version of the product. Only the scene around the product (background, surface, lighting, props, model, camera angle) may differ from the reference photo."
+    },
+    {
+      "slot": 6,
+      "role": "social proof",
+      "filename": "06-social-proof.jpg",
+      "alt": "Tiger Eye bracelet with 5-star customer review styling",
+      "prompt": "Social-proof style image: the exact bracelet from the reference photo displayed on a marble tray beside its gift-ready pouch, with a subtle 5-star rating graphic and a short review card overlay reading 'Looks way more premium than the price'. Bright, warm, trustworthy premium D2C aesthetic. The bracelet must match the referenced real product exactly — same beads, chain and clasp — and follow the brand's bright premium style. PRODUCT LOCK (mandatory): reproduce the product EXACTLY as in the reference photo — identical design, pattern, weave/links, texture, clasp, stones, charms, engraving, thickness, proportions, color and finish. NEGATIVE PROMPT — strictly avoid ALL of the following: redesigned product, altered shape, different clasp, added or removed elements, extra charms or pendants, changed bead count or size, color shift, thicker or thinner chain, different weave pattern, stylized or 'improved' product, fantasy version of the product. Only the scene around the product (background, surface, lighting, props, model, camera angle) may differ from the reference photo."
+    }
+  ]
+}

@@ -1,0 +1,70 @@
+{
+  "slug": "richie-rich-dual-tone-rice-chain-bracelet",
+  "name": "Richie Rich Dual-Tone Rice Chain Bracelet",
+  "category": "Crystal Jewellery",
+  "vendor": "Studd Muffyn",
+  "price": "",
+  "mrp": "",
+  "sku": "",
+  "variants": "",
+  "jewellery_finish": "",
+  "jewellery_type": "Bracelet",
+  "theme_mood": "",
+  "text_style": "Normal",
+  "color_theme": "",
+  "background_style": "",
+  "model_pref": "Both",
+  "hero_types": [
+    "normal"
+  ],
+  "hero_custom": "",
+  "crystal_name": "Pyrite, Black Obsidian",
+  "crystal_benefit": "",
+  "offer": "",
+  "details": "Product Description\n\nMove forward with ambition while staying protected and grounded with the Richie Rich Dual-Tone Rice Chain Bracelet.\n\nThe centre features a balanced arrangement of two glossy Black Obsidian beads and two metallic Pyrite beads. Black Obsidian is placed on the outer sides, while Pyrite forms the centre, creating a clean and symmetrical dual-crystal design.\n\nThe crystals are paired with alternating gold- and silver-tone geometric rice links, giving the bracelet a bold, modern and premium appearance. The dual-tone finish makes it easy to style with gold jewellery, silver accessories, watches and everyday outfits.\n\nStuddMuffyn’s Richie Rich concept combines Pyrite for prosperity, confidence and forward movement with Black Obsidian for grounding and protection from negativity and distractions. Together, the two crystals represent the balance between achieving success and protecting your energy along the way.\n\nThe adjustable extension chain provides a flexible wrist fit, while the lobster clasp keeps the bracelet securely fastened. Lightweight and versatile, it can be worn alone as a meaningful statement piece or stacked with a watch and other bracelets.\n\nKey Features\nTwo natural Pyrite beads\nTwo polished Black Obsidian beads\nBalanced four-bead centre arrangement\nAlternating gold- and silver-tone rice links\nAdjustable extension chain\nSecure lobster clasp closure\nLightweight and comfortable\nSuitable for men and women\nTraditional Crystal Benefits\n\nPyrite\n\nAssociated with wealth and prosperity\nEncourages confidence and ambition\nSupports action and financial-growth intentions\nPromotes an optimistic, success-oriented mindset\n\nBlack Obsidian\n\nTraditionally associated with protection\nSupports grounding and emotional stability\nHelps shield the wearer from negativity\nEncourages focus by reducing external distractions\n\nStuddMuffyn presents this Pyrite-and-Obsidian combination as a balance of prosperity and protection. Crystal benefits are based on traditional beliefs and are not guaranteed financial or medical outcomes.\n\nProduct Specifications\n\nProduct Type: Dual-Crystal Rice Chain Bracelet\nCrystals Used: Pyrite and Black Obsidian\nNumber of Beads: 4\nBead Arrangement: Black Obsidian – Pyrite – Pyrite – Black Obsidian\nBead Shape: Round and polished\nChain Style: Geometric rice-link chain\nChain Finish: Gold and silver dual tone\nClosure: Lobster clasp\nFit: Adjustable\nGender: Unisex\nStyle: Bold, contemporary and meaningful\nCountry of Origin: India\n\nIdeal For\n\nCareer growth intentions, business meetings, office wear, travel, daily protection, success-focused gifting and modern crystal-jewellery styling.\n\nCare Instructions\n\nKeep the bracelet away from water, perfume, sweat, creams and harsh chemicals. Wipe gently with a soft, dry cloth after use and store separately in a clean jewellery pouch or box. Natural crystals may have slight variations in colour, texture and shine, making every piece unique.",
+  "notes": "",
+  "ref_urls": [],
+  "inputs": {
+    "raw": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/raw/e83d4d1e-e7bf-401b-a455-9d5eaa8c26b1-LwAMeFa2A184dxUxYkbmDK9bzLTMQx.png",
+        "name": "e83d4d1e-e7bf-401b-a455-9d5eaa8c26b1.png"
+      }
+    ],
+    "crystal": [],
+    "refs": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/refs/ChatGPT_Image_Jul_11__2026__03_41_46_PM__1_-wj1JriU3VAf57hMqrJKMajo5mjXjg3.png",
+        "name": "ChatGPT_Image_Jul_11__2026__03_41_46_PM__1_.png"
+      }
+    ],
+    "labels": []
+  },
+  "status": "generating_images",
+  "error": "",
+  "log": [
+    "2026-07-16T05:15:04.186Z created",
+    "2026-07-16T05:20:42.235Z queued content",
+    "2026-07-16T05:21:30.249Z worker picked up content",
+    "2026-07-16T05:23:15.569Z content generated",
+    "2026-07-16T05:26:09.829Z queued images slots 1,2,3,4,5,6,7,8,9,10,11",
+    "2026-07-16T05:26:29.003Z worker picked up images",
+    "2026-07-17T17:52:55.127Z watchdog: run went silent, re-queued",
+    "2026-07-17T17:52:55.526Z worker picked up images"
+  ],
+  "created": 1784178904186,
+  "updated": 1784310775526,
+  "only_slots": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ]
+}

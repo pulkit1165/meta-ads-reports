@@ -1,0 +1,16 @@
+{
+  "cli": { "appVersionSource": "local" },
+  "build": {
+    "production": {
+      "autoIncrement": true
+    },
+    "preview": {
+      "distribution": "internal"
+    }
+  },
+  "submit": {
+    "production": {
+      "ios": { "ascAppId": "1597059141" }
+    }
+  }
+}

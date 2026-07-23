@@ -34,8 +34,8 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 RECIPIENTS = [
     's.harpreetsahota@gmail.com', 'yadavjagdeep.studdmuffyn@gmail.com',
-    'navdeep.studdmuffyn@gmail.com', 'pulkit.studdmuffyn@gmail.com',
-    'kindattitude@gmail.com', 'ankur.bhati2204@gmail.com',
+    'navdeep.studdmuffyn@gmail.com',
+    'kindattitude@gmail.com',
 ]
 
 NEW_BUCKETS = [0.5, 0.75, 1.0, 1.25, 1.5]      # plus the special 0.0 (roas==0)

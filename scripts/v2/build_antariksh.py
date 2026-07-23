@@ -257,6 +257,28 @@ def build_categories(presets=HD_PRESETS, categories=HD_CATEGORIES):
     return out
 
 
+def fetch_web_budget():
+    """Per-portal active daily budget (Rs/day), live from Meta. Sums per_day_budget
+    over every currently-ACTIVE campaign by portal. Reuses the campaign-list cache
+    populated by build_categories(), so this is a cache hit (no extra API calls)."""
+    import os
+    if not os.getenv('META_ACCESS_TOKEN'):
+        return {}
+    try:
+        import home_decor_dashboard_data as hdd
+    except Exception as e:  # noqa: BLE001
+        print(f"  webBudget: import failed ({e})", file=sys.stderr)
+        return {}
+    out = {}
+    try:
+        for portal, _friendly, c in hdd._list_campaigns("ACTIVE"):
+            out[portal] = out.get(portal, 0.0) + hdd.hd.per_day_budget(c)
+    except Exception as e:  # noqa: BLE001
+        print(f"  webBudget: failed ({e})", file=sys.stderr)
+        return {}
+    return {k: round(v) for k, v in out.items()}
+
+
 def render(payload, catdata=None):
     data = json.dumps(payload, separators=(',', ':'))
     cd = json.dumps(catdata or {}, separators=(',', ':'), ensure_ascii=False)
@@ -276,6 +298,7 @@ def main():
     conn.close()
 
     catdata = build_categories()
+    payload['webBudget'] = fetch_web_budget()
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -474,7 +497,7 @@ HTML = r"""<!doctype html>
         <div class="kpis k6" id="ovKpis"></div>
         <div class="card" style="margin-top:14px">
           <h3 id="ovSplitTitle">Website split</h3>
-          <div class="csub">Studd Muffyn (SM) &middot; Nuskhe By Paras (NBP) &middot; Studd Muffyn Life (SML) &mdash; revenue = Shopify ground truth, ROI = revenue / Meta spend</div>
+          <div class="csub">Studd Muffyn (SM) &middot; Nuskhe By Paras (NBP) &middot; Studd Muffyn Life (SML) &mdash; revenue = Shopify ground truth, ROI = revenue / Meta spend. <b>Active &#8377;/day, Spend (today) &amp; ROAS (today)</b> are live from Meta and refresh hourly; Revenue / Orders / Spend / ROI are for the selected date range.</div>
           <table id="ovSplit"><thead><tr><th>Website</th><th>Revenue</th><th>Orders</th><th>Spend</th><th>ROI</th></tr></thead><tbody></tbody></table>
         </div>
       </section>
@@ -741,11 +764,32 @@ function renderOverview(){
   }
   wrap.innerHTML=kp;
   // website split
-  const isCat=!!cat, head=['Website','Revenue',isCat?'Units':'Orders','Spend','ROI'];
-  let h='<thead><tr>'+head.map((c,i)=>'<th'+(i?'':'')+'>'+c+'</th>').join('')+'</tr></thead><tbody>';
-  PORTALS.forEach(p=>{const s=portalStats(p,cat); if(s.orderRev===0&&s.spend===0&&s.net===0)return;
-    h+='<tr><td><span class="chip">'+p+'</span> '+(WEB[p]||'')+'</td><td>'+fmtINR(s.net)+'</td><td>'+fmtNum(isCat?s.units:s.orders)+'</td><td>'+fmtINR(s.spend)+'</td><td><span class="rg '+roiClass(s.roi)+'">'+s.roi.toFixed(2)+'×</span></td></tr>';});
-  h+='</tbody>';
+  const isCat=!!cat, last=P.maxDate;
+  // today (latest day) per-portal spend + Shopify revenue — live from the hourly payload
+  const tSpend={}, tRev={};
+  P.adDays.forEach(r=>{if(r.d===last&&(!cat||r.c===cat))tSpend[r.p]=(tSpend[r.p]||0)+r.s;});
+  P.shop.forEach(r=>{if(r.d===last)tRev[r.p]=(tRev[r.p]||0)+r.rev;});
+  let head, h;
+  if(!isCat){
+    head=['Website','Active ₹/day','Spend (today)','ROAS (today)','Revenue','Orders','Spend','ROI'];
+    h='<thead><tr>'+head.map(c=>'<th>'+c+'</th>').join('')+'</tr></thead><tbody>';
+    PORTALS.forEach(p=>{const s=portalStats(p,cat); if(s.orderRev===0&&s.spend===0&&s.net===0)return;
+      const ab=(P.webBudget&&P.webBudget[p]!=null)?P.webBudget[p]:null;
+      const ts=tSpend[p]||0, tr=tRev[p]||0, tro=ts>0?tr/ts:0;
+      h+='<tr><td><span class="chip">'+p+'</span> '+(WEB[p]||'')+'</td>'+
+        '<td>'+(ab!=null?'<b>'+fmtINR(ab)+'</b>':'<span class="muted">&mdash;</span>')+'</td>'+
+        '<td>'+fmtINR(ts)+'</td>'+
+        '<td>'+(ts>0?'<span class="rg '+roiClass(tro)+'">'+tro.toFixed(2)+'×</span>':'<span class="muted">&mdash;</span>')+'</td>'+
+        '<td>'+fmtINR(s.net)+'</td><td>'+fmtNum(s.orders)+'</td><td>'+fmtINR(s.spend)+'</td>'+
+        '<td><span class="rg '+roiClass(s.roi)+'">'+s.roi.toFixed(2)+'×</span></td></tr>';});
+    h+='</tbody>';
+  } else {
+    head=['Website','Revenue','Units','Spend','ROI'];
+    h='<thead><tr>'+head.map(c=>'<th>'+c+'</th>').join('')+'</tr></thead><tbody>';
+    PORTALS.forEach(p=>{const s=portalStats(p,cat); if(s.orderRev===0&&s.spend===0&&s.net===0)return;
+      h+='<tr><td><span class="chip">'+p+'</span> '+(WEB[p]||'')+'</td><td>'+fmtINR(s.net)+'</td><td>'+fmtNum(s.units)+'</td><td>'+fmtINR(s.spend)+'</td><td><span class="rg '+roiClass(s.roi)+'">'+s.roi.toFixed(2)+'×</span></td></tr>';});
+    h+='</tbody>';
+  }
   document.querySelector('#ovSplit').innerHTML=h;
 }
 function kpi(lbl,tag,val,sub){return '<div class="kpi"><div class="lbl">'+lbl+' '+tag+'</div><div class="val">'+val+'</div><div class="sub">'+sub+'</div></div>';}

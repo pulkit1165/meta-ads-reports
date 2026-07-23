@@ -1,0 +1,55 @@
+{
+  "slug": "tri-wealth-bracelet",
+  "name": "Tri Wealth Bracelet",
+  "category": "Crystal Jewellery",
+  "price": "",
+  "mrp": "",
+  "sku": "",
+  "variants": "",
+  "jewellery_finish": "",
+  "jewellery_type": "Bracelet",
+  "theme_mood": "",
+  "color_theme": "",
+  "background_style": "",
+  "model_pref": "Women",
+  "hero_types": [
+    "normal"
+  ],
+  "hero_custom": "",
+  "crystal_name": "",
+  "crystal_benefit": "",
+  "offer": "",
+  "details": "Product Description\n\nBring together prosperity, protection and grounded confidence with the Tri Wealth Bracelet Set. This coordinated set includes three individually designed crystal bracelets featuring Pyrite, Black Obsidian, Lava Stone and a symbolic Hamsa Hand charm.\n\nEach bracelet offers a different look while staying connected through a rich black and metallic colour palette. Wear one bracelet for a clean everyday statement or stack all three together for a bold, power-inspired wrist look.\n\nThe set is designed for people who want to move towards growth and success while staying protected, focused and emotionally grounded.\n\nThe Set Includes\n1. Richie Rich Dual Bead Bracelet\n\nA minimal bracelet featuring alternating Pyrite and glossy Black Obsidian beads. The balanced design represents moving towards prosperity while remaining grounded and protected.\n\n2. Wealth Protection Lava Bracelet\n\nA statement bracelet combining Pyrite, Black Obsidian and textured Lava Stone beads. Metallic spacer accents add contrast and give it a premium layered appearance.\n\n3. Hamsa Wealth Shield Bracelet\n\nA symbolic bracelet featuring Pyrite, Lava Stone and an antique-finished Hamsa Hand charm. The design brings together abundance-inspired crystal energy and traditional protection symbolism.\n\nWhy Choose It?\n\nThree Coordinated Designs:\nIncludes three different bracelets that can be worn separately, paired together or styled as a complete stack.\n\nProsperity and Protection Combination:\nPyrite is traditionally linked with abundance and confidence, while Black Obsidian is associated with grounding and protection.\n\nTextured Lava Stone Detailing:\nPorous Lava Stone beads add depth, character and a naturally bold appearance.\n\nSymbolic Hamsa Charm:\nThe Hamsa Hand is traditionally worn as a symbol of protection against nazar and unwanted energy.\n\nVersatile Black and Metallic Finish:\nThe neutral colour combination complements casual, office, festive and evening outfits.\n\nFlexible Slip-On Construction:\nThe stretch design allows the bracelets to be worn without a complicated clasp.\n\nCrafted With\nPyrite — The Wealth Crystal\n\nPyrite is traditionally associated with prosperity, ambition, confidence and a growth-focused mindset. Its metallic appearance adds a rich finish to each bracelet.\n\nBlack Obsidian — The Protection Crystal\n\nBlack Obsidian is commonly associated with grounding and protection from negativity, envy and emotional distractions. Studd Muffyn’s Richie Rich range similarly combines Pyrite for prosperity with Black Obsidian for protection and balance.\n\nLava Stone — The Grounding Element\n\nLava Stone is traditionally connected with strength, stability and emotional grounding. Its porous surface provides a raw texture that contrasts beautifully with the polished beads.\n\nHamsa Hand Charm\n\nThe antique-finished Hamsa charm adds a meaningful protective symbol and creates a distinctive statement within the set.\n\nMetallic Spacer Accents\n\nSilver-toned spacer elements create separation between the darker beads and give the bracelets a polished, premium finish.\n\nFlexible Stretch Cord\n\nKeeps the beads securely arranged while supporting easy slip-on wear.\n\nCrystal Significance\nProsperity\n\nPyrite is often called a wealth-inspired crystal because it is traditionally associated with abundance, opportunities, ambition and confident action.\n\nProtection\n\nBlack Obsidian is worn as a symbolic shield against negativity, nazar and unwanted external influences.\n\nGrounding\n\nLava Stone and Black Obsidian are traditionally connected with stability, emotional strength and remaining calm under pressure.\n\nConfidence\n\nThe overall combination represents pursuing success with self-belief while maintaining focus and balance.\n\nCrystal benefits are based on traditional beliefs and are not medical, professional or financial guarantees.\n\nInnovation\nThree complete crystal bracelets in one coordinated set\nCombination of polished, metallic and naturally textured beads\nProsperity, protection and grounding-inspired crystal selection\nHamsa charm incorporated into one bracelet\nDifferent designs connected through one colour story\nFlexible styling for solo, paired or stacked wear\nSuitable for both meaningful crystal use and fashion styling",
+  "notes": "",
+  "ref_urls": [],
+  "inputs": {
+    "raw": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/raw/ChatGPT_Image_Jul_14__2026__03_33_52_PM-wQC1AH02OMVzC8vIZVMFKhHVi1xuDn.png",
+        "name": "ChatGPT_Image_Jul_14__2026__03_33_52_PM.png"
+      }
+    ],
+    "crystal": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/crystal/Screenshot_2026-07-14_153700-LuVhXWCjBbeDhzzCaxFwpAumtiawnU.png",
+        "name": "Screenshot_2026-07-14_153700.png"
+      }
+    ],
+    "refs": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/refs/ChatGPT_Image_Jul_9__2026__12_09_51_PM-vFh4ySd18dsdk0DK0xOMcpTK81mfqO.png",
+        "name": "ChatGPT_Image_Jul_9__2026__12_09_51_PM.png"
+      }
+    ],
+    "labels": []
+  },
+  "status": "generating_content",
+  "error": "",
+  "log": [
+    "2026-07-14T10:09:36.710Z created",
+    "2026-07-14T10:33:10.006Z queued content",
+    "2026-07-17T17:52:56.045Z worker picked up content"
+  ],
+  "created": 1784023776710,
+  "updated": 1784310776045
+}

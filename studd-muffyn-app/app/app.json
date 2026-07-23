@@ -1,0 +1,44 @@
+{
+  "expo": {
+    "name": "Studd Muffyn",
+    "slug": "studd-muffyn",
+    "version": "5.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.studdmuffinn.shopifyapp",
+      "buildNumber": "5.0.0"
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "package": "com.studdmuffinn.shopifyapp",
+      "versionCode": 50000
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "output": "single",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-image",
+      "expo-web-browser",
+      "expo-status-bar"
+    ],
+    "scheme": "studdmuffyn",
+    "backgroundColor": "#0B0B0D",
+    "splash": {
+      "backgroundColor": "#0B0B0D",
+      "resizeMode": "contain",
+      "image": "./assets/splash-logo.png"
+    }
+  }
+}

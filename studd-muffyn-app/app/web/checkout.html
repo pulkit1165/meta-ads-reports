@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Checkout — Studd Muffyn</title>
+  <link rel="stylesheet" href="https://checkout-ui.shiprocket.com/assets/styles/shopify.css">
+  <style>
+    body { margin: 0; font-family: -apple-system, sans-serif; background: #fff; color: #121212; }
+    .load { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 90vh; gap: 16px; }
+    .spin { width: 34px; height: 34px; border: 3px solid #eee; border-top-color: #c79353; border-radius: 50%; animation: r 0.8s linear infinite; }
+    @keyframes r { to { transform: rotate(360deg); } }
+    .msg { color: rgba(18,18,18,0.6); font-size: 14px; }
+    a.fb { color: #c79353; font-weight: 600; }
+  </style>
+</head>
+<body>
+  <div class="load" id="loader">
+    <div class="spin"></div>
+    <div class="msg">Opening secure checkout…</div>
+  </div>
+  <script>
+    // Opened by the Studd Muffyn app as: /checkout.html?token=...&fallback=<shopify-permalink>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var token = params.get('token');
+      var fallback = params.get('fallback') || 'https://studdmuffyn.com/cart';
+
+      function goFallback() { location.replace(fallback); }
+      if (!token) return goFallback();
+
+      var tries = 0;
+      function open() {
+        tries++;
+        if (window.HeadlessCheckout && typeof window.HeadlessCheckout.addToCart === 'function') {
+          try {
+            window.HeadlessCheckout.addToCart(null, token, {
+              fallbackUrl: fallback,
+              isInitiatedFromApp: true
+            });
+            var l = document.getElementById('loader');
+            if (l) l.querySelector('.msg').textContent = 'Loading checkout…';
+          } catch (e) {
+            goFallback();
+          }
+        } else if (tries < 50) {
+          setTimeout(open, 200); // wait for the Shiprocket script
+        } else {
+          goFallback(); // script never loaded — use Shopify checkout
+        }
+      }
+      window.addEventListener('load', open);
+      setTimeout(open, 1200);
+    })();
+  </script>
+  <script src="https://checkout-ui.shiprocket.com/assets/js/channels/shopify.js" async></script>
+</body>
+</html>

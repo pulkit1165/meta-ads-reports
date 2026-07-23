@@ -1,0 +1,67 @@
+{
+  "slug": "alchemy-lapis-prism-rice-chain-pendant-necklace",
+  "name": "Alchemy Lapis prism  Rice Chain Pendant Necklace",
+  "category": "Crystal Jewellery",
+  "vendor": "Studd Muffyn",
+  "price": "",
+  "mrp": "",
+  "sku": "",
+  "variants": "",
+  "jewellery_finish": "",
+  "jewellery_type": "Chain",
+  "theme_mood": "",
+  "text_style": "Normal",
+  "color_theme": "",
+  "background_style": "",
+  "model_pref": "Women",
+  "hero_types": [
+    "normal"
+  ],
+  "hero_custom": "",
+  "crystal_name": "Lapis",
+  "crystal_benefit": "",
+  "offer": "",
+  "details": "Make a bold, royal statement with the Lapis Lazuli Crystal Rice Chain Pendant Necklace. Natural deep-blue Lapis Lazuli crystal chips are clustered at the centre and framed by a polished Multi-Colouredrice-style chain, creating a striking contrast that instantly elevates any outfit.\n\nEach intense royal-blue stone may carry natural Multi-Colouredor earthy inclusions, giving every piece an authentic, one-of-a-kind gemstone character. No two necklaces are ever exactly alike. Lapis Lazuli has long been associated with wisdom, confidence, communication and self-expression.\n\nThe structured Multi-Colouredbar-link chain adds a modern luxury touch, while the naturally shaped stone chips keep the design distinctive and artistic. An adjustable lobster clasp lets it sit comfortably and layer beautifully with your other gold-tone pieces.\n\nKey features\n\nNatural Lapis Lazuli crystal chips in a deep royal-blue shade\nGenuine natural inclusions and stone-to-stone variation\nPolished Multi-Colouredrice-style bar-link chain\nAdjustable lobster-clasp closure for a flexible fit\nStatement look in a lightweight, comfortable design\nSuitable for daily wear, formal wear and festive occasions\nCrystal meaning\n\nLapis Lazuli is traditionally known as a symbol of wisdom, confidence, truth and self-expression. Its royal-blue tone has been treasured in jewellery for centuries.\n\nStyling suggestion\n\nPair it with white, navy blue, black, cream or Multi-Colouredoutfits. It looks especially premium with formal and festive clothing, and layers beautifully with other gold-tone pieces. Multi-Coloured Rice Chain\n\nIf you love jewellery that feels fun, stylish, and effortlessly premium, this Multi-Coloured Rice Chain is made for you.\n\nThe Rice Chain is known for its fine textured link pattern that gives the chain a smooth, structured, and polished look around the neckline. Its sleek rice-style design adds a clean luxurious finish, while the multi-coloured detailing brings a fresh, trendy, and eye-catching twist to your everyday jewellery look.\n\nDesigned with a 3 mm width and 51 cm length, the multi-coloured finish adds a playful modern shine, while the durable chain structure makes it easy to wear again and again. Lightweight, anti-tarnish, and skin-friendly, this chain is designed for comfort, style, and long-lasting everyday use with proper care.\n\nWear it solo for a colourful statement or layer it with pendants and other chains for a more fashionable jewellery stack. A chic, versatile, and aesthetic chain that instantly makes your outfit look more stylish and expressive.\n\nStyling Tip: Pair it with a solid tee, shirt, dress, kurti, blazer, or neutral outfit to let the multi-coloured chain stand out beautifully.",
+  "notes": "",
+  "ref_urls": [],
+  "inputs": {
+    "raw": [
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/raw/Gemini_Generated_Image_z3ei68z3ei68z3ei-YzFUDCOArQticcVlQ1mNd8rHf3rsoC.png",
+        "name": "Gemini_Generated_Image_z3ei68z3ei68z3ei.png"
+      },
+      {
+        "url": "https://sn34bsjv5pejb0um.public.blob.vercel-storage.com/jobs/_uploads/raw/Gemini_Generated_Image_j2ovxvj2ovxvj2ov-eun6473LbMJ2pblY9h6o7fo6hDjcvs.png",
+        "name": "Gemini_Generated_Image_j2ovxvj2ovxvj2ov.png"
+      }
+    ],
+    "crystal": [],
+    "refs": [],
+    "labels": []
+  },
+  "status": "generating_images",
+  "error": "",
+  "log": [
+    "2026-07-16T04:59:47.718Z created",
+    "2026-07-16T04:59:59.755Z queued content",
+    "2026-07-16T05:00:20.465Z worker picked up content",
+    "2026-07-16T05:02:25.173Z content generated",
+    "2026-07-16T05:07:50.096Z queued images slots 1,2,3,4,5,6,7,8,9,10,11",
+    "2026-07-16T05:08:17.273Z worker picked up images"
+  ],
+  "created": 1784177987718,
+  "updated": 1784178497273,
+  "only_slots": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11
+  ]
+}
