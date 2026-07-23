@@ -42,3 +42,4 @@ build/
 .turbo/
 *.tsbuildinfo
 .vercel/
+listing-studio/worker_jobs/

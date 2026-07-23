@@ -1,1 +1,0 @@
-[17:39:29] claude -p started (timeout 1800s)
