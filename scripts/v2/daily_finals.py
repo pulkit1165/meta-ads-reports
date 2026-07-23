@@ -181,8 +181,19 @@ def ensure(store: dict, ntn_db: str, token: str, now=None, days: int = 8) -> tup
             print(f'  daily_finals: skipping {d} — Meta pull incomplete, will retry next run')
             continue
         shop = shopify_daily(ntn_db, d)
-        if sum(spend.values()) == 0 and sum(s['sales'] for s in shop.values()) == 0:
+        day_spend = sum(spend.values())
+        day_sales = sum(s['sales'] for s in shop.values())
+        if day_spend == 0 and day_sales == 0:
             continue                    # nothing ran that day; don't freeze an empty
+        # Guard against a Shopify INGEST GAP freezing a wrong number forever. A
+        # day with real ad spend but zero sales is never genuine — it means the
+        # orders haven't been ingested yet (this is exactly how 22 Jul nearly
+        # froze at Rs0 / ROAS 0.00 while the ingest was down). Skip and retry;
+        # a frozen day is permanent, so better late than wrong.
+        if day_spend > 0 and day_sales == 0:
+            print(f'  daily_finals: NOT freezing {d} — Rs{day_spend:,.0f} spend but Rs0 sales '
+                  f'(Shopify ingest gap); will retry once orders land')
+            continue
         store[d] = {p: {'sales': shop[p]['sales'], 'spend': round(spend[p], 2),
                         'orders': shop[p]['orders']} for p in PORTALS}
         changed = True

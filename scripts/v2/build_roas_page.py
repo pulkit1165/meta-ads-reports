@@ -304,8 +304,11 @@ def main():
          '<div class="bar"><h1>Blended ROAS &mdash; hourly</h1>',
          f'<div class="stamp">'
          f'<span id="badge" class="badge live">&#9679; LIVE</span>'
-         f'<span id="age">data {data_age} min old &middot; {data_txt}</span>'
-         f'<span class="nxt">Pulled at the top of each hour &mdash; a full hour, live ~2 min later</span>'
+         f'<span id="age"><b>Today&rsquo;s figures through {data_txt}</b> '
+         f'&middot; {data_age} min old</span>'
+         f'<span class="nxt">Meta &amp; Shopify are measured once at the top of each '
+         f'hour, so this is a complete hour &mdash; live ~2 min after it turns. '
+         f'Yesterday and earlier are frozen full-day totals, untouched by the hourly pull.</span>'
          f'<span class="nxt" id="chk">checking\u2026</span>'
          f'<span class="nxt" id="nxt">Next update ~{nxt_txt}</span></div></div>']
 

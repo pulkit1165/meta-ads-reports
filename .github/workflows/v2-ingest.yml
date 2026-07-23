@@ -112,12 +112,21 @@ jobs:
           echo "days=$DAYS" >> "$GITHUB_OUTPUT"
           echo "portal_arg=$PORTAL_ARG" >> "$GITHUB_OUTPUT"
 
+      # Meta ad-level insights across ~75 accounts is the slow, flaky part. With
+      # no cap it hung indefinitely on Meta's transient 500s, and because the
+      # Shopify step below was gated on success() that HANG SILENTLY FROZE SALES
+      # DATA for days (21 Jul onward). Bound it and let the run continue: stale
+      # Meta for one hour is fine; missing sales is not.
       - name: Ingest Meta (campaigns + ad-level insights)
+        timeout-minutes: 18
+        continue-on-error: true
         run: |
           python3 scripts/v2/ingest_meta.py \
             --days ${{ steps.cfg.outputs.days }} \
             ${{ steps.cfg.outputs.portal_arg }}
 
+      # Runs even if Meta timed out/failed above — sales must always land and
+      # get pushed. (continue-on-error on Meta keeps success() true here.)
       - name: Ingest Shopify (orders + line items)
         if: ${{ success() }}
         run: |
