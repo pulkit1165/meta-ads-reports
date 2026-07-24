@@ -237,6 +237,8 @@ jobs:
           IST = timezone(timedelta(hours=5, minutes=30))
           now = datetime.now(IST)
 
+          STALE_MIN = 90   # both feeds alert once they cross 1.5 h old
+
           # Snapshot (Meta pixel ROAS) freshness. Slots are 'YYYY-MM-DD HH'.
           snap_age_min = None
           try:
@@ -250,30 +252,34 @@ jobs:
           print(f"now {now:%Y-%m-%d %H:%M} IST | latest snapshot slot: {s}"
                 + (f" ({snap_age_min:.0f} min old)" if snap_age_min is not None else ""))
 
-          # Shopify sales freshness, per portal.
-          shop = []
+          # Shopify freshness is measured by when the INGEST last ran, not by the
+          # newest order time — otherwise a genuine quiet stretch (no sale for
+          # 90 min at night) would false-alarm. ingest_log records every
+          # ingest_shopify run; a stale success there means the pipeline is down.
+          ing_age_min = None
           try:
-              shop = sqlite3.connect(os.environ['NTN_DB']).execute(
-                  "SELECT portal, MAX(created_at) FROM shopify_orders GROUP BY portal").fetchall()
+              con = sqlite3.connect(os.environ['NTN_DB'])
+              row = con.execute(
+                  "SELECT MAX(COALESCE(finished_at, started_at)) FROM ingest_log "
+                  "WHERE job_name='ingest_shopify' AND status='success'").fetchone()
+              if row and row[0]:
+                  ing_age_min = (now - datetime.fromisoformat(row[0])).total_seconds() / 60
+              # Order ages are still printed for context (not the alert trigger).
+              for portal, ts in con.execute(
+                      "SELECT portal, MAX(created_at) FROM shopify_orders GROUP BY portal"):
+                  age_h = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
+                  print(f"  shopify {portal}: last order {ts} ({age_h:.1f}h ago)")
           except Exception:
               pass
-          shop_ages = {}
-          for portal, ts in shop:
-              age_h = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
-              shop_ages[portal] = age_h
-              print(f"  shopify {portal}: {ts} ({age_h:.1f}h old){'  <-- STALE' if age_h > 6 else ''}")
+          print(f"  shopify ingest last succeeded: "
+                + (f"{ing_age_min:.0f} min ago" if ing_age_min is not None else "UNKNOWN"))
 
-          # A feed is STALE if the snapshot is >150 min old (should refresh 3x/hr)
-          # or EVERY shopify portal is >6h old (ingest runs every 10 min; 6h means
-          # it has been down for a long time, not just a between-orders lull).
+          # A feed is STALE if the snapshot OR the Shopify ingest is >90 min old.
           reasons = []
-          if snap_age_min is None or snap_age_min > 150:
+          if snap_age_min is None or snap_age_min > STALE_MIN:
               reasons.append(f"Meta snapshot {('missing' if snap_age_min is None else f'{snap_age_min:.0f} min old')}")
-          if shop_ages and all(a > 6 for a in shop_ages.values()):
-              worst = max(shop_ages.values())
-              reasons.append(f"Shopify sales feed {worst:.1f}h old across all portals")
-          if not shop_ages:
-              reasons.append("Shopify sales feed unreadable (no orders table / DB gone)")
+          if ing_age_min is None or ing_age_min > STALE_MIN:
+              reasons.append(f"Shopify ingest {('has no success on record' if ing_age_min is None else f'last ran {ing_age_min:.0f} min ago')}")
 
           stale = bool(reasons)
           print("FEED STATUS:", "STALE — " + "; ".join(reasons) if stale else "fresh")
