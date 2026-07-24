@@ -61,6 +61,7 @@ jobs:
       STATE_FILE: email-state/roas_email_sent.json
       GMAIL_USER: ${{ secrets.GMAIL_USER }}
       GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+      META_ACCESS_TOKEN: ${{ secrets.META_ACCESS_TOKEN }}   # for the products report (live campaign pull)
       SHOPIFY_STORE_URL: ${{ secrets.SHOPIFY_STORE_URL }}
       SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
       SHOPIFY_STORE_URL_SML: ${{ secrets.SHOPIFY_STORE_URL_SML }}
@@ -80,7 +81,7 @@ jobs:
       # tiers on any run that skipped it — SM read 1 product against Rs93,000
       # of live budget.
       - name: Install dependencies
-        run: pip install --quiet requests python-dotenv gspread
+        run: pip install --quiet requests python-dotenv gspread openpyxl
 
       - name: Restore both databases
         run: |
@@ -314,6 +315,17 @@ jobs:
       # an hour where GitHub skipped a tick. The hour-by-hour table is
       # reconstructed from the databases each time, so a missed build leaves no
       # permanent hole: the next build fills it back in.
+      # Downloadable "All Portals · Products Report" Excel, a faithful clone of
+      # Navdeep's manual products-report tab (verified to reproduce its 10d
+      # columns exactly). Light live campaign-level pull from 6 accounts (~a few
+      # seconds); continue-on-error so a Meta blip never blocks the page/deploy.
+      # Runs before the page build so the page can show the report's timestamp.
+      - name: Build products report (Excel)
+        continue-on-error: true
+        run: |
+          python3 scripts/v2/build_products_report.py \
+            --out roas-live/reports/products-report.xlsx
+
       - name: Build ROAS page
         run: |
           python3 scripts/v2/build_roas_page.py \

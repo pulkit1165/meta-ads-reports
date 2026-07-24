@@ -143,7 +143,19 @@ summary .m{font-weight:400;color:#7a8798;font-size:12px}
 .t-watch{background:#eef3f9;color:#4a6580}
 .ok{font-size:13px;color:#0a7d3c;font-weight:600}
 .foot{font-size:11px;color:#94a0ad;text-align:center;line-height:1.7;padding:6px 8px 0}
-@media(max-width:640px){.roas{font-size:38px}.wrap{padding:12px 8px 40px}.card{padding:14px}}
+.dlcard{display:flex;flex-wrap:wrap;align-items:center;gap:16px;justify-content:space-between}
+.dlleft{min-width:0}
+.dlmeta{font-size:12px;color:#5a6b7d;line-height:1.7;margin-top:4px}
+.dlmeta b{color:#12355b}
+.dlmeta .k{display:inline-block;min-width:70px;color:#94a0ad}
+.dlbtn{display:inline-flex;align-items:center;gap:9px;background:#12355b;color:#fff;
+       text-decoration:none;font-size:13px;font-weight:700;padding:12px 20px;border-radius:8px;
+       box-shadow:0 1px 2px rgba(16,32,56,.18);white-space:nowrap}
+.dlbtn:hover{background:#0d2947}
+.dlbtn .ic{font-size:16px;line-height:1}
+.dlsub{font-size:11px;color:#94a0ad;margin-top:6px}
+@media(max-width:640px){.roas{font-size:38px}.wrap{padding:12px 8px 40px}.card{padding:14px}
+  .dlcard{gap:12px}.dlbtn{width:100%;justify-content:center}}
 """
 
 
@@ -327,6 +339,31 @@ def main():
         h.append(f'<div class="vs">vs yesterday {y["roas"]:.2f} '
                  f'<span class="{cls}">{d:+.2f}</span></div>')
     h.append(f'<div class="vs">{day}</div></div>')
+
+    # Downloadable products report (Excel). The sidecar json is written next to
+    # the xlsx by build_products_report.py; if the report build was skipped or
+    # failed this run, we simply omit the card rather than link a missing file.
+    rjson = Path(args.out).parent / 'reports' / 'products-report.json'
+    if rjson.exists():
+        try:
+            rmeta = json.loads(rjson.read_text())
+            g = rmeta.get('grand', {})
+            h.append('<div class="card"><h2>Reports</h2><div class="dlcard">')
+            h.append('<div class="dlleft"><div style="font-weight:700;color:#12355b;font-size:14px">'
+                     'All Portals &middot; Products Report</div>'
+                     f'<div class="dlmeta">'
+                     f'<span class="k">Generated</span> <b>{rmeta.get("stamp","")}</b><br>'
+                     f'<span class="k">Today</span> ROAS <b>{g.get("today_roas",0):.2f}</b> '
+                     f'&middot; {rupee(g.get("today_spend",0))} spend &rarr; {rupee(g.get("today_rev",0))} sales<br>'
+                     f'<span class="k">10-day</span> ROAS <b>{g.get("d10_roas",0):.2f}</b> '
+                     f'&middot; {rupee(g.get("d10_spend",0))} &rarr; {rupee(g.get("d10_rev",0))}</div>'
+                     '<div class="dlsub">Per-product spend, budget &amp; ROAS across SM / NBP / SML '
+                     '&middot; Meta 1d-view + 7d-click &middot; refreshes hourly</div></div>')
+            h.append('<a class="dlbtn" href="reports/products-report.xlsx" download>'
+                     '<span class="ic">&#8681;</span> Download Excel</a>')
+            h.append('</div></div>')
+        except Exception:
+            pass
 
     # today by website
     if tot:
