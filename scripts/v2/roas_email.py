@@ -118,7 +118,9 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
              f'spend &nbsp;&middot;&nbsp; {a["orders"]:,} orders &nbsp;&middot;&nbsp; '
              f'{a["products"]} products live</div>')
     h.append(f'<div class="vs">&#8377;{a["active_budget"]:,.0f} budget live &nbsp;&middot;&nbsp; '
-             f'&#8377;{a["closed_budget"]:,.0f} closed so far</div>')
+             f'&#8377;{a["budget_left"]:,.0f} left to spend ({a["budget_left_pct"]:.0f}%) '
+             f'&nbsp;&middot;&nbsp; {a["spent_pct"]:.0f}% of day budget spent '
+             f'&nbsp;&middot;&nbsp; &#8377;{a["closed_budget"]:,.0f} closed so far</div>')
     if yday:
         y = yday['ALL']
         d = a['roas'] - y['roas']
@@ -131,7 +133,8 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
     # ---- by website ----
     h.append('<div class="card"><h2>Today by website</h2><table>')
     h.append('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
-             '<th>ROAS</th><th>Budget live</th><th>Budget closed</th>'
+             '<th>ROAS</th><th>Budget live</th><th>Budget left</th>'
+             '<th>Left %</th><th>Spent %</th><th>Budget closed</th>'
              '<th>Products</th></tr>')
     for p in PORTALS:
         t = tot[p]
@@ -142,12 +145,18 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
                  f'<td>&#8377;{t["spend"]:,.0f}</td>'
                  f'<td class="big">{t["roas"]:.2f}{yv}</td>'
                  f'<td>&#8377;{t["active_budget"]:,.0f}</td>'
+                 f'<td>&#8377;{t["budget_left"]:,.0f}</td>'
+                 f'<td>{t["budget_left_pct"]:.0f}%</td>'
+                 f'<td>{t["spent_pct"]:.0f}%</td>'
                  f'<td class="mut">&#8377;{t["closed_budget"]:,.0f}</td>'
                  f'<td>{t["products"]}</td></tr>')
     h.append(f'<tr class="tot"><td>All</td><td>&#8377;{a["rev"]:,.0f}</td>'
              f'<td>{a["orders"]:,}</td>'
              f'<td>&#8377;{a["spend"]:,.0f}</td><td>{a["roas"]:.2f}</td>'
              f'<td>&#8377;{a["active_budget"]:,.0f}</td>'
+             f'<td>&#8377;{a["budget_left"]:,.0f}</td>'
+             f'<td>{a["budget_left_pct"]:.0f}%</td>'
+             f'<td>{a["spent_pct"]:.0f}%</td>'
              f'<td>&#8377;{a["closed_budget"]:,.0f}</td>'
              f'<td>{a["products"]}</td></tr>')
     h.append('</table></div>')
@@ -156,7 +165,8 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
     if latest:
         h.append(f'<div class="card"><h2>Latest hour &mdash; {latest[-5:]} IST</h2><table>')
         h.append('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
-                 '<th>ROAS</th><th>Budget live</th><th>Products</th></tr>')
+                 '<th>ROAS</th><th>Budget live</th><th>Budget left</th>'
+                 '<th>Spent %</th><th>Products</th></tr>')
         for p in PORTALS:
             c = at(p, latest)
             if not c:
@@ -173,6 +183,8 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
                      f'<td>&#8377;{c["ad_spend"]:,.0f}</td>'
                      f'<td class="big">{c["roas"]:.2f}</td>'
                      f'<td>&#8377;{c["active_budget"]:,.0f}</td>'
+                     f'<td>&#8377;{c["budget_left"]:,.0f} ({c["budget_left_pct"]:.0f}%)</td>'
+                     f'<td>{c["spent_pct"]:.0f}%</td>'
                      f'<td>{c["products"]}{dp}</td></tr>')
         h.append('</table></div>')
 
@@ -217,7 +229,9 @@ def text_fallback(day, tot, closing, slot):
     a = tot['ALL']
     out = [f'BLENDED ROAS {a["roas"]:.2f} — {day} data as of {slot} IST',
            f'Rs{a["rev"]:,.0f} sales / Rs{a["spend"]:,.0f} spend · {a["products"]} products live',
-           f'Budget live Rs{a["active_budget"]:,.0f} · closed so far Rs{a["closed_budget"]:,.0f}', '']
+           f'Budget live Rs{a["active_budget"]:,.0f} · left Rs{a["budget_left"]:,.0f} '
+           f'({a["budget_left_pct"]:.0f}%) · {a["spent_pct"]:.0f}% of day budget spent · '
+           f'closed so far Rs{a["closed_budget"]:,.0f}', '']
     for p in PORTALS:
         t = tot[p]
         out.append(f'  {WEBSITE[p]:16} Rs{t["rev"]:>9,.0f} / Rs{t["spend"]:>9,.0f} = '

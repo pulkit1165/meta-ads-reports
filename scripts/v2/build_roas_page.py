@@ -188,8 +188,18 @@ def rupee(v):
 # Each saved hour repeats the same columns as "Today by website", so the two
 # read identically — the hourly block is that table frozen at that hour.
 HOUR_COLS = ('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
-             '<th>ROAS</th><th>Budget live</th><th>Budget closed</th>'
+             '<th>ROAS</th><th>Budget live</th><th>Budget left</th>'
+             '<th>Left %</th><th>Spent %</th><th>Budget closed</th>'
              '<th>Products</th></tr>')
+
+
+def budget_cells(r, cls=''):
+    """The three budget-position cells: ₹ left on active budgets, that as a %
+    of active budget, and cumulative spend as a % of everything live today."""
+    c = f' class="{cls}"' if cls else ''
+    return (f'<td{c}>{rupee(r["budget_left"])}</td>'
+            f'<td{c}>{r["budget_left_pct"]:.0f}%</td>'
+            f'<td{c}>{r["spent_pct"]:.0f}%</td>')
 
 
 def hour_blocks(prows, arows, open_last=False, times=None, now=None):
@@ -227,12 +237,14 @@ def hour_blocks(prows, arows, open_last=False, times=None, now=None):
                 f'<td>{rupee(c["cum_spend"])}</td>'
                 f'<td class="big">{c["cum_roas"]:.2f}</td>'
                 f'<td>{rupee(c["active_budget"])}</td>'
+                + budget_cells(c) +
                 f'<td class="mut">{rupee(c["closed_budget"])}</td>'
                 f'<td>{c["products"]}</td></tr>')
         body += (
             f'<tr class="tot"><td>All</td><td>{rupee(a["cum_sales"])}</td>'
             f'<td>{a["cum_orders"]:,}</td><td>{rupee(a["cum_spend"])}</td>'
             f'<td>{a["cum_roas"]:.2f}</td><td>{rupee(a["active_budget"])}</td>'
+            + budget_cells(a) +
             f'<td>{rupee(a["closed_budget"])}</td><td>{a["products"]}</td></tr>')
 
         is_last = (i == len(slots) - 1)
@@ -403,6 +415,9 @@ def main():
              f'&nbsp;&middot;&nbsp; {a["orders"]:,} orders &nbsp;&middot;&nbsp; '
              f'{a["products"]} products live</div>')
     h.append(f'<div class="vs">{rupee(a.get("active_budget", 0))} budget live '
+             f'&nbsp;&middot;&nbsp; {rupee(a.get("budget_left", 0))} left to spend '
+             f'({a.get("budget_left_pct", 0):.0f}%) '
+             f'&nbsp;&middot;&nbsp; {a.get("spent_pct", 0):.0f}% of day budget spent '
              f'&nbsp;&middot;&nbsp; {rupee(a.get("closed_budget", 0))} closed so far</div>')
     if yday:
         y = yday['ALL']
@@ -419,6 +434,7 @@ def main():
         h.append('<div class="card"><h2>Today by website</h2><div class="scroll"><table>')
         h.append('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
                  '<th>ROAS</th><th>Yesterday</th><th>Budget live</th>'
+                 '<th>Budget left</th><th>Left %</th><th>Spent %</th>'
                  '<th>Budget closed</th><th>Products</th></tr>')
         for p in PORTALS:
             t = tot[p]
@@ -429,12 +445,14 @@ def main():
                      f'<td>{t["orders"]:,}</td>'
                      f'<td>{rupee(t["spend"])}</td><td class="big">{t["roas"]:.2f}</td>'
                      f'<td class="mut">{yv}</td><td>{rupee(t["active_budget"])}</td>'
+                     + budget_cells(t) +
                      f'<td class="mut">{rupee(t["closed_budget"])}</td>'
                      f'<td>{t["products"]}</td></tr>')
         h.append(f'<tr class="tot"><td>All</td><td>{rupee(a["rev"])}</td>'
                  f'<td>{a["orders"]:,}</td>'
                  f'<td>{rupee(a["spend"])}</td><td>{a["roas"]:.2f}</td><td></td>'
                  f'<td>{rupee(a["active_budget"])}</td>'
+                 + budget_cells(a) +
                  f'<td>{rupee(a["closed_budget"])}</td>'
                  f'<td>{a["products"]}</td></tr>')
         h.append('</table></div></div>')
