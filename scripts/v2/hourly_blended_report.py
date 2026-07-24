@@ -42,7 +42,7 @@ IST = timezone(timedelta(hours=5, minutes=30))
 HEADER = ['Hour (IST)', 'Portal', 'Shopify Sale ₹', 'Ad Spend ₹',
           'Product Suggestions', 'Blended ROAS', 'Orders', 'Δ Products',
           'Active Budget ₹', 'Closed Budget ₹', 'Live Campaigns', 'Cum. Spend ₹',
-          'Budget Left ₹', 'Budget Left %', 'Spent % of Day Budget']
+          'Budget Left ₹', 'Budget Left %', 'Active Spent %', 'Spent % of Day Budget']
 
 
 def with_deltas(rows: list[dict]) -> list[dict]:
@@ -85,6 +85,7 @@ def to_values(rows: list[dict]) -> list[list]:
             camps, round(r['cum_spend']) if r['has_snap'] else '',
             round(r['budget_left']) if r['has_snap'] else '',
             r['budget_left_pct'] if r['has_snap'] else '',
+            r['active_spent_pct'] if r['has_snap'] else '',
             r['spent_pct'] if r['has_snap'] else '',
         ])
     return out
@@ -169,7 +170,7 @@ def main():
         w.update(range_name='A1', values=sheet_values)
         try:
             w.freeze(rows=2)
-            w.format('A1:O2', {'textFormat': {'bold': True}})
+            w.format('A1:P2', {'textFormat': {'bold': True}})
         except Exception:
             pass
         print(f"wrote '{args.tab}' ({len(values)} rows)")
@@ -182,33 +183,36 @@ def main():
         ws = wb.create_sheet('Hourly Blended ROAS')
         summary_hdr = ['Portal', 'Shopify Sale ₹', 'Ad Spend ₹', 'Blended ROAS',
                        'Orders', 'Products Live', 'Active Budget ₹', 'Closed Budget ₹',
-                       'Budget Left ₹', 'Budget Left %', 'Spent % of Day Budget']
+                       'Budget Left ₹', 'Budget Left %', 'Active Spent %',
+                       'Spent % of Day Budget']
         summary = [[p, round(tot[p]['rev']), round(tot[p]['spend']), tot[p]['roas'],
                     tot[p]['orders'], tot[p]['products'],
                     round(tot[p]['active_budget']), round(tot[p]['closed_budget']),
                     round(tot[p]['budget_left']), tot[p]['budget_left_pct'],
-                    tot[p]['spent_pct']]
+                    tot[p]['active_spent_pct'], tot[p]['spent_pct']]
                    for p in PORTALS]
         summary.append(['ALL', round(a['rev']), round(a['spend']), a['roas'],
                         a['orders'], a['products'],
                         round(a['active_budget']), round(a['closed_budget']),
-                        round(a['budget_left']), a['budget_left_pct'], a['spent_pct']])
+                        round(a['budget_left']), a['budget_left_pct'],
+                        a['active_spent_pct'], a['spent_pct']])
         nxt = write_table(
             ws, f'⏱️ HOURLY BLENDED ROAS — {day} · updated {updated} · '
                 f'Shopify sales ÷ Meta spend per portal per hour',
             summary_hdr, summary, band='DAY TOTALS',
             numfmt={2: '#,##0', 3: '#,##0', 4: '0.00', 7: '#,##0', 8: '#,##0',
-                    9: '#,##0', 10: '0.0"%"', 11: '0.0"%"'},
-            center_cols={1, 4, 5, 6, 10, 11})
+                    9: '#,##0', 10: '0.0"%"', 11: '0.0"%"', 12: '0.0"%"'},
+            center_cols={1, 4, 5, 6, 10, 11, 12})
 
         write_table(
             ws, '', HEADER, values, start=nxt,
             band="BY HOUR — 'Product Suggestions' = distinct products live on ads that hour; "
                  "Δ Products is the change vs the previous hour; Budget Left = unspent ₹ on "
-                 "still-active budgets; Spent % = cumulative spend ÷ all budget live today",
+                 "still-active budgets; Active Spent % = spend on active budgets ÷ active "
+                 "budget; Spent % of Day Budget = cumulative spend ÷ all budget live today",
             numfmt={3: '#,##0', 4: '#,##0', 6: '0.00', 9: '#,##0', 10: '#,##0',
-                    12: '#,##0', 13: '#,##0', 14: '0.0"%"', 15: '0.0"%"'},
-            center_cols={1, 2, 5, 6, 7, 8, 11, 14, 15})
+                    12: '#,##0', 13: '#,##0', 14: '0.0"%"', 15: '0.0"%"', 16: '0.0"%"'},
+            center_cols={1, 2, 5, 6, 7, 8, 11, 14, 15, 16})
 
         Path(args.xlsx).parent.mkdir(parents=True, exist_ok=True)
         wb.save(args.xlsx)

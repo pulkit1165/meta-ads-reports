@@ -189,16 +189,19 @@ def rupee(v):
 # read identically — the hourly block is that table frozen at that hour.
 HOUR_COLS = ('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
              '<th>ROAS</th><th>Budget live</th><th>Budget left</th>'
-             '<th>Left %</th><th>Spent %</th><th>Budget closed</th>'
-             '<th>Products</th></tr>')
+             '<th>Left %</th><th>Active spent %</th><th>Day spent %</th>'
+             '<th>Budget closed</th><th>Products</th></tr>')
 
 
 def budget_cells(r, cls=''):
-    """The three budget-position cells: ₹ left on active budgets, that as a %
-    of active budget, and cumulative spend as a % of everything live today."""
+    """The budget-position cells: ₹ left on active budgets, that as a % of
+    active budget, spend on active budgets as a % of active budget (dead
+    unspent budget on closed campaigns influences neither side), and
+    cumulative spend as a % of everything that was live today."""
     c = f' class="{cls}"' if cls else ''
     return (f'<td{c}>{rupee(r["budget_left"])}</td>'
             f'<td{c}>{r["budget_left_pct"]:.0f}%</td>'
+            f'<td{c}>{r["active_spent_pct"]:.0f}%</td>'
             f'<td{c}>{r["spent_pct"]:.0f}%</td>')
 
 
@@ -417,6 +420,7 @@ def main():
     h.append(f'<div class="vs">{rupee(a.get("active_budget", 0))} budget live '
              f'&nbsp;&middot;&nbsp; {rupee(a.get("budget_left", 0))} left to spend '
              f'({a.get("budget_left_pct", 0):.0f}%) '
+             f'&nbsp;&middot;&nbsp; {a.get("active_spent_pct", 0):.0f}% of active budget spent '
              f'&nbsp;&middot;&nbsp; {a.get("spent_pct", 0):.0f}% of day budget spent '
              f'&nbsp;&middot;&nbsp; {rupee(a.get("closed_budget", 0))} closed so far</div>')
     if yday:
@@ -434,8 +438,8 @@ def main():
         h.append('<div class="card"><h2>Today by website</h2><div class="scroll"><table>')
         h.append('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
                  '<th>ROAS</th><th>Yesterday</th><th>Budget live</th>'
-                 '<th>Budget left</th><th>Left %</th><th>Spent %</th>'
-                 '<th>Budget closed</th><th>Products</th></tr>')
+                 '<th>Budget left</th><th>Left %</th><th>Active spent %</th>'
+                 '<th>Day spent %</th><th>Budget closed</th><th>Products</th></tr>')
         for p in PORTALS:
             t = tot[p]
             yv = f'{yday[p]["roas"]:.2f}' if yday else '&mdash;'

@@ -251,6 +251,7 @@ def meta_hourly(con: sqlite3.Connection, day: str) -> dict:
         active_budget = {p: 0.0 for p in PORTALS}
         closed_budget = {p: 0.0 for p in PORTALS}
         budget_left = {p: 0.0 for p in PORTALS}
+        active_spend = {p: 0.0 for p in PORTALS}
         for _s, acct, cid, cname, spend, status, budget in by_slot[slot]:
             portal = portal_of(acct)
             if portal is None:
@@ -260,6 +261,11 @@ def meta_hourly(con: sqlite3.Connection, day: str) -> dict:
                 running[key] = spend
             if status == 'Active':
                 active_budget[portal] += budget
+                # Spend consumed by the campaigns running right now — the numerator
+                # for "how far into the LIVE budget are we". A closed campaign's
+                # unspent budget is dead money and belongs to neither side of that
+                # ratio.
+                active_spend[portal] += running.get(key, 0.0)
                 # Headroom still spendable on the campaigns running right now.
                 # Per campaign, never negative — overspend on one campaign is not
                 # headroom another campaign can use.
@@ -288,6 +294,7 @@ def meta_hourly(con: sqlite3.Connection, day: str) -> dict:
                 'active_budget': round(active_budget[p], 2),
                 'closed_budget': round(closed_budget[p], 2),
                 'budget_left': round(budget_left[p], 2),
+                'active_spend': round(active_spend[p], 2),
             }
             prev_cum[p] = cum[p]
     return out
@@ -408,6 +415,9 @@ def build_rows(snap_db: str, ntn_db: str, day: str, align: bool = True) -> list[
                 'budget_left': left,
                 'budget_left_pct': round(left / ab * 100, 1) if ab else 0.0,
                 'spent_pct': round(cum_spend / day_budget * 100, 1) if day_budget else 0.0,
+                'active_spend': m.get('active_spend', 0.0),
+                'active_spent_pct': (round(m.get('active_spend', 0.0) / ab * 100, 1)
+                                     if ab else 0.0),
             })
     return rows
 
@@ -457,6 +467,10 @@ def all_portal_rows(rows: list[dict]) -> list[dict]:
                                       for r in group) * 100, 1)
                           if sum(r['active_budget'] + r['closed_budget'] for r in group)
                           else 0.0),
+            'active_spend': sum(r['active_spend'] for r in group),
+            'active_spent_pct': (round(sum(r['active_spend'] for r in group)
+                                       / sum(r['active_budget'] for r in group) * 100, 1)
+                                 if sum(r['active_budget'] for r in group) else 0.0),
         })
     return out
 
@@ -465,7 +479,8 @@ def summarise(rows: list[dict]) -> dict:
     """Day totals per portal + overall, for the header line and WhatsApp digest."""
     tot = {p: {'rev': 0.0, 'spend': 0.0, 'orders': 0, 'products': 0,
                'active_budget': 0.0, 'closed_budget': 0.0,
-               'budget_left': 0.0, 'budget_left_pct': 0.0, 'spent_pct': 0.0}
+               'budget_left': 0.0, 'budget_left_pct': 0.0, 'spent_pct': 0.0,
+               'active_spend': 0.0, 'active_spent_pct': 0.0}
            for p in PORTALS}
     for r in rows:
         t = tot[r['portal']]
@@ -489,6 +504,8 @@ def summarise(rows: list[dict]) -> dict:
             tot[p]['budget_left'] = snap[-1]['budget_left']
             tot[p]['budget_left_pct'] = snap[-1]['budget_left_pct']
             tot[p]['spent_pct'] = snap[-1]['spent_pct']
+            tot[p]['active_spend'] = snap[-1]['active_spend']
+            tot[p]['active_spent_pct'] = snap[-1]['active_spent_pct']
         tot[p]['roas'] = round(tot[p]['rev'] / tot[p]['spend'], 2) if tot[p]['spend'] else 0.0
     grand_rev = sum(tot[p]['rev'] for p in PORTALS)
     grand_spend = sum(tot[p]['spend'] for p in PORTALS)
@@ -500,11 +517,14 @@ def summarise(rows: list[dict]) -> dict:
         'active_budget': sum(tot[p]['active_budget'] for p in PORTALS),
         'closed_budget': sum(tot[p]['closed_budget'] for p in PORTALS),
         'budget_left': sum(tot[p]['budget_left'] for p in PORTALS),
+        'active_spend': sum(tot[p]['active_spend'] for p in PORTALS),
         'roas': round(grand_rev / grand_spend, 2) if grand_spend else 0.0,
     }
     _ab = tot['ALL']['active_budget']
     _db = _ab + tot['ALL']['closed_budget']
     tot['ALL']['budget_left_pct'] = round(tot['ALL']['budget_left'] / _ab * 100, 1) if _ab else 0.0
+    tot['ALL']['active_spent_pct'] = (round(tot['ALL']['active_spend'] / _ab * 100, 1)
+                                      if _ab else 0.0)
     # grand_spend (Σ hourly deltas) equals the day's final cumulative spend,
     # so this is "share of today's total activated budget already spent".
     tot['ALL']['spent_pct'] = round(grand_spend / _db * 100, 1) if _db else 0.0

@@ -119,6 +119,7 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
              f'{a["products"]} products live</div>')
     h.append(f'<div class="vs">&#8377;{a["active_budget"]:,.0f} budget live &nbsp;&middot;&nbsp; '
              f'&#8377;{a["budget_left"]:,.0f} left to spend ({a["budget_left_pct"]:.0f}%) '
+             f'&nbsp;&middot;&nbsp; {a["active_spent_pct"]:.0f}% of active budget spent '
              f'&nbsp;&middot;&nbsp; {a["spent_pct"]:.0f}% of day budget spent '
              f'&nbsp;&middot;&nbsp; &#8377;{a["closed_budget"]:,.0f} closed so far</div>')
     if yday:
@@ -134,8 +135,8 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
     h.append('<div class="card"><h2>Today by website</h2><table>')
     h.append('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
              '<th>ROAS</th><th>Budget live</th><th>Budget left</th>'
-             '<th>Left %</th><th>Spent %</th><th>Budget closed</th>'
-             '<th>Products</th></tr>')
+             '<th>Left %</th><th>Active spent %</th><th>Day spent %</th>'
+             '<th>Budget closed</th><th>Products</th></tr>')
     for p in PORTALS:
         t = tot[p]
         yv = (f'<div class="mut" style="font-size:11px">yest {yday[p]["roas"]:.2f}</div>'
@@ -147,6 +148,7 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
                  f'<td>&#8377;{t["active_budget"]:,.0f}</td>'
                  f'<td>&#8377;{t["budget_left"]:,.0f}</td>'
                  f'<td>{t["budget_left_pct"]:.0f}%</td>'
+                 f'<td>{t["active_spent_pct"]:.0f}%</td>'
                  f'<td>{t["spent_pct"]:.0f}%</td>'
                  f'<td class="mut">&#8377;{t["closed_budget"]:,.0f}</td>'
                  f'<td>{t["products"]}</td></tr>')
@@ -156,6 +158,7 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
              f'<td>&#8377;{a["active_budget"]:,.0f}</td>'
              f'<td>&#8377;{a["budget_left"]:,.0f}</td>'
              f'<td>{a["budget_left_pct"]:.0f}%</td>'
+             f'<td>{a["active_spent_pct"]:.0f}%</td>'
              f'<td>{a["spent_pct"]:.0f}%</td>'
              f'<td>&#8377;{a["closed_budget"]:,.0f}</td>'
              f'<td>{a["products"]}</td></tr>')
@@ -166,7 +169,7 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
         h.append(f'<div class="card"><h2>Latest hour &mdash; {latest[-5:]} IST</h2><table>')
         h.append('<tr><th>Website</th><th>Sales</th><th>Orders</th><th>Spend</th>'
                  '<th>ROAS</th><th>Budget live</th><th>Budget left</th>'
-                 '<th>Spent %</th><th>Products</th></tr>')
+                 '<th>Active spent %</th><th>Day spent %</th><th>Products</th></tr>')
         for p in PORTALS:
             c = at(p, latest)
             if not c:
@@ -184,6 +187,7 @@ def build_html(day, rows, tot, closing, slot, lk16, yday=None, yday_date='', gap
                      f'<td class="big">{c["roas"]:.2f}</td>'
                      f'<td>&#8377;{c["active_budget"]:,.0f}</td>'
                      f'<td>&#8377;{c["budget_left"]:,.0f} ({c["budget_left_pct"]:.0f}%)</td>'
+                     f'<td>{c["active_spent_pct"]:.0f}%</td>'
                      f'<td>{c["spent_pct"]:.0f}%</td>'
                      f'<td>{c["products"]}{dp}</td></tr>')
         h.append('</table></div>')
@@ -230,7 +234,8 @@ def text_fallback(day, tot, closing, slot):
     out = [f'BLENDED ROAS {a["roas"]:.2f} — {day} data as of {slot} IST',
            f'Rs{a["rev"]:,.0f} sales / Rs{a["spend"]:,.0f} spend · {a["products"]} products live',
            f'Budget live Rs{a["active_budget"]:,.0f} · left Rs{a["budget_left"]:,.0f} '
-           f'({a["budget_left_pct"]:.0f}%) · {a["spent_pct"]:.0f}% of day budget spent · '
+           f'({a["budget_left_pct"]:.0f}%) · {a["active_spent_pct"]:.0f}% of active budget '
+           f'spent · {a["spent_pct"]:.0f}% of day budget spent · '
            f'closed so far Rs{a["closed_budget"]:,.0f}', '']
     for p in PORTALS:
         t = tot[p]
