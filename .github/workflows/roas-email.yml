@@ -220,23 +220,86 @@ jobs:
             git add -A && git commit -m "finals overlay" || true
           done
 
-      - name: Freshness check
-        # Surfaces a stale feed in the job log instead of silently mailing old
-        # numbers — the snapshot cron and the Shopify ingest both skip sometimes.
+      - name: Freshness check + stale-feed alert
+        # Surfaces a stale feed in the job log AND actively emails the operator
+        # when either feed goes cold. The snapshot cron and the Shopify ingest
+        # both skip sometimes; before this, a silent stall (like 21-24 Jul) was
+        # only discovered days later by eyeballing the dashboard. Now any stall
+        # pings within the hour. Wrapped so it can NEVER fail the mail run.
+        continue-on-error: true
+        env:
+          ALERT_TO: pulkitsharma1165@gmail.com
         run: |
           python3 - <<'PY'
-          import sqlite3, os
+          import sqlite3, os, smtplib, ssl, traceback
+          from email.mime.text import MIMEText
           from datetime import datetime, timezone, timedelta
           IST = timezone(timedelta(hours=5, minutes=30))
           now = datetime.now(IST)
-          s = sqlite3.connect(os.environ['SNAP_DB']).execute(
-              "SELECT MAX(hour_slot) FROM campaign_hourly_snapshots").fetchone()[0]
-          o = sqlite3.connect(os.environ['NTN_DB']).execute(
-              "SELECT portal, MAX(created_at) FROM shopify_orders GROUP BY portal").fetchall()
-          print(f"now {now:%Y-%m-%d %H:%M} IST | latest snapshot slot: {s}")
-          for portal, ts in o:
-              age = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
-              print(f"  shopify {portal}: {ts} ({age:.1f}h old){'  <-- STALE' if age > 6 else ''}")
+
+          # Snapshot (Meta pixel ROAS) freshness. Slots are 'YYYY-MM-DD HH'.
+          snap_age_min = None
+          try:
+              s = sqlite3.connect(os.environ['SNAP_DB']).execute(
+                  "SELECT MAX(hour_slot) FROM campaign_hourly_snapshots").fetchone()[0]
+              if s:
+                  slot = datetime.strptime(s[:13], "%Y-%m-%d %H").replace(tzinfo=IST)
+                  snap_age_min = (now - slot).total_seconds() / 60
+          except Exception:
+              s = None
+          print(f"now {now:%Y-%m-%d %H:%M} IST | latest snapshot slot: {s}"
+                + (f" ({snap_age_min:.0f} min old)" if snap_age_min is not None else ""))
+
+          # Shopify sales freshness, per portal.
+          shop = []
+          try:
+              shop = sqlite3.connect(os.environ['NTN_DB']).execute(
+                  "SELECT portal, MAX(created_at) FROM shopify_orders GROUP BY portal").fetchall()
+          except Exception:
+              pass
+          shop_ages = {}
+          for portal, ts in shop:
+              age_h = (now - datetime.fromisoformat(ts)).total_seconds() / 3600
+              shop_ages[portal] = age_h
+              print(f"  shopify {portal}: {ts} ({age_h:.1f}h old){'  <-- STALE' if age_h > 6 else ''}")
+
+          # A feed is STALE if the snapshot is >150 min old (should refresh 3x/hr)
+          # or EVERY shopify portal is >6h old (ingest runs every 10 min; 6h means
+          # it has been down for a long time, not just a between-orders lull).
+          reasons = []
+          if snap_age_min is None or snap_age_min > 150:
+              reasons.append(f"Meta snapshot {('missing' if snap_age_min is None else f'{snap_age_min:.0f} min old')}")
+          if shop_ages and all(a > 6 for a in shop_ages.values()):
+              worst = max(shop_ages.values())
+              reasons.append(f"Shopify sales feed {worst:.1f}h old across all portals")
+          if not shop_ages:
+              reasons.append("Shopify sales feed unreadable (no orders table / DB gone)")
+
+          stale = bool(reasons)
+          print("FEED STATUS:", "STALE — " + "; ".join(reasons) if stale else "fresh")
+
+          # Alert at most ~once/hour (first tick of the IST hour) so an ongoing
+          # outage does not spam every 10 min. GitHub skipping this exact tick
+          # just delays the ping to the next hour — fine for an outage alert.
+          user = os.environ.get('GMAIL_USER'); pw = os.environ.get('GMAIL_APP_PASSWORD')
+          if stale and now.minute < 10 and user and pw:
+              try:
+                  body = (f"The ROAS dashboard feed looks STALE as of {now:%d %b %H:%M} IST.\n\n"
+                          + "\n".join(f"  • {r}" for r in reasons)
+                          + "\n\nThe dashboard may be showing frozen/old numbers. "
+                            "The pipeline self-heals on the next good ingest; if this "
+                            "keeps firing for >2h, the ingest or state branch needs a look.\n\n"
+                            "— automated watchdog (roas-email.yml)")
+                  msg = MIMEText(body)
+                  msg['Subject'] = f"⚠️ ROAS feed STALE — {reasons[0]}"
+                  msg['From'] = user; msg['To'] = os.environ['ALERT_TO']
+                  with smtplib.SMTP('smtp.gmail.com', 587, timeout=30) as srv:
+                      srv.starttls(context=ssl.create_default_context())
+                      srv.login(user, pw)
+                      srv.sendmail(user, [os.environ['ALERT_TO']], msg.as_string())
+                  print(f"  📧 stale-feed alert sent to {os.environ['ALERT_TO']}")
+              except Exception:
+                  print("  (alert email failed — non-fatal)"); traceback.print_exc()
           PY
 
       # The PAGE rebuilds on every attempt (3x/hour), unlike the email. Rebuilding
