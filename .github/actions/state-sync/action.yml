@@ -43,6 +43,21 @@ runs:
             if [ -f "$STATE_DIR/ntn.db.gz" ]; then
               gunzip -f "$STATE_DIR/ntn.db.gz" && echo "  ✅ decompressed ntn.db"
             fi
+            # Self-heal a corrupt snapshot. A 'database disk image is malformed'
+            # db used to cascade-fail EVERY step (schema init onward), silently
+            # freezing sales for hours. Rebuild it via .recover so the run
+            # proceeds; a later re-ingest fills anything the recovery dropped.
+            if [ -f "$STATE_DIR/ntn.db" ] && \
+               [ "$(sqlite3 "$STATE_DIR/ntn.db" 'PRAGMA integrity_check;' 2>/dev/null | head -1)" != "ok" ]; then
+              echo "  ⚠️  restored ntn.db is malformed — rebuilding via .recover"
+              sqlite3 "$STATE_DIR/ntn.db" ".recover" 2>/dev/null | sqlite3 "$STATE_DIR/ntn.db.fixed" 2>/dev/null || true
+              if [ -s "$STATE_DIR/ntn.db.fixed" ] && \
+                 [ "$(sqlite3 "$STATE_DIR/ntn.db.fixed" 'PRAGMA integrity_check;' 2>/dev/null | head -1)" = "ok" ]; then
+                mv -f "$STATE_DIR/ntn.db.fixed" "$STATE_DIR/ntn.db"; echo "  ✅ recovered ntn.db"
+              else
+                rm -f "$STATE_DIR/ntn.db.fixed"; echo "  ❌ could not recover ntn.db" >&2
+              fi
+            fi
             echo "  ✅ restored $(find "$STATE_DIR" -type f ! -name '.gitkeep' | wc -l | tr -d ' ') state file(s) from branch"
           else
             echo "  ℹ️  no state branch yet — starting fresh"
@@ -74,6 +89,25 @@ runs:
           # ~100 MB (GitHub's hard push limit) which broke every save; gzip
           # drops it to ~1/3. Scripts never see the .gz (restore decompresses).
           if [ -f "$WT/ntn.db" ]; then
+            # Fold the WAL into the main file so the published snapshot is a
+            # single, consistent image. Gzipping a WAL-mode db WITHOUT this is
+            # exactly what produced the 'malformed' (page 43887) corruption on
+            # 24 Jul that froze the sales feed.
+            sqlite3 "$WT/ntn.db" "PRAGMA wal_checkpoint(TRUNCATE);" >/dev/null 2>&1 || true
+            rm -f "$WT/ntn.db-wal" "$WT/ntn.db-shm"
+            # Never publish a corrupt db over the good one — recover, or abort.
+            if [ "$(sqlite3 "$WT/ntn.db" 'PRAGMA integrity_check;' 2>/dev/null | head -1)" != "ok" ]; then
+              echo "  ⚠️  ntn.db failed integrity_check before publish — recovering"
+              sqlite3 "$WT/ntn.db" ".recover" 2>/dev/null | sqlite3 "$WT/ntn.db.fixed" 2>/dev/null || true
+              if [ -s "$WT/ntn.db.fixed" ] && \
+                 [ "$(sqlite3 "$WT/ntn.db.fixed" 'PRAGMA integrity_check;' 2>/dev/null | head -1)" = "ok" ]; then
+                mv -f "$WT/ntn.db.fixed" "$WT/ntn.db"; echo "  ✅ recovered before publish"
+              else
+                rm -f "$WT/ntn.db.fixed"
+                echo "  ❌ ntn.db corrupt & unrecoverable — NOT publishing (keeping last good snapshot)" >&2
+                exit 1
+              fi
+            fi
             gzip -f "$WT/ntn.db"   # → ntn.db.gz
           fi
 
