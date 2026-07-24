@@ -47,7 +47,7 @@ concurrency:
   cancel-in-progress: false
 
 permissions:
-  contents: write            # only ever writes the email-state branch
+  contents: write            # writes the email-state and reports-archive branches
 
 jobs:
   email:
@@ -315,16 +315,44 @@ jobs:
       # an hour where GitHub skipped a tick. The hour-by-hour table is
       # reconstructed from the databases each time, so a missed build leaves no
       # permanent hole: the next build fills it back in.
-      # Downloadable "All Portals · Products Report" Excel, a faithful clone of
-      # Navdeep's manual products-report tab (verified to reproduce its 10d
-      # columns exactly). Light live campaign-level pull from 6 accounts (~a few
-      # seconds); continue-on-error so a Meta blip never blocks the page/deploy.
-      # Runs before the page build so the page can show the report's timestamp.
-      - name: Build products report (Excel)
+      # ── Products report: daily-at-2PM snapshot, archived per day ──
+      # A downloadable "All Portals · Products Report" Excel (faithful clone of
+      # Navdeep's manual tab, verified to reproduce its 10d columns exactly).
+      # Past days are kept forever on the `reports-archive` branch and restored
+      # into the deploy dir every run, so the dashboard's left-sidebar Reports
+      # menu lists every day. The live pull is light (6 accounts, campaign level)
+      # so it never risks the pipeline; all steps are continue-on-error.
+      - name: Restore products-report archive
         continue-on-error: true
         run: |
-          python3 scripts/v2/build_products_report.py \
-            --out roas-live/reports/products-report.xlsx
+          mkdir -p roas-live/reports/archive
+          if git ls-remote --exit-code --heads origin reports-archive >/dev/null 2>&1; then
+            git fetch --depth=1 origin reports-archive:refs/remotes/origin/reports-archive
+            WT=.rep-wt; git worktree remove -f "$WT" 2>/dev/null || true; rm -rf "$WT"
+            git worktree add -f "$WT" origin/reports-archive
+            rsync -a --exclude='.git' "$WT"/ roas-live/reports/archive/ 2>/dev/null || true
+            git worktree remove -f "$WT" 2>/dev/null || true
+            echo "restored $(ls roas-live/reports/archive/*.xlsx 2>/dev/null | wc -l | tr -d ' ') archived report(s)"
+          else
+            echo "no reports-archive branch yet — will create on first 2 PM run"
+          fi
+
+      - name: Build daily products report (2 PM IST)
+        continue-on-error: true
+        run: |
+          DATE=$(TZ=Asia/Kolkata date +%F)
+          HOUR=$(TZ=Asia/Kolkata date +%H)
+          TARGET="roas-live/reports/archive/products-report-$DATE.xlsx"
+          COUNT=$(ls roas-live/reports/archive/products-report-*.xlsx 2>/dev/null | wc -l | tr -d ' ')
+          # Generate today's snapshot once — at/after 14:00 IST, or immediately if
+          # the archive is still empty (so there is always something to download).
+          if [ ! -f "$TARGET" ] && { [ "$HOUR" -ge 14 ] || [ "$COUNT" -eq 0 ]; }; then
+            echo "generating products report for $DATE (hour=$HOUR)"
+            python3 scripts/v2/build_products_report.py --date "$DATE" --out "$TARGET"
+            [ -f "$TARGET" ] && echo "NEW_REPORT=1" >> "$GITHUB_ENV"
+          else
+            echo "no new report this run (hour=$HOUR, today exists=$([ -f "$TARGET" ] && echo yes || echo no), archived=$COUNT)"
+          fi
 
       - name: Build ROAS page
         run: |
@@ -386,3 +414,36 @@ jobs:
             cp "../$STATE_FILE" roas_email_sent.json
             git add -A && git commit -m "roas-email overlay" || true
           done
+
+      # Persist today's products report to the reports-archive branch so every
+      # past day stays available in the dashboard sidebar across redeploys.
+      # Append-only (one small xlsx+json per day) — no binary-merge conflicts.
+      - name: Save products-report archive
+        if: ${{ env.NEW_REPORT == '1' }}
+        continue-on-error: true
+        run: |
+          git config user.name  "meta-ads-bot"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          WT=.reparch-wt; git worktree remove -f "$WT" 2>/dev/null || true; rm -rf "$WT"
+          if git ls-remote --exit-code --heads origin reports-archive >/dev/null 2>&1; then
+            git fetch --depth=1 origin reports-archive:refs/remotes/origin/reports-archive
+            git worktree add -f "$WT" origin/reports-archive
+          else
+            git worktree add -f --orphan -b reports-archive "$WT"
+            ( cd "$WT" && git rm -rf . 2>/dev/null || true )
+          fi
+          cp -f roas-live/reports/archive/products-report-*.xlsx \
+                roas-live/reports/archive/products-report-*.json "$WT"/ 2>/dev/null || true
+          cd "$WT"; git add -A
+          if git diff --staged --quiet; then echo "archive already up to date"; exit 0; fi
+          git commit -m "products report: $(TZ=Asia/Kolkata date '+%F %H:%M') IST"
+          for i in 1 2 3 4 5; do
+            git push origin "HEAD:reports-archive" && { echo pushed; exit 0; }
+            git fetch origin reports-archive && git reset --hard origin/reports-archive
+            cp -f ../roas-live/reports/archive/products-report-*.xlsx \
+                  ../roas-live/reports/archive/products-report-*.json ./ 2>/dev/null || true
+            git add -A
+            git diff --staged --quiet && { echo "remote already matches"; exit 0; }
+            git commit -m "products report overlay" || true
+          done
+          echo "archive push failed after retries" >&2

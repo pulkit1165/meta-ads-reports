@@ -143,19 +143,41 @@ summary .m{font-weight:400;color:#7a8798;font-size:12px}
 .t-watch{background:#eef3f9;color:#4a6580}
 .ok{font-size:13px;color:#0a7d3c;font-weight:600}
 .foot{font-size:11px;color:#94a0ad;text-align:center;line-height:1.7;padding:6px 8px 0}
-.dlcard{display:flex;flex-wrap:wrap;align-items:center;gap:16px;justify-content:space-between}
-.dlleft{min-width:0}
-.dlmeta{font-size:12px;color:#5a6b7d;line-height:1.7;margin-top:4px}
-.dlmeta b{color:#12355b}
-.dlmeta .k{display:inline-block;min-width:70px;color:#94a0ad}
-.dlbtn{display:inline-flex;align-items:center;gap:9px;background:#12355b;color:#fff;
-       text-decoration:none;font-size:13px;font-weight:700;padding:12px 20px;border-radius:8px;
-       box-shadow:0 1px 2px rgba(16,32,56,.18);white-space:nowrap}
-.dlbtn:hover{background:#0d2947}
-.dlbtn .ic{font-size:16px;line-height:1}
-.dlsub{font-size:11px;color:#94a0ad;margin-top:6px}
-@media(max-width:640px){.roas{font-size:38px}.wrap{padding:12px 8px 40px}.card{padding:14px}
-  .dlcard{gap:12px}.dlbtn{width:100%;justify-content:center}}
+/* ── left sidebar shell ── */
+.shell{display:flex;max-width:1246px;margin:0 auto;align-items:flex-start}
+.side{width:238px;flex:0 0 238px;background:#0f2440;color:#c7d3e2;padding:18px 14px 26px;
+      display:flex;flex-direction:column;gap:16px;position:sticky;top:0;height:100vh;overflow-y:auto}
+.side .brand{font-size:14px;font-weight:800;color:#fff;padding:2px 8px 12px;border-bottom:1px solid #1d3557}
+.navsec{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.09em;
+        color:#6f83a0;padding:0 8px;margin:2px 0 4px}
+a.nav{display:block;color:#cdd8e6;text-decoration:none;font-size:13px;padding:8px 10px;border-radius:7px}
+a.nav:hover{background:#1b355a;color:#fff}
+a.nav.active{background:#1b355a;color:#fff;font-weight:600}
+.reports{border:none}
+.reports>summary{display:none}
+.rlist{display:flex;flex-direction:column;gap:2px;margin-top:2px}
+a.ritem{display:flex;justify-content:space-between;align-items:baseline;gap:8px;color:#cdd8e6;
+        text-decoration:none;font-size:12.5px;padding:8px 10px;border-radius:7px}
+a.ritem:hover{background:#1b355a;color:#fff}
+a.ritem .rd{font-weight:600}
+a.ritem .rr{font-size:11px;color:#8ea3c2;font-variant-numeric:tabular-nums}
+a.ritem.top{background:#12365f}
+a.ritem.top .rr{color:#7fd6a0}
+.rnone{font-size:12px;color:#6f83a0;padding:6px 8px;line-height:1.5}
+.main{flex:1;min-width:0;max-width:1040px;padding:18px 20px 50px}
+@media(max-width:900px){
+  .shell{flex-direction:column}
+  .side{width:auto;flex:none;position:static;height:auto;padding:12px 12px;gap:10px}
+  .side .brand{border-bottom:none;padding-bottom:2px}
+  .navsec.hidem{display:none}
+  a.nav{display:none}
+  .reports>summary{display:block;cursor:pointer;font-size:13px;font-weight:700;color:#fff;
+        padding:9px 11px;background:#1b355a;border-radius:7px;list-style:none}
+  .reports>summary::-webkit-details-marker{display:none}
+  .rlist{max-height:44vh;overflow-y:auto;margin-top:6px}
+  .main{padding:14px 12px 40px;max-width:none}
+  .roas{font-size:38px}.card{padding:14px}
+}
 """
 
 
@@ -254,6 +276,55 @@ def closure_rows(items):
     return out
 
 
+def gather_reports(out_path):
+    """Every archived daily products report, newest first, from the json sidecars
+    that build_products_report.py writes next to each dated xlsx."""
+    d = Path(out_path).parent / 'reports' / 'archive'
+    items = []
+    if d.exists():
+        for jf in sorted(d.glob('products-report-*.json'), reverse=True):
+            try:
+                m = json.loads(jf.read_text())
+                items.append({
+                    'date': m.get('today', jf.stem.replace('products-report-', '')),
+                    'stamp': m.get('stamp', ''),
+                    'file': f"reports/archive/{jf.with_suffix('.xlsx').name}",
+                    'grand': m.get('grand', {}),
+                })
+            except Exception:
+                pass
+    return items
+
+
+def sidebar_html(items):
+    """Left nav: brand + a Reports menu listing every archived day as a download."""
+    s = ['<nav class="side">',
+         '<div class="brand">&#128202; NTN Ads &middot; ROAS</div>',
+         '<div><div class="navsec">Live</div>'
+         '<a class="nav active" href="#top">Blended ROAS</a></div>',
+         '<details class="reports" open>',
+         '<summary>&#128193; Reports</summary>',
+         '<div class="navsec hidem">Products report &middot; daily 2 PM</div>',
+         '<div class="rlist">']
+    if items:
+        for i, it in enumerate(items):
+            try:
+                dt = datetime.strptime(it['date'], '%Y-%m-%d'); label = f'{dt:%d %b}'
+            except Exception:
+                label = it['date']
+            roas = it['grand'].get('today_roas', 0) or 0
+            top = ' top' if i == 0 else ''
+            s.append(f'<a class="ritem{top}" href="{it["file"]}" download '
+                     f'title="Products report &mdash; {it.get("stamp","")}">'
+                     f'<span class="rd">{label}</span>'
+                     f'<span class="rr">{roas:.2f}x</span></a>')
+    else:
+        s.append('<div class="rnone">No reports yet &mdash; the first one saves '
+                 'automatically at 2 PM IST.</div>')
+    s.append('</div></details></nav>')
+    return '\n'.join(s)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument('--snap-db', default='state/camp_snapshots.db')
@@ -312,7 +383,8 @@ def main():
          # indexes — this page shows per-website revenue, spend and budgets.
          '<meta name="robots" content="noindex,nofollow,noarchive">',
          f'<title>ROAS {a["roas"]:.2f} — {day}</title>',
-         f'<style>{CSS}</style></head><body><div class="wrap">',
+         f'<style>{CSS}</style></head><body><a id="top"></a>',
+         f'<div class="shell">{sidebar_html(gather_reports(args.out))}<main class="main">',
          '<div class="bar"><h1>Blended ROAS &mdash; hourly</h1>',
          f'<div class="stamp">'
          f'<span id="badge" class="badge live">&#9679; LIVE</span>'
@@ -340,30 +412,7 @@ def main():
                  f'<span class="{cls}">{d:+.2f}</span></div>')
     h.append(f'<div class="vs">{day}</div></div>')
 
-    # Downloadable products report (Excel). The sidecar json is written next to
-    # the xlsx by build_products_report.py; if the report build was skipped or
-    # failed this run, we simply omit the card rather than link a missing file.
-    rjson = Path(args.out).parent / 'reports' / 'products-report.json'
-    if rjson.exists():
-        try:
-            rmeta = json.loads(rjson.read_text())
-            g = rmeta.get('grand', {})
-            h.append('<div class="card"><h2>Reports</h2><div class="dlcard">')
-            h.append('<div class="dlleft"><div style="font-weight:700;color:#12355b;font-size:14px">'
-                     'All Portals &middot; Products Report</div>'
-                     f'<div class="dlmeta">'
-                     f'<span class="k">Generated</span> <b>{rmeta.get("stamp","")}</b><br>'
-                     f'<span class="k">Today</span> ROAS <b>{g.get("today_roas",0):.2f}</b> '
-                     f'&middot; {rupee(g.get("today_spend",0))} spend &rarr; {rupee(g.get("today_rev",0))} sales<br>'
-                     f'<span class="k">10-day</span> ROAS <b>{g.get("d10_roas",0):.2f}</b> '
-                     f'&middot; {rupee(g.get("d10_spend",0))} &rarr; {rupee(g.get("d10_rev",0))}</div>'
-                     '<div class="dlsub">Per-product spend, budget &amp; ROAS across SM / NBP / SML '
-                     '&middot; Meta 1d-view + 7d-click &middot; refreshes hourly</div></div>')
-            h.append('<a class="dlbtn" href="reports/products-report.xlsx" download>'
-                     '<span class="ic">&#8681;</span> Download Excel</a>')
-            h.append('</div></div>')
-        except Exception:
-            pass
+    # (The products-report downloads live in the left sidebar — see sidebar_html.)
 
     # today by website
     if tot:
@@ -543,7 +592,7 @@ function tick(){{
 }}
 tick(); setInterval(tick,1000);
 </script>''')
-    h.append('</div></body></html>')
+    h.append('</main></div></body></html>')
 
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
