@@ -1,0 +1,995 @@
+<title>SM Budget-Closing Report · 21–24 Jul 2026</title>
+<style>
+:root {
+  --bg:#f6f6f4; --surface:#ffffff; --ink:#191a1e; --ink2:#5b5d68; --ink3:#8b8d99;
+  --line:#e4e4e0; --accent:#2a78d6; --accent-soft:#e3edf9;
+  --crit:#c43c3b; --crit-soft:#fbe9e8; --warn:#9a6a00; --warn-soft:#faf0d8;
+  --ok:#0f7a38; --ok-soft:#e3f2e7; --neu-soft:#ececea;
+}
+@media (prefers-color-scheme: dark) {
+  :root:where(:not([data-theme="light"])) {
+    --bg:#141518; --surface:#1e1f24; --ink:#f0f0ed; --ink2:#b6b8c2; --ink3:#82848f;
+    --line:#2e2f36; --accent:#3987e5; --accent-soft:#1c2c40;
+    --crit:#e66767; --crit-soft:#3a2222; --warn:#d9a13a; --warn-soft:#37301c;
+    --ok:#4fbf74; --ok-soft:#1d3226; --neu-soft:#2a2b31;
+  }
+}
+:root[data-theme="dark"] {
+  --bg:#141518; --surface:#1e1f24; --ink:#f0f0ed; --ink2:#b6b8c2; --ink3:#82848f;
+  --line:#2e2f36; --accent:#3987e5; --accent-soft:#1c2c40;
+  --crit:#e66767; --crit-soft:#3a2222; --warn:#d9a13a; --warn-soft:#37301c;
+  --ok:#4fbf74; --ok-soft:#1d3226; --neu-soft:#2a2b31;
+}
+:root[data-theme="light"] {
+  --bg:#f6f6f4; --surface:#ffffff; --ink:#191a1e; --ink2:#5b5d68; --ink3:#8b8d99;
+  --line:#e4e4e0; --accent:#2a78d6; --accent-soft:#e3edf9;
+  --crit:#c43c3b; --crit-soft:#fbe9e8; --warn:#9a6a00; --warn-soft:#faf0d8;
+  --ok:#0f7a38; --ok-soft:#e3f2e7; --neu-soft:#ececea;
+}
+* { box-sizing:border-box; }
+body { background:var(--bg); color:var(--ink); font:15px/1.55 -apple-system,'SF Pro Text',system-ui,sans-serif;
+  margin:0; padding:32px 20px 80px; }
+.wrap { max-width:1100px; margin:0 auto; display:flex; flex-direction:column; gap:28px; }
+header .eyebrow { text-transform:uppercase; letter-spacing:.12em; font-size:11px; color:var(--accent); font-weight:650; }
+h1 { font-size:27px; line-height:1.2; margin:6px 0 4px; text-wrap:balance; font-weight:750; }
+.sub { color:var(--ink2); font-size:14px; max-width:70ch; }
+h2 { font-size:17px; margin:0 0 2px; font-weight:700; }
+.sec-note { color:var(--ink3); font-size:12.5px; margin:0 0 12px; }
+.tiles { display:grid; grid-template-columns:repeat(auto-fit,minmax(148px,1fr)); gap:10px; }
+.tile { background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }
+.tile .v { font-size:23px; font-weight:750; font-variant-numeric:tabular-nums; letter-spacing:-.01em; }
+.tile .v.crit { color:var(--crit); } .tile .v.warn { color:var(--warn); } .tile .v.ok { color:var(--ok); }
+.tile .l { font-size:11.5px; color:var(--ink2); margin-top:2px; line-height:1.35; }
+.panel { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:20px; }
+.hist { display:flex; align-items:flex-end; gap:6px; height:150px; padding-top:18px; }
+.hb { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; height:100%; gap:3px; min-width:0; }
+.hb i { width:100%; max-width:44px; background:var(--accent); opacity:.55; border-radius:4px 4px 0 0; display:block; }
+.hb.early i { opacity:1; }
+.hb b { font-size:11px; color:var(--ink3); font-weight:500; }
+.hb-n { font-size:11px; color:var(--ink2); font-variant-numeric:tabular-nums; }
+.legend { display:flex; gap:16px; font-size:12px; color:var(--ink2); margin-top:10px; }
+.legend i { display:inline-block; width:10px; height:10px; border-radius:3px; background:var(--accent); vertical-align:-1px; margin-right:5px; }
+.legend .dim i { opacity:.55; }
+.tbl-wrap { overflow-x:auto; }
+table { border-collapse:collapse; width:100%; font-size:13.5px; font-variant-numeric:tabular-nums; }
+th { text-align:right; font-size:10.5px; text-transform:uppercase; letter-spacing:.07em; color:var(--ink3);
+  padding:8px 10px 6px; border-bottom:1px solid var(--line); white-space:nowrap; font-weight:650; }
+th:first-child, th.lft { text-align:left; }
+td { padding:8px 10px; border-bottom:1px solid var(--line); white-space:nowrap; vertical-align:top; }
+tr:last-child td { border-bottom:none; }
+tr.gap td { padding:0; height:6px; background:var(--bg); border-bottom:none; }
+td.num { text-align:right; }
+td.emph { font-weight:700; }
+td.crit { color:var(--crit); font-weight:650; } td.warn { color:var(--warn); font-weight:650; } td.ok { color:var(--ok); font-weight:650; }
+.pname { font-weight:600; max-width:260px; white-space:normal; }
+.sku { font-size:11px; color:var(--ink3); font-weight:500; letter-spacing:.02em; margin-top:1px; }
+.sku-inline { font-size:11.5px; color:var(--ink3); font-weight:500; }
+.chip { display:inline-block; font-size:10px; font-weight:700; letter-spacing:.04em; border-radius:99px;
+  padding:1.5px 8px; margin-left:7px; vertical-align:1px; }
+.chip.crit { background:var(--crit-soft); color:var(--crit); }
+.chip.warn { background:var(--warn-soft); color:var(--warn); }
+.chip.neu { background:var(--neu-soft); color:var(--ink2); }
+.bar-cell { min-width:110px; }
+.bar-cell span { font-size:12px; color:var(--ink2); margin-left:7px; }
+.bar { display:inline-block; width:64px; height:8px; background:var(--line); border-radius:99px; vertical-align:1px; }
+.bar i { display:block; height:100%; background:var(--crit); border-radius:99px; }
+.card { background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:0 18px; }
+.card summary { cursor:pointer; padding:14px 0; display:flex; flex-wrap:wrap; gap:4px 12px; align-items:baseline; }
+.card summary b { font-size:15px; }
+.sum-meta { color:var(--ink2); font-size:12.5px; }
+.camp { border-top:1px solid var(--line); padding:12px 0; }
+.cname { font-size:12.5px; font-weight:600; word-break:break-all; }
+.ctl { display:flex; flex-wrap:wrap; gap:6px; margin:7px 0 5px; }
+.t { font-size:11.5px; font-weight:600; border-radius:6px; padding:2.5px 9px; font-variant-numeric:tabular-nums; }
+.t.crit { background:var(--crit-soft); color:var(--crit); }
+.t.warn { background:var(--warn-soft); color:var(--warn); }
+.t.ok { background:var(--ok-soft); color:var(--ok); }
+.t.neu { background:var(--neu-soft); color:var(--ink2); }
+.cmeta { font-size:11.5px; color:var(--ink3); }
+.recs { display:flex; flex-direction:column; gap:12px; counter-reset:rec; }
+.rec { display:flex; gap:14px; background:var(--surface); border:1px solid var(--line); border-radius:10px; padding:14px 16px; }
+.rec::before { counter-increment:rec; content:counter(rec); flex:0 0 26px; height:26px; border-radius:50%;
+  background:var(--accent-soft); color:var(--accent); font-weight:750; font-size:13px;
+  display:flex; align-items:center; justify-content:center; }
+.rec b { display:block; margin-bottom:2px; }
+.rec p { margin:0; color:var(--ink2); font-size:13.5px; }
+.callout { border-left:3px solid var(--accent); background:var(--surface); border-radius:0 10px 10px 0;
+  padding:14px 18px; font-size:14px; color:var(--ink2); }
+.callout b { color:var(--ink); }
+.foot { color:var(--ink3); font-size:12px; border-top:1px solid var(--line); padding-top:14px; }
+mark { background:var(--warn-soft); color:var(--ink); border-radius:3px; padding:0 3px; }
+</style>
+<div class="wrap">
+<header>
+  <div class="eyebrow">Studd Muffyn · Meta Ads Ops</div>
+  <h1>Budget-Closing Report: tries, early kills, creatives &amp; repeat offenders</h1>
+  <div class="sub">21–24 July 2026 · SM Fragrance 01 + SM Crystals accounts · hourly campaign snapshots.
+  A <b>try</b> = one campaign active on one day. A <b>close</b> = that campaign paused intraday.
+  <b>Early</b> = closed by 09:00 IST. <b>Win</b> = final-day ROAS ≥ 1.6.
+  SKU IDs are NTN codes from campaign names. ROAS figures are intraday Meta-pixel ROAS (the only intraday signal) — Shopify full-day truth runs lower.</div>
+</header>
+
+<section class="tiles">
+  <div class="tile"><div class="v">148</div><div class="l">campaign-day tries (58 campaigns, 17 products)</div></div>
+  <div class="tile"><div class="v">108</div><div class="l">ended in a close (73% of tries)</div></div>
+  <div class="tile"><div class="v crit">51</div><div class="l">closed early — by 09:00 IST (47% of closes)</div></div>
+  <div class="tile"><div class="v ok">30</div><div class="l">tries hit ROAS ≥ 1.6 (20% success rate)</div></div>
+  <div class="tile"><div class="v crit">₹101,920</div><div class="l">sunk in early closes at ROAS &lt; 0.5</div></div>
+  <div class="tile"><div class="v warn">₹69,992</div><div class="l">of that already burnt by 6 AM (overnight)</div></div>
+</section>
+
+<section class="panel">
+  <h2>When campaigns get closed</h2>
+  <p class="sec-note">Count of closes per hour, all 4 days pooled. The 06–09h wall is the morning cull after unattended overnight spend.</p>
+  <div class="hist"><div class="hb early" title="06:00 — 9 closes">
+      <span class="hb-n">9</span><i style="height:56%"></i><b>6</b></div><div class="hb early" title="07:00 — 16 closes">
+      <span class="hb-n">16</span><i style="height:100%"></i><b>7</b></div><div class="hb early" title="08:00 — 13 closes">
+      <span class="hb-n">13</span><i style="height:81%"></i><b>8</b></div><div class="hb early" title="09:00 — 13 closes">
+      <span class="hb-n">13</span><i style="height:81%"></i><b>9</b></div><div class="hb" title="10:00 — 4 closes">
+      <span class="hb-n">4</span><i style="height:25%"></i><b>10</b></div><div class="hb" title="11:00 — 5 closes">
+      <span class="hb-n">5</span><i style="height:31%"></i><b>11</b></div><div class="hb" title="12:00 — 8 closes">
+      <span class="hb-n">8</span><i style="height:50%"></i><b>12</b></div><div class="hb" title="13:00 — 8 closes">
+      <span class="hb-n">8</span><i style="height:50%"></i><b>13</b></div><div class="hb" title="14:00 — 6 closes">
+      <span class="hb-n">6</span><i style="height:38%"></i><b>14</b></div><div class="hb" title="15:00 — 5 closes">
+      <span class="hb-n">5</span><i style="height:31%"></i><b>15</b></div><div class="hb" title="16:00 — 9 closes">
+      <span class="hb-n">9</span><i style="height:56%"></i><b>16</b></div><div class="hb" title="17:00 — 2 closes">
+      <span class="hb-n">2</span><i style="height:12%"></i><b>17</b></div><div class="hb" title="18:00 — 9 closes">
+      <span class="hb-n">9</span><i style="height:56%"></i><b>18</b></div><div class="hb" title="19:00 — 1 closes">
+      <span class="hb-n">1</span><i style="height:6%"></i><b>19</b></div></div>
+  <div class="legend"><span><i></i>early cull window (06–09h)</span><span class="dim"><i></i>rest of day</span></div>
+</section>
+
+<section>
+  <h2>Creative type — what actually gets closed vs what wins</h2>
+  <p class="sec-note">Creative type = dominant ad format inside each campaign (by spend, from classified ad names). Success = final-day ROAS ≥ 1.6.</p>
+  <div class="panel tbl-wrap"><table>
+    <thead><tr><th>Creative type</th><th>Tries</th><th>Camps</th><th>Closed (rate)</th><th>Early ≤9h</th><th>Wins ≥1.6 (rate)</th><th>Spend</th><th>Sunk</th></tr></thead>
+    <tbody><tr>
+      <td class="pname">Paras</td>
+      <td class="num">79</td>
+      <td class="num">32</td>
+      <td class="num crit">60 (76%)</td>
+      <td class="num">28</td>
+      <td class="num crit">12/79 (15%)</td>
+      <td class="num">₹393,141</td>
+      <td class="num">₹205,504</td>
+    </tr><tr>
+      <td class="pname">Motion</td>
+      <td class="num">48</td>
+      <td class="num">21</td>
+      <td class="num warn">33 (69%)</td>
+      <td class="num">15</td>
+      <td class="num warn">11/48 (23%)</td>
+      <td class="num">₹255,514</td>
+      <td class="num">₹116,583</td>
+    </tr><tr>
+      <td class="pname">Wanda</td>
+      <td class="num">8</td>
+      <td class="num">2</td>
+      <td class="num ">4 (50%)</td>
+      <td class="num">1</td>
+      <td class="num ok">5/8 (62%)</td>
+      <td class="num">₹46,978</td>
+      <td class="num">₹13,059</td>
+    </tr><tr>
+      <td class="pname">Other</td>
+      <td class="num">7</td>
+      <td class="num">4</td>
+      <td class="num crit">7 (100%)</td>
+      <td class="num">6</td>
+      <td class="num crit">0/7 (0%)</td>
+      <td class="num">₹15,154</td>
+      <td class="num">₹13,048</td>
+    </tr><tr>
+      <td class="pname">Partnership</td>
+      <td class="num">4</td>
+      <td class="num">1</td>
+      <td class="num ">2 (50%)</td>
+      <td class="num">0</td>
+      <td class="num ok">2/4 (50%)</td>
+      <td class="num">₹37,632</td>
+      <td class="num">₹13,316</td>
+    </tr><tr>
+      <td class="pname">Static</td>
+      <td class="num">2</td>
+      <td class="num">1</td>
+      <td class="num crit">2 (100%)</td>
+      <td class="num">1</td>
+      <td class="num crit">0/2 (0%)</td>
+      <td class="num">₹7,990</td>
+      <td class="num">₹7,742</td>
+    </tr></tbody>
+  </table></div>
+  <div class="callout" style="margin-top:12px"><b>The creative story in one line:</b> Paras-single creatives are the closing machine —
+  79 tries, 76% closed, only <b>15%</b> ever hit 1.6. Motion reels close less (69%) and win more (<b>23%</b>).
+  Wanda-format (2 campaigns, 8 tries) wins <b>62%</b> and Partnership 50% — both small samples but consistently the survivors.
+  "Other" (the new keychain launches) went 0-for-7 with 6 early kills.</div>
+</section>
+
+<section>
+  <h2>Per-product scorecard</h2>
+  <p class="sec-note">Sorted by number of closes. Early / Mid / Late = closed ≤09h / 10–15h / 16h+. Wins = tries ending ROAS ≥ 1.6. Sunk = spend burnt at the moment of pause.</p>
+  <div class="panel tbl-wrap"><table>
+    <thead><tr><th>Product · SKU</th><th>Tries</th><th>Camps</th><th>Closes</th><th>Early ≤9h</th><th>Mid</th><th>Late</th>
+    <th>Survived</th><th>Early share</th><th>Wins ≥1.6</th><th>Med close</th><th>ROAS@close</th><th>ROAS 4d</th><th>Spend</th><th>Sunk</th></tr></thead>
+    <tbody><tr>
+      <td class="pname">Richie Rich (chain/bracelet)<div class="sku">NTN1574, NTN1577, NTN1687, NTN1974, NTN2155</div></td>
+      <td class="num">29</td>
+      <td class="num">11</td>
+      <td class="num">21</td>
+      <td class="num emph">11</td>
+      <td class="num">9</td>
+      <td class="num">1</td>
+      <td class="num">8</td>
+      <td class="bar-cell"><div class="bar"><i style="width:52%"></i></div><span>52%</span></td>
+      <td class="num crit">2/29 (7%)</td>
+      <td class="num">09:00</td>
+      <td class="num crit">0.32</td>
+      <td class="num warn">0.94</td>
+      <td class="num">₹147,163</td>
+      <td class="num">₹70,078</td>
+    </tr><tr>
+      <td class="pname">Pyrite<span class="chip warn">high close rate</span><div class="sku">NTN1523</div></td>
+      <td class="num">14</td>
+      <td class="num">7</td>
+      <td class="num">12</td>
+      <td class="num emph">5</td>
+      <td class="num">5</td>
+      <td class="num">2</td>
+      <td class="num">2</td>
+      <td class="bar-cell"><div class="bar"><i style="width:42%"></i></div><span>42%</span></td>
+      <td class="num crit">2/14 (14%)</td>
+      <td class="num">12:00</td>
+      <td class="num crit">0.43</td>
+      <td class="num warn">1.17</td>
+      <td class="num">₹54,989</td>
+      <td class="num">₹35,539</td>
+    </tr><tr>
+      <td class="pname">Richie Rich Combo (Pyrite bracelet + Black Obsidian Bracelet)<span class="chip warn">high close rate</span><div class="sku">NTN222</div></td>
+      <td class="num">14</td>
+      <td class="num">4</td>
+      <td class="num">11</td>
+      <td class="num emph">1</td>
+      <td class="num">4</td>
+      <td class="num">6</td>
+      <td class="num">3</td>
+      <td class="bar-cell"><div class="bar"><i style="width:9%"></i></div><span>9%</span></td>
+      <td class="num warn">5/14 (36%)</td>
+      <td class="num">16:00</td>
+      <td class="num warn">0.9</td>
+      <td class="num ok">1.37</td>
+      <td class="num">₹73,341</td>
+      <td class="num">₹46,360</td>
+    </tr><tr>
+      <td class="pname">7 Chakra<span class="chip warn">high close rate</span><div class="sku">NTN1679, NTN1682</div></td>
+      <td class="num">14</td>
+      <td class="num">6</td>
+      <td class="num">11</td>
+      <td class="num emph">4</td>
+      <td class="num">4</td>
+      <td class="num">3</td>
+      <td class="num">3</td>
+      <td class="bar-cell"><div class="bar"><i style="width:36%"></i></div><span>36%</span></td>
+      <td class="num crit">1/14 (7%)</td>
+      <td class="num">13:00</td>
+      <td class="num warn">0.8</td>
+      <td class="num warn">1.16</td>
+      <td class="num">₹75,674</td>
+      <td class="num">₹48,571</td>
+    </tr><tr>
+      <td class="pname">Chains (generic)<div class="sku">NTN1686</div></td>
+      <td class="num">13</td>
+      <td class="num">4</td>
+      <td class="num">7</td>
+      <td class="num emph">1</td>
+      <td class="num">2</td>
+      <td class="num">4</td>
+      <td class="num">6</td>
+      <td class="bar-cell"><div class="bar"><i style="width:14%"></i></div><span>14%</span></td>
+      <td class="num warn">4/13 (31%)</td>
+      <td class="num">16:00</td>
+      <td class="num warn">0.8</td>
+      <td class="num ok">1.56</td>
+      <td class="num">₹96,080</td>
+      <td class="num">₹37,333</td>
+    </tr><tr>
+      <td class="pname">Unstoppable Bracelet<span class="chip warn">high close rate</span><div class="sku">NTN1678, NTN950</div></td>
+      <td class="num">9</td>
+      <td class="num">5</td>
+      <td class="num">7</td>
+      <td class="num emph">5</td>
+      <td class="num">1</td>
+      <td class="num">1</td>
+      <td class="num">2</td>
+      <td class="bar-cell"><div class="bar"><i style="width:71%"></i></div><span>71%</span></td>
+      <td class="num warn">3/9 (33%)</td>
+      <td class="num">07:00</td>
+      <td class="num crit">0.4</td>
+      <td class="num warn">1.11</td>
+      <td class="num">₹39,400</td>
+      <td class="num">₹19,194</td>
+    </tr><tr>
+      <td class="pname">Gold Chips<span class="chip warn">high close rate</span><div class="sku">NTN1716, NTN1724</div></td>
+      <td class="num">8</td>
+      <td class="num">2</td>
+      <td class="num">7</td>
+      <td class="num emph">3</td>
+      <td class="num">4</td>
+      <td class="num">0</td>
+      <td class="num">1</td>
+      <td class="bar-cell"><div class="bar"><i style="width:43%"></i></div><span>43%</span></td>
+      <td class="num warn">2/8 (25%)</td>
+      <td class="num">11:00</td>
+      <td class="num crit">0.45</td>
+      <td class="num warn">1.12</td>
+      <td class="num">₹34,051</td>
+      <td class="num">₹21,564</td>
+    </tr><tr>
+      <td class="pname">Keychains<span class="chip crit">early-only</span><span class="chip crit">never survived</span><div class="sku">NTN1990</div></td>
+      <td class="num">6</td>
+      <td class="num">3</td>
+      <td class="num">6</td>
+      <td class="num emph">6</td>
+      <td class="num">0</td>
+      <td class="num">0</td>
+      <td class="num">0</td>
+      <td class="bar-cell"><div class="bar"><i style="width:100%"></i></div><span>100%</span></td>
+      <td class="num crit">0/6 (0%)</td>
+      <td class="num">07:00</td>
+      <td class="num crit">0.0</td>
+      <td class="num crit">0.13</td>
+      <td class="num">₹13,128</td>
+      <td class="num">₹11,226</td>
+    </tr><tr>
+      <td class="pname">Catalog Chains<div class="sku">—</div></td>
+      <td class="num">9</td>
+      <td class="num">3</td>
+      <td class="num">5</td>
+      <td class="num emph">1</td>
+      <td class="num">3</td>
+      <td class="num">1</td>
+      <td class="num">4</td>
+      <td class="bar-cell"><div class="bar"><i style="width:20%"></i></div><span>20%</span></td>
+      <td class="num ok">5/9 (56%)</td>
+      <td class="num">13:00</td>
+      <td class="num crit">0.48</td>
+      <td class="num ok">2.02</td>
+      <td class="num">₹49,003</td>
+      <td class="num">₹14,881</td>
+    </tr><tr>
+      <td class="pname">Geode<span class="chip crit">early-only</span><div class="sku">—</div></td>
+      <td class="num">8</td>
+      <td class="num">3</td>
+      <td class="num">5</td>
+      <td class="num emph">5</td>
+      <td class="num">0</td>
+      <td class="num">0</td>
+      <td class="num">3</td>
+      <td class="bar-cell"><div class="bar"><i style="width:100%"></i></div><span>100%</span></td>
+      <td class="num crit">0/8 (0%)</td>
+      <td class="num">07:00</td>
+      <td class="num crit">0.1</td>
+      <td class="num warn">1.08</td>
+      <td class="num">₹33,659</td>
+      <td class="num">₹10,848</td>
+    </tr><tr>
+      <td class="pname">Velore Chain<div class="sku">NTN1290</div></td>
+      <td class="num">6</td>
+      <td class="num">4</td>
+      <td class="num">4</td>
+      <td class="num emph">3</td>
+      <td class="num">1</td>
+      <td class="num">0</td>
+      <td class="num">2</td>
+      <td class="bar-cell"><div class="bar"><i style="width:75%"></i></div><span>75%</span></td>
+      <td class="num crit">1/6 (17%)</td>
+      <td class="num">09:00</td>
+      <td class="num crit">0.45</td>
+      <td class="num warn">1.08</td>
+      <td class="num">₹34,810</td>
+      <td class="num">₹13,446</td>
+    </tr><tr>
+      <td class="pname">7 Chakra Bracelet<span class="chip warn">high close rate</span><div class="sku">NTN229</div></td>
+      <td class="num">4</td>
+      <td class="num">2</td>
+      <td class="num">3</td>
+      <td class="num emph">2</td>
+      <td class="num">0</td>
+      <td class="num">1</td>
+      <td class="num">1</td>
+      <td class="bar-cell"><div class="bar"><i style="width:67%"></i></div><span>67%</span></td>
+      <td class="num warn">1/4 (25%)</td>
+      <td class="num">09:00</td>
+      <td class="num crit">0.26</td>
+      <td class="num warn">1.24</td>
+      <td class="num">₹15,451</td>
+      <td class="num">₹6,371</td>
+    </tr><tr>
+      <td class="pname">NTN2151<span class="chip crit">early-only</span><span class="chip crit">never survived</span><div class="sku">NTN2151</div></td>
+      <td class="num">3</td>
+      <td class="num">3</td>
+      <td class="num">3</td>
+      <td class="num emph">3</td>
+      <td class="num">0</td>
+      <td class="num">0</td>
+      <td class="num">0</td>
+      <td class="bar-cell"><div class="bar"><i style="width:100%"></i></div><span>100%</span></td>
+      <td class="num crit">0/3 (0%)</td>
+      <td class="num">07:00</td>
+      <td class="num crit">0.0</td>
+      <td class="num crit">0.09</td>
+      <td class="num">₹7,839</td>
+      <td class="num">₹7,135</td>
+    </tr><tr>
+      <td class="pname">7 Horses Vastu Shakti Selenite Plate<div class="sku">NTN1217</div></td>
+      <td class="num">4</td>
+      <td class="num">1</td>
+      <td class="num">2</td>
+      <td class="num emph">0</td>
+      <td class="num">2</td>
+      <td class="num">0</td>
+      <td class="num">2</td>
+      <td class="bar-cell"><div class="bar"><i style="width:0%"></i></div><span>0%</span></td>
+      <td class="num ok">2/4 (50%)</td>
+      <td class="num">14:00</td>
+      <td class="num warn">0.53</td>
+      <td class="num ok">1.56</td>
+      <td class="num">₹23,064</td>
+      <td class="num">₹7,724</td>
+    </tr><tr>
+      <td class="pname">Selenite Crystal Recharging Plate<span class="chip warn">high close rate</span><div class="sku">NTN212</div></td>
+      <td class="num">2</td>
+      <td class="num">1</td>
+      <td class="num">2</td>
+      <td class="num emph">0</td>
+      <td class="num">1</td>
+      <td class="num">1</td>
+      <td class="num">0</td>
+      <td class="bar-cell"><div class="bar"><i style="width:0%"></i></div><span>0%</span></td>
+      <td class="num crit">0/2 (0%)</td>
+      <td class="num">18:00</td>
+      <td class="num warn">0.97</td>
+      <td class="num ok">1.34</td>
+      <td class="num">₹9,957</td>
+      <td class="num">₹9,625</td>
+    </tr><tr>
+      <td class="pname">299 Collection<div class="sku">—</div></td>
+      <td class="num">4</td>
+      <td class="num">1</td>
+      <td class="num">1</td>
+      <td class="num emph">0</td>
+      <td class="num">0</td>
+      <td class="num">1</td>
+      <td class="num">3</td>
+      <td class="bar-cell"><div class="bar"><i style="width:0%"></i></div><span>0%</span></td>
+      <td class="num ok">2/4 (50%)</td>
+      <td class="num">18:00</td>
+      <td class="num ok">1.28</td>
+      <td class="num ok">1.87</td>
+      <td class="num">₹46,944</td>
+      <td class="num">₹7,686</td>
+    </tr><tr>
+      <td class="pname">NTN1684<span class="chip crit">early-only</span><span class="chip warn">high close rate</span><div class="sku">NTN1684</div></td>
+      <td class="num">1</td>
+      <td class="num">1</td>
+      <td class="num">1</td>
+      <td class="num emph">1</td>
+      <td class="num">0</td>
+      <td class="num">0</td>
+      <td class="num">0</td>
+      <td class="bar-cell"><div class="bar"><i style="width:100%"></i></div><span>100%</span></td>
+      <td class="num crit">0/1 (0%)</td>
+      <td class="num">07:00</td>
+      <td class="num crit">0.0</td>
+      <td class="num crit">0.38</td>
+      <td class="num">₹1,857</td>
+      <td class="num">₹1,669</td>
+    </tr></tbody>
+  </table></div>
+</section>
+
+<section>
+  <h2>Product × creative type — which format fails for which product</h2>
+  <p class="sec-note">Products with 3+ tries. Read this to decide what creative to relaunch with, not whether to relaunch.</p>
+  <div class="panel tbl-wrap"><table>
+    <thead><tr><th>Product · SKU</th><th class="lft">Creative</th><th>Tries</th><th>Closed (rate)</th><th>Early</th><th>Wins ≥1.6 (rate)</th><th>Spend</th><th>Sunk</th></tr></thead>
+    <tbody><tr><td class="pname" rowspan="2">Richie Rich (chain/bracelet)<div class="sku">NTN1574, NTN1577, NTN1687, NTN1974, NTN2155</div></td>
+          <td>Paras</td>
+          <td class="num">16</td>
+          <td class="num crit">16 (100%)</td>
+          <td class="num">8</td>
+          <td class="num crit">0/16 (0%)</td>
+          <td class="num">₹59,310</td>
+          <td class="num">₹50,654</td>
+        </tr><tr>
+          <td>Motion</td>
+          <td class="num">13</td>
+          <td class="num ">5 (38%)</td>
+          <td class="num">3</td>
+          <td class="num crit">2/13 (15%)</td>
+          <td class="num">₹87,853</td>
+          <td class="num">₹19,424</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="2">Pyrite<div class="sku">NTN1523</div></td>
+          <td>Paras</td>
+          <td class="num">8</td>
+          <td class="num crit">6 (75%)</td>
+          <td class="num">2</td>
+          <td class="num warn">2/8 (25%)</td>
+          <td class="num">₹33,315</td>
+          <td class="num">₹15,544</td>
+        </tr><tr>
+          <td>Motion</td>
+          <td class="num">6</td>
+          <td class="num crit">6 (100%)</td>
+          <td class="num">3</td>
+          <td class="num crit">0/6 (0%)</td>
+          <td class="num">₹21,674</td>
+          <td class="num">₹19,995</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="2">Richie Rich Combo (Pyrite bracelet + Black Obsidian Bracelet)<div class="sku">NTN222</div></td>
+          <td>Motion</td>
+          <td class="num">8</td>
+          <td class="num crit">7 (88%)</td>
+          <td class="num">1</td>
+          <td class="num warn">3/8 (38%)</td>
+          <td class="num">₹37,426</td>
+          <td class="num">₹25,730</td>
+        </tr><tr>
+          <td>Paras</td>
+          <td class="num">6</td>
+          <td class="num warn">4 (67%)</td>
+          <td class="num">0</td>
+          <td class="num warn">2/6 (33%)</td>
+          <td class="num">₹35,914</td>
+          <td class="num">₹20,631</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="2">7 Chakra<div class="sku">NTN1679, NTN1682</div></td>
+          <td>Paras</td>
+          <td class="num">12</td>
+          <td class="num crit">9 (75%)</td>
+          <td class="num">4</td>
+          <td class="num crit">1/12 (8%)</td>
+          <td class="num">₹63,177</td>
+          <td class="num">₹36,633</td>
+        </tr><tr>
+          <td>Motion</td>
+          <td class="num">2</td>
+          <td class="num crit">2 (100%)</td>
+          <td class="num">0</td>
+          <td class="num crit">0/2 (0%)</td>
+          <td class="num">₹12,496</td>
+          <td class="num">₹11,938</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="3">Chains (generic)<div class="sku">NTN1686</div></td>
+          <td>Paras</td>
+          <td class="num">7</td>
+          <td class="num ">3 (43%)</td>
+          <td class="num">0</td>
+          <td class="num warn">2/7 (29%)</td>
+          <td class="num">₹50,458</td>
+          <td class="num">₹16,275</td>
+        </tr><tr>
+          <td>Partnership</td>
+          <td class="num">4</td>
+          <td class="num ">2 (50%)</td>
+          <td class="num">0</td>
+          <td class="num ok">2/4 (50%)</td>
+          <td class="num">₹37,632</td>
+          <td class="num">₹13,316</td>
+        </tr><tr>
+          <td>Static</td>
+          <td class="num">2</td>
+          <td class="num crit">2 (100%)</td>
+          <td class="num">1</td>
+          <td class="num crit">0/2 (0%)</td>
+          <td class="num">₹7,990</td>
+          <td class="num">₹7,742</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="2">Unstoppable Bracelet<div class="sku">NTN1678, NTN950</div></td>
+          <td>Motion</td>
+          <td class="num">6</td>
+          <td class="num warn">4 (67%)</td>
+          <td class="num">2</td>
+          <td class="num ok">3/6 (50%)</td>
+          <td class="num">₹31,336</td>
+          <td class="num">₹12,237</td>
+        </tr><tr>
+          <td>Paras</td>
+          <td class="num">3</td>
+          <td class="num crit">3 (100%)</td>
+          <td class="num">3</td>
+          <td class="num crit">0/3 (0%)</td>
+          <td class="num">₹8,064</td>
+          <td class="num">₹6,957</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="1">Gold Chips<div class="sku">NTN1716, NTN1724</div></td>
+          <td>Paras</td>
+          <td class="num">8</td>
+          <td class="num crit">7 (88%)</td>
+          <td class="num">3</td>
+          <td class="num warn">2/8 (25%)</td>
+          <td class="num">₹34,051</td>
+          <td class="num">₹21,564</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="1">Keychains<div class="sku">NTN1990</div></td>
+          <td>Other</td>
+          <td class="num">6</td>
+          <td class="num crit">6 (100%)</td>
+          <td class="num">6</td>
+          <td class="num crit">0/6 (0%)</td>
+          <td class="num">₹13,128</td>
+          <td class="num">₹11,226</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="2">Catalog Chains<div class="sku">—</div></td>
+          <td>Wanda</td>
+          <td class="num">8</td>
+          <td class="num ">4 (50%)</td>
+          <td class="num">1</td>
+          <td class="num ok">5/8 (62%)</td>
+          <td class="num">₹46,978</td>
+          <td class="num">₹13,059</td>
+        </tr><tr>
+          <td>Other</td>
+          <td class="num">1</td>
+          <td class="num crit">1 (100%)</td>
+          <td class="num">0</td>
+          <td class="num crit">0/1 (0%)</td>
+          <td class="num">₹2,026</td>
+          <td class="num">₹1,821</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="1">Geode<div class="sku">—</div></td>
+          <td>Paras</td>
+          <td class="num">8</td>
+          <td class="num warn">5 (62%)</td>
+          <td class="num">5</td>
+          <td class="num crit">0/8 (0%)</td>
+          <td class="num">₹33,659</td>
+          <td class="num">₹10,848</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="2">Velore Chain<div class="sku">NTN1290</div></td>
+          <td>Motion</td>
+          <td class="num">5</td>
+          <td class="num warn">3 (60%)</td>
+          <td class="num">2</td>
+          <td class="num warn">1/5 (20%)</td>
+          <td class="num">₹31,967</td>
+          <td class="num">₹10,731</td>
+        </tr><tr>
+          <td>Paras</td>
+          <td class="num">1</td>
+          <td class="num crit">1 (100%)</td>
+          <td class="num">1</td>
+          <td class="num crit">0/1 (0%)</td>
+          <td class="num">₹2,843</td>
+          <td class="num">₹2,715</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="1">7 Chakra Bracelet<div class="sku">NTN229</div></td>
+          <td>Paras</td>
+          <td class="num">4</td>
+          <td class="num crit">3 (75%)</td>
+          <td class="num">2</td>
+          <td class="num warn">1/4 (25%)</td>
+          <td class="num">₹15,451</td>
+          <td class="num">₹6,371</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="1">NTN2151<div class="sku">NTN2151</div></td>
+          <td>Motion</td>
+          <td class="num">3</td>
+          <td class="num crit">3 (100%)</td>
+          <td class="num">3</td>
+          <td class="num crit">0/3 (0%)</td>
+          <td class="num">₹7,839</td>
+          <td class="num">₹7,135</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="1">7 Horses Vastu Shakti Selenite Plate<div class="sku">NTN1217</div></td>
+          <td>Motion</td>
+          <td class="num">4</td>
+          <td class="num ">2 (50%)</td>
+          <td class="num">0</td>
+          <td class="num ok">2/4 (50%)</td>
+          <td class="num">₹23,064</td>
+          <td class="num">₹7,724</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr><tr><td class="pname" rowspan="1">299 Collection<div class="sku">—</div></td>
+          <td>Paras</td>
+          <td class="num">4</td>
+          <td class="num ">1 (25%)</td>
+          <td class="num">0</td>
+          <td class="num ok">2/4 (50%)</td>
+          <td class="num">₹46,944</td>
+          <td class="num">₹7,686</td>
+        </tr><tr class="gap"><td colspan="8"></td></tr></tbody>
+  </table></div>
+</section>
+
+<section class="panel">
+  <h2>Closed very early — and only early</h2>
+  <p class="sec-note">Every single close for these products happened by 09:00 IST. These never earn their overnight spend.</p>
+  <ul style="margin:0; padding-left:20px; color:var(--ink2)">
+    <li><b style='color:var(--ink)'>Keychains</b> <span class='sku-inline'>NTN1990</span> — 6/6 closes early, 6 tries, 0 wins, avg ROAS at close 0.0, sunk ₹11,226</li><li><b style='color:var(--ink)'>Geode</b> <span class='sku-inline'></span> — 5/5 closes early, 8 tries, 0 wins, avg ROAS at close 0.1, sunk ₹10,848</li><li><b style='color:var(--ink)'>NTN2151</b> <span class='sku-inline'>NTN2151</span> — 3/3 closes early, 3 tries, 0 wins, avg ROAS at close 0.0, sunk ₹7,135</li><li><b style='color:var(--ink)'>NTN1684</b> <span class='sku-inline'>NTN1684</span> — 1/1 closes early, 1 tries, 0 wins, avg ROAS at close 0.0, sunk ₹1,669</li>
+  </ul>
+  <p class="sec-note" style="margin-top:12px">Never survived a full day (3+ tries): <b>Keychains</b> (6 tries), <b>NTN2151</b> (3 tries).</p>
+</section>
+
+<section>
+  <h2>Campaign-level detail — repeat offenders</h2>
+  <p class="sec-note">Products with 4+ closes. Each row is one campaign; each pill is one day's outcome (day: close-hour · pixel-ROAS at close, ☀ = early close; green pill = ran the full day, with final ROAS).</p>
+  <div style="display:flex; flex-direction:column; gap:10px"><details class="card" open>
+      <summary><b>Richie Rich (chain/bracelet)</b> <span class="sku-inline">NTN1574, NTN1577, NTN1687, NTN1974, NTN2155</span>
+        <span class="sum-meta">29 tries · 21 closes (11 early) · 2 wins ≥1.6 · sunk ₹70,078</span>
+      </summary><div class="camp">
+          <div class="cname">Richie_rich_bracelet_499_NTN1577_ex30dp_brand_paras_single_170726_v.st <span class="chip neu">Paras</span><span class="chip neu">NTN1577</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 10:00 at ROAS 0.39, day ended 0.52">21: 10h · R0.39</span><span class="t warn" title="22 Jul — closed 15:00 at ROAS 0.81, day ended 0.99">22: 15h · R0.81</span><span class="t warn" title="23 Jul — closed 18:00 at ROAS 0.99, day ended 1.25">23: 18h · R0.99</span></div>
+          <div class="cmeta">3 tries · 3 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹15,344</div>
+        </div><div class="camp">
+          <div class="cname">ntn_wanda_sales_jewellery_richie_rice_chain_549_reel_clp_170726_retarg <span class="chip neu">Motion</span></div>
+          <div class="ctl"><span class="t warn" title="21 Jul — closed 09:00 at ROAS 0.64, day ended 1.02">21: 09h · R0.64☀</span><span class="t warn" title="22 Jul — closed 15:00 at ROAS 0.68, day ended 0.74">22: 15h · R0.68</span><span class="t crit" title="23 Jul — closed 08:00 at ROAS 0, day ended 0">23: 08h · R0☀</span></div>
+          <div class="cmeta">3 tries · 3 closed · 2 early · 0 hit ROAS≥1.6 · sunk ₹11,539</div>
+        </div><div class="camp">
+          <div class="cname">rice_richie_rich_bracelet_499_NTN1577_EXC_30_DP_brand_paras_single_110 <span class="chip neu">Paras</span><span class="chip neu">NTN1577</span></div>
+          <div class="ctl"><span class="t crit" title="22 Jul — closed 08:00 at ROAS 0.38, day ended 0.37">22: 08h · R0.38☀</span><span class="t crit" title="23 Jul — closed 08:00 at ROAS 0, day ended 0.2">23: 08h · R0☀</span></div>
+          <div class="cmeta">2 tries · 2 closed · 2 early · 0 hit ROAS≥1.6 · sunk ₹5,039</div>
+        </div><div class="camp">
+          <div class="cname">ntn_adv_wanda_loose_richie_rich_rice_399_bracelet_NTN1687_reel_120726_ <span class="chip neu">Paras</span><span class="chip neu">NTN1687</span></div>
+          <div class="ctl"><span class="t warn" title="23 Jul — closed 11:00 at ROAS 0.61, day ended 0.53">23: 11h · R0.61</span><span class="t crit" title="24 Jul — closed 06:00 at ROAS 0, day ended 0">24: 06h · R0☀</span></div>
+          <div class="cmeta">2 tries · 2 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹6,899</div>
+        </div><div class="camp">
+          <div class="cname">Richie_rich_bracelet_499_NTN1577_brand_paras_single_180726_high_potent <span class="chip neu">Paras</span><span class="chip neu">NTN1577</span></div>
+          <div class="ctl"><span class="t crit" title="22 Jul — closed 12:00 at ROAS 0.44, day ended 0.54">22: 12h · R0.44</span><span class="t crit" title="23 Jul — closed 12:00 at ROAS 0.39, day ended 0.39">23: 12h · R0.39</span></div>
+          <div class="cmeta">2 tries · 2 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹8,817</div>
+        </div><div class="camp">
+          <div class="cname">ntn_adv_wanda_sales_richie_rich_rice_399_bracelet_NTN1687_reel_190726_ <span class="chip neu">Paras</span><span class="chip neu">NTN1687</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 07:00 at ROAS 0, day ended 0">21: 07h · R0☀</span><span class="t crit" title="22 Jul — closed 07:00 at ROAS 0, day ended 0">22: 07h · R0☀</span></div>
+          <div class="cmeta">2 tries · 2 closed · 2 early · 0 hit ROAS≥1.6 · sunk ₹3,715</div>
+        </div><div class="camp">
+          <div class="cname">Richie_rich_399 _NTN1687_ex30dp_brand_motion_100726_strong <span class="chip neu">Paras</span><span class="chip neu">NTN1687</span></div>
+          <div class="ctl"><span class="t crit" title="22 Jul — closed 07:00 at ROAS 0, day ended 0">22: 07h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹1,745</div>
+        </div><div class="camp">
+          <div class="cname">Richie_rich_bracelet_499_NTN1577_rtg_brand_paras_single_180726_high_po <span class="chip neu">Paras</span><span class="chip neu">NTN1577</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 10:00 at ROAS 0, day ended 0">21: 10h · R0</span></div>
+          <div class="cmeta">1 tries · 1 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹1,415</div>
+        </div><div class="camp">
+          <div class="cname">Richie_rich_combo_699_NTN2155_brand_paras_single_180726_high_potential <span class="chip neu">Paras</span><span class="chip neu">NTN2155</span></div>
+          <div class="ctl"><span class="t crit" title="24 Jul — closed 10:00 at ROAS 0.21, day ended 0.32">24: 10h · R0.21</span></div>
+          <div class="cmeta">1 tries · 1 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹2,915</div>
+        </div><div class="camp">
+          <div class="cname">Richie_rich_combo_699_NTN2155_ex30dp_brand_paras_single_170726_v.stron <span class="chip neu">Paras</span><span class="chip neu">NTN2155</span></div>
+          <div class="ctl"><span class="t crit" title="24 Jul — closed 08:00 at ROAS 0, day ended 0.81">24: 08h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,056</div>
+        </div><div class="camp">
+          <div class="cname">ntn1574_wanda_sales_jewellery_richie_rice_chain_549_reel_clp_170726_re <span class="chip neu">Motion</span><span class="chip neu">NTN1574</span></div>
+          <div class="ctl"><span class="t warn" title="24 Jul — closed 12:00 at ROAS 0.94, day ended 1.05">24: 12h · R0.94</span></div>
+          <div class="cmeta">1 tries · 1 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹5,974</div>
+        </div><div class="camp">
+          <div class="cname">ntn1974_anklet_richie_rich_549_220726_mining <span class="chip neu">Motion</span><span class="chip neu">NTN1974</span></div>
+          <div class="ctl"><span class="t crit" title="22 Jul — closed 07:00 at ROAS 0, day ended 0.25">22: 07h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹1,911</div>
+        </div><div class="camp">
+          <div class="cname">Richie_rich_combo_699_NTN2155_rtg_brand_paras_single_170726_v.strong – <span class="chip neu">Paras</span><span class="chip neu">NTN2155</span></div>
+          <div class="ctl"><span class="t crit" title="24 Jul — closed 09:00 at ROAS 0.17, day ended 0.51">24: 09h · R0.17☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,708</div>
+        </div><div class="camp">
+          <div class="cname">ntn_wanda_sales_30dp_jewellery_richie_rice_chain_reel_clp_090726_stron <span class="chip neu">Motion</span></div>
+          <div class="ctl"><span class="t neu" title="21 Jul — ran full day, final ROAS 1.06">21: full day · R1.06</span><span class="t neu" title="22 Jul — ran full day, final ROAS 1.09">22: full day · R1.09</span><span class="t neu" title="23 Jul — ran full day, final ROAS 1.16">23: full day · R1.16</span><span class="t neu" title="24 Jul — ran full day, final ROAS 1.31">24: full day · R1.31</span></div>
+          <div class="cmeta">4 tries · 0 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹0</div>
+        </div><div class="camp">
+          <div class="cname">richierich_braclet_399_combo_NTN1687_ex30dp_brand_paras_single_110726_ <span class="chip neu">Motion</span><span class="chip neu">NTN1687</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — ran full day, final ROAS 1.62">21: full day · R1.62</span><span class="t ok" title="22 Jul — ran full day, final ROAS 2.07">22: full day · R2.07</span><span class="t neu" title="23 Jul — ran full day, final ROAS 1.29">23: full day · R1.29</span><span class="t neu" title="24 Jul — ran full day, final ROAS 1.34">24: full day · R1.34</span></div>
+          <div class="cmeta">4 tries · 0 closed · 0 early · 2 hit ROAS≥1.6 · sunk ₹0</div>
+        </div></details><details class="card" open>
+      <summary><b>Pyrite</b> <span class="sku-inline">NTN1523</span>
+        <span class="sum-meta">14 tries · 12 closes (5 early) · 2 wins ≥1.6 · sunk ₹35,539</span>
+      </summary><div class="camp">
+          <div class="cname">ntn1523_adv_wanda_rtg_crystal_pyrite_keyring&amp;agate_sales_reel_clp_2206 <span class="chip neu">Paras</span><span class="chip neu">NTN1523</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 13:00 at ROAS 0.38, day ended 0.37">21: 13h · R0.38</span><span class="t crit" title="22 Jul — closed 12:00 at ROAS 0.36, day ended 0.35">22: 12h · R0.36</span><span class="t crit" title="24 Jul — closed 06:00 at ROAS 0, day ended 0">24: 06h · R0☀</span></div>
+          <div class="cmeta">3 tries · 3 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹3,571</div>
+        </div><div class="camp">
+          <div class="cname">ntn_adv_web_conv_sales_pyrite_locket_reel_210726 <span class="chip neu">Motion</span></div>
+          <div class="ctl"><span class="t warn" title="21 Jul — closed 12:00 at ROAS 0.78, day ended 0.7">21: 12h · R0.78</span><span class="t crit" title="21 Jul — closed 09:00 at ROAS 0, day ended 0.47">21: 09h · R0☀</span><span class="t ok" title="22 Jul — closed 16:00 at ROAS 1.14, day ended 1.06">22: 16h · R1.14</span></div>
+          <div class="cmeta">3 tries · 3 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹11,912</div>
+        </div><div class="camp">
+          <div class="cname">ntn1523_adv_wanda_sales_crystal_pyrite_keyring&amp;agate_sales_reel_clp_22 <span class="chip neu">Paras</span><span class="chip neu">NTN1523</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — ran full day, final ROAS 2.5">21: full day · R2.5</span><span class="t ok" title="22 Jul — closed 18:00 at ROAS 1.07, day ended 1.21">22: 18h · R1.07</span><span class="t ok" title="23 Jul — ran full day, final ROAS 1.98">23: full day · R1.98</span><span class="t warn" title="24 Jul — closed 15:00 at ROAS 0.72, day ended 0.7">24: 15h · R0.72</span></div>
+          <div class="cmeta">4 tries · 2 closed · 0 early · 2 hit ROAS≥1.6 · sunk ₹9,100</div>
+        </div><div class="camp">
+          <div class="cname">ntn_adv_web_loose_conv_pyrite_ring_reel_210726 <span class="chip neu">Motion</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 09:00 at ROAS 0, day ended 0.45">21: 09h · R0☀</span><span class="t warn" title="22 Jul — closed 12:00 at ROAS 0.57, day ended 0.56">22: 12h · R0.57</span></div>
+          <div class="cmeta">2 tries · 2 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹5,653</div>
+        </div><div class="camp">
+          <div class="cname">ntn_adv_wanda_sales_crystal_pyrite_keyring&amp;agate_reel_020726 – Copy 2 <span class="chip neu">Paras</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 08:00 at ROAS 0.19, day ended 0.18">21: 08h · R0.19☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,874</div>
+        </div><div class="camp">
+          <div class="cname">ntn_adv_web_conv_pyrite_ring_reel_210726 <span class="chip neu">Motion</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 09:00 at ROAS 0, day ended 0">21: 09h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,430</div>
+        </div></details><details class="card" open>
+      <summary><b>Richie Rich Combo (Pyrite bracelet + Black Obsidian Bracelet)</b> <span class="sku-inline">NTN222</span>
+        <span class="sum-meta">14 tries · 11 closes (1 early) · 5 wins ≥1.6 · sunk ₹46,360</span>
+      </summary><div class="camp">
+          <div class="cname">ntn222_wanda_conv_sales_crystal_richie_rich_combo_999_reel_clp_180726_ <span class="chip neu">Motion</span><span class="chip neu">NTN222</span></div>
+          <div class="ctl"><span class="t warn" title="21 Jul — closed 16:00 at ROAS 0.92, day ended 1.68">21: 16h · R0.92</span><span class="t crit" title="22 Jul — closed 13:00 at ROAS 0.27, day ended 1.09">22: 13h · R0.27</span><span class="t crit" title="23 Jul — closed 09:00 at ROAS 0.34, day ended 0.33">23: 09h · R0.34☀</span><span class="t ok" title="24 Jul — closed 12:00 at ROAS 1.08, day ended 1.21">24: 12h · R1.08</span></div>
+          <div class="cmeta">4 tries · 4 closed · 1 early · 1 hit ROAS≥1.6 · sunk ₹12,955</div>
+        </div><div class="camp">
+          <div class="cname">ntn222_wanda_conv_sales_crystal_richie_rich_combo_999_reel_clp_180726_ <span class="chip neu">Motion</span><span class="chip neu">NTN222</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — ran full day, final ROAS 2.0">21: full day · R2.0</span><span class="t ok" title="22 Jul — closed 18:00 at ROAS 1.09, day ended 1.83">22: 18h · R1.09</span><span class="t warn" title="23 Jul — closed 16:00 at ROAS 0.96, day ended 0.93">23: 16h · R0.96</span><span class="t ok" title="24 Jul — closed 16:00 at ROAS 1.31, day ended 1.18">24: 16h · R1.31</span></div>
+          <div class="cmeta">4 tries · 3 closed · 0 early · 2 hit ROAS≥1.6 · sunk ₹12,774</div>
+        </div><div class="camp">
+          <div class="cname">Richie Rich Combo _NTN222_EXC_30_DP_brand_paras_single_280626_strong <span class="chip neu">Paras</span><span class="chip neu">NTN222</span></div>
+          <div class="ctl"><span class="t warn" title="21 Jul — closed 11:00 at ROAS 0.74, day ended 0.98">21: 11h · R0.74</span><span class="t ok" title="22 Jul — closed 18:00 at ROAS 1.34, day ended 1.73">22: 18h · R1.34</span><span class="t neu" title="23 Jul — ran full day, final ROAS 1.35">23: full day · R1.35</span><span class="t ok" title="24 Jul — ran full day, final ROAS 1.66">24: full day · R1.66</span></div>
+          <div class="cmeta">4 tries · 2 closed · 0 early · 2 hit ROAS≥1.6 · sunk ₹11,179</div>
+        </div><div class="camp">
+          <div class="cname">Richie Rich Combo _NTN222_exc180dp_brand_paras_single_050726_Strong <span class="chip neu">Paras</span><span class="chip neu">NTN222</span></div>
+          <div class="ctl"><span class="t warn" title="21 Jul — closed 13:00 at ROAS 0.89, day ended 1.15">21: 13h · R0.89</span><span class="t warn" title="22 Jul — closed 16:00 at ROAS 0.93, day ended 0.92">22: 16h · R0.93</span></div>
+          <div class="cmeta">2 tries · 2 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹9,452</div>
+        </div></details><details class="card" open>
+      <summary><b>7 Chakra</b> <span class="sku-inline">NTN1679, NTN1682</span>
+        <span class="sum-meta">14 tries · 11 closes (4 early) · 1 wins ≥1.6 · sunk ₹48,571</span>
+      </summary><div class="camp">
+          <div class="cname">ntn1679_sales_7chakra_bracelet_499_loose_brand_paras_170726_v.strong – <span class="chip neu">Paras</span><span class="chip neu">NTN1679</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — closed 13:00 at ROAS 1.69, day ended 1.57">21: 13h · R1.69</span><span class="t ok" title="22 Jul — closed 16:00 at ROAS 1.17, day ended 1.14">22: 16h · R1.17</span><span class="t ok" title="23 Jul — closed 14:00 at ROAS 1.25, day ended 1.31">23: 14h · R1.25</span></div>
+          <div class="cmeta">3 tries · 3 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹13,525</div>
+        </div><div class="camp">
+          <div class="cname">NTN1682_sales_7chakra_chain_549_ex180dp_brand_paras_170726_v.strong <span class="chip neu">Paras</span><span class="chip neu">NTN1682</span></div>
+          <div class="ctl"><span class="t crit" title="22 Jul — closed 09:00 at ROAS 0.32, day ended 0.81">22: 09h · R0.32☀</span><span class="t crit" title="23 Jul — closed 09:00 at ROAS 0.33, day ended 0.47">23: 09h · R0.33☀</span></div>
+          <div class="cmeta">2 tries · 2 closed · 2 early · 0 hit ROAS≥1.6 · sunk ₹6,518</div>
+        </div><div class="camp">
+          <div class="cname">NTN1682_sales_7chakra_chain_549_ex30dimp_brand_paras_170726_v.strong – <span class="chip neu">Motion</span><span class="chip neu">NTN1682</span></div>
+          <div class="ctl"><span class="t warn" title="22 Jul — closed 14:00 at ROAS 0.93, day ended 1.19">22: 14h · R0.93</span><span class="t warn" title="23 Jul — closed 18:00 at ROAS 0.93, day ended 0.9">23: 18h · R0.93</span></div>
+          <div class="cmeta">2 tries · 2 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹11,938</div>
+        </div><div class="camp">
+          <div class="cname">ntn1679_sales_7chakra_ex30dp_brand_paras_130726_High Potential <span class="chip neu">Paras</span><span class="chip neu">NTN1679</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — ran full day, final ROAS 1.65">21: full day · R1.65</span><span class="t ok" title="22 Jul — closed 17:00 at ROAS 1.27, day ended 1.25">22: 17h · R1.27</span><span class="t neu" title="23 Jul — ran full day, final ROAS 1.27">23: full day · R1.27</span><span class="t neu" title="24 Jul — ran full day, final ROAS 1.23">24: full day · R1.23</span></div>
+          <div class="cmeta">4 tries · 1 closed · 0 early · 1 hit ROAS≥1.6 · sunk ₹6,737</div>
+        </div><div class="camp">
+          <div class="cname">ntn1679_sales_7chakra_bracelet_499_ex30dp_brand_paras_170726_v.strong <span class="chip neu">Paras</span><span class="chip neu">NTN1679</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 08:00 at ROAS 0, day ended 0.46">21: 08h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,100</div>
+        </div><div class="camp">
+          <div class="cname">NTN1682_sales_7chakra_chain_549_loose_brand_paras_170726_v.strong <span class="chip neu">Paras</span><span class="chip neu">NTN1682</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 08:00 at ROAS 0, day ended 0">21: 08h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹1,986</div>
+        </div><div class="camp">
+          <div class="cname">7_Chakra_chain_Bracelet_NTN1679_rtg_brand_paras_single_170726_retarget <span class="chip neu">Paras</span><span class="chip neu">NTN1679</span></div>
+          <div class="ctl"><span class="t warn" title="23 Jul — closed 13:00 at ROAS 0.91, day ended 1.05">23: 13h · R0.91</span></div>
+          <div class="cmeta">1 tries · 1 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹5,766</div>
+        </div></details><details class="card" open>
+      <summary><b>Chains (generic)</b> <span class="sku-inline">NTN1686</span>
+        <span class="sum-meta">13 tries · 7 closes (1 early) · 4 wins ≥1.6 · sunk ₹37,333</span>
+      </summary><div class="camp">
+          <div class="cname">NTN1686_Rope_chain_collection_exc30dp_399_120726_ <span class="chip neu">Partnership</span><span class="chip neu">NTN1686</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — ran full day, final ROAS 1.94">21: full day · R1.94</span><span class="t warn" title="22 Jul — closed 17:00 at ROAS 0.68, day ended 0.77">22: 17h · R0.68</span><span class="t warn" title="23 Jul — closed 16:00 at ROAS 0.96, day ended 1.27">23: 16h · R0.96</span><span class="t ok" title="24 Jul — ran full day, final ROAS 1.86">24: full day · R1.86</span></div>
+          <div class="cmeta">4 tries · 2 closed · 0 early · 2 hit ROAS≥1.6 · sunk ₹13,316</div>
+        </div><div class="camp">
+          <div class="cname">NTN1686_Rope_chain_collection_ex30dp_2_399_120726_ <span class="chip neu">Paras</span><span class="chip neu">NTN1686</span></div>
+          <div class="ctl"><span class="t neu" title="22 Jul — ran full day, final ROAS 1.35">22: full day · R1.35</span><span class="t warn" title="23 Jul — closed 18:00 at ROAS 0.99, day ended 0.97">23: 18h · R0.99</span><span class="t warn" title="24 Jul — closed 13:00 at ROAS 0.62, day ended 0.61">24: 13h · R0.62</span></div>
+          <div class="cmeta">3 tries · 2 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹9,346</div>
+        </div><div class="camp">
+          <div class="cname">ntn_carousel_ad_chains_jewellery_static_210726 <span class="chip neu">Static</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — closed 19:00 at ROAS 1.22, day ended 1.46">21: 19h · R1.22</span><span class="t crit" title="24 Jul — closed 06:00 at ROAS 0, day ended 0.6">24: 06h · R0☀</span></div>
+          <div class="cmeta">2 tries · 2 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹7,742</div>
+        </div><div class="camp">
+          <div class="cname">NTN1686_Rope_chain_collection_loose_899_120726_strong <span class="chip neu">Paras</span><span class="chip neu">NTN1686</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — closed 15:00 at ROAS 1.14, day ended 1.6">21: 15h · R1.14</span></div>
+          <div class="cmeta">1 tries · 1 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹6,929</div>
+        </div><div class="camp">
+          <div class="cname">NTN1686_Rope_chain_collection_ex30dp_899_120726_strong <span class="chip neu">Paras</span><span class="chip neu">NTN1686</span></div>
+          <div class="ctl"><span class="t ok" title="22 Jul — ran full day, final ROAS 2.54">22: full day · R2.54</span><span class="t neu" title="23 Jul — ran full day, final ROAS 1.51">23: full day · R1.51</span><span class="t ok" title="24 Jul — ran full day, final ROAS 1.8">24: full day · R1.8</span></div>
+          <div class="cmeta">3 tries · 0 closed · 0 early · 2 hit ROAS≥1.6 · sunk ₹0</div>
+        </div></details><details class="card" open>
+      <summary><b>Unstoppable Bracelet</b> <span class="sku-inline">NTN1678, NTN950</span>
+        <span class="sum-meta">9 tries · 7 closes (5 early) · 3 wins ≥1.6 · sunk ₹19,194</span>
+      </summary><div class="camp">
+          <div class="cname">unstoppable_bracelet_NTN950_Loose_brand_paras_single_010726_High Poten <span class="chip neu">Motion</span><span class="chip neu">NTN950</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — closed 13:00 at ROAS 1.14, day ended 1.62">21: 13h · R1.14</span><span class="t neu" title="22 Jul — ran full day, final ROAS 1.54">22: full day · R1.54</span><span class="t ok" title="23 Jul — ran full day, final ROAS 1.65">23: full day · R1.65</span><span class="t ok" title="24 Jul — closed 16:00 at ROAS 1.33, day ended 1.63">24: 16h · R1.33</span></div>
+          <div class="cmeta">4 tries · 2 closed · 0 early · 3 hit ROAS≥1.6 · sunk ₹8,296</div>
+        </div><div class="camp">
+          <div class="cname">unstoppable_bracelet_NTN950_ex30dp_brand_paras_single_020726 <span class="chip neu">Motion</span><span class="chip neu">NTN950</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 09:00 at ROAS 0, day ended 0">21: 09h · R0☀</span><span class="t crit" title="23 Jul — closed 07:00 at ROAS 0.16, day ended 0.14">23: 07h · R0.16☀</span></div>
+          <div class="cmeta">2 tries · 2 closed · 2 early · 0 hit ROAS≥1.6 · sunk ₹3,941</div>
+        </div><div class="camp">
+          <div class="cname">ntn1678_unstoppable_bracelet_499_ex180dp_paras_single_100726_v.Strong <span class="chip neu">Paras</span><span class="chip neu">NTN1678</span></div>
+          <div class="ctl"><span class="t crit" title="24 Jul — closed 07:00 at ROAS 0.17, day ended 0.16">24: 07h · R0.17☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,949</div>
+        </div><div class="camp">
+          <div class="cname">ntn1678_Unstoppable_499_Loose_paras_single_170726_High Potential_A/B_T <span class="chip neu">Paras</span><span class="chip neu">NTN1678</span></div>
+          <div class="ctl"><span class="t crit" title="24 Jul — closed 06:00 at ROAS 0, day ended 0">24: 06h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,057</div>
+        </div><div class="camp">
+          <div class="cname">ntn1678_Unstoppable_499_ex30dp_paras_single_100726_High Potential – Co <span class="chip neu">Paras</span><span class="chip neu">NTN1678</span></div>
+          <div class="ctl"><span class="t crit" title="24 Jul — closed 06:00 at ROAS 0, day ended 0">24: 06h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹1,951</div>
+        </div></details><details class="card" open>
+      <summary><b>Gold Chips</b> <span class="sku-inline">NTN1716, NTN1724</span>
+        <span class="sum-meta">8 tries · 7 closes (3 early) · 2 wins ≥1.6 · sunk ₹21,564</span>
+      </summary><div class="camp">
+          <div class="cname">gold_chips_bracelet_NTN1716_Loose_paras_single_160726_highpotential <span class="chip neu">Paras</span><span class="chip neu">NTN1716</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 08:00 at ROAS 0.13, day ended 1.65">21: 08h · R0.13☀</span><span class="t warn" title="22 Jul — closed 11:00 at ROAS 0.7, day ended 0.84">22: 11h · R0.7</span><span class="t warn" title="23 Jul — closed 14:00 at ROAS 0.63, day ended 0.62">23: 14h · R0.63</span><span class="t crit" title="24 Jul — closed 09:00 at ROAS 0, day ended 0.63">24: 09h · R0☀</span></div>
+          <div class="cmeta">4 tries · 4 closed · 2 early · 1 hit ROAS≥1.6 · sunk ₹12,440</div>
+        </div><div class="camp">
+          <div class="cname">gold_chips_bracelet_NTN1716_ex30dp_paras_single_170726_highpotential <span class="chip neu">Paras</span><span class="chip neu">NTN1716</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 09:00 at ROAS 0, day ended 0.48">21: 09h · R0☀</span><span class="t ok" title="22 Jul — closed 14:00 at ROAS 1.32, day ended 1.23">22: 14h · R1.32</span><span class="t crit" title="23 Jul — closed 11:00 at ROAS 0.36, day ended 0.54">23: 11h · R0.36</span></div>
+          <div class="cmeta">3 tries · 3 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹9,124</div>
+        </div><div class="camp">
+          <div class="cname">gold_chips_chain_NTN1724_ex30dp_paras_single_170726_highpotential <span class="chip neu">Paras</span><span class="chip neu">NTN1724</span></div>
+          <div class="ctl"><span class="t ok" title="24 Jul — ran full day, final ROAS 1.66">24: full day · R1.66</span></div>
+          <div class="cmeta">1 tries · 0 closed · 0 early · 1 hit ROAS≥1.6 · sunk ₹0</div>
+        </div></details><details class="card" >
+      <summary><b>Keychains</b> <span class="sku-inline">NTN1990</span>
+        <span class="sum-meta">6 tries · 6 closes (6 early) · 0 wins ≥1.6 · sunk ₹11,226</span>
+      </summary><div class="camp">
+          <div class="cname">ntn1990_new_keychains_loose_230726_mining <span class="chip neu">Other</span><span class="chip neu">NTN1990</span></div>
+          <div class="ctl"><span class="t crit" title="23 Jul — closed 07:00 at ROAS 0, day ended 0">23: 07h · R0☀</span><span class="t crit" title="24 Jul — closed 08:00 at ROAS 0, day ended 0">24: 08h · R0☀</span></div>
+          <div class="cmeta">2 tries · 2 closed · 2 early · 0 hit ROAS≥1.6 · sunk ₹3,894</div>
+        </div><div class="camp">
+          <div class="cname">ntn1990_new_keychains_ex30dp_230726_mining <span class="chip neu">Other</span><span class="chip neu">NTN1990</span></div>
+          <div class="ctl"><span class="t crit" title="23 Jul — closed 07:00 at ROAS 0, day ended 0">23: 07h · R0☀</span><span class="t crit" title="24 Jul — closed 08:00 at ROAS 0, day ended 0.55">24: 08h · R0☀</span></div>
+          <div class="cmeta">2 tries · 2 closed · 2 early · 0 hit ROAS≥1.6 · sunk ₹3,800</div>
+        </div><div class="camp">
+          <div class="cname">ntn1990_new_keychains_rtg_230726_mining <span class="chip neu">Other</span><span class="chip neu">NTN1990</span></div>
+          <div class="ctl"><span class="t crit" title="23 Jul — closed 06:00 at ROAS 0, day ended 0">23: 06h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹1,330</div>
+        </div><div class="camp">
+          <div class="cname">ntn1990_new_keychains_ex180dp_230726_mining <span class="chip neu">Other</span><span class="chip neu">NTN1990</span></div>
+          <div class="ctl"><span class="t crit" title="24 Jul — closed 07:00 at ROAS 0, day ended 0.15">24: 07h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,202</div>
+        </div></details><details class="card" >
+      <summary><b>Catalog Chains</b> <span class="sku-inline"></span>
+        <span class="sum-meta">9 tries · 5 closes (1 early) · 5 wins ≥1.6 · sunk ₹14,881</span>
+      </summary><div class="camp">
+          <div class="cname">ntn_wanda_sales_conv_catalog_pendant_reel_clp_270626 <span class="chip neu">Wanda</span></div>
+          <div class="ctl"><span class="t warn" title="21 Jul — closed 14:00 at ROAS 0.96, day ended 1.67">21: 14h · R0.96</span><span class="t crit" title="22 Jul — closed 13:00 at ROAS 0.28, day ended 0.28">22: 13h · R0.28</span><span class="t ok" title="23 Jul — ran full day, final ROAS 102.26">23: full day · R102.26</span><span class="t crit" title="24 Jul — closed 08:00 at ROAS 0, day ended 0">24: 08h · R0☀</span></div>
+          <div class="cmeta">4 tries · 3 closed · 1 early · 2 hit ROAS≥1.6 · sunk ₹6,939</div>
+        </div><div class="camp">
+          <div class="cname">ntn_wanda_sales_conv_catalog_chain_reel_clp_020726_strong <span class="chip neu">Wanda</span></div>
+          <div class="ctl"><span class="t ok" title="21 Jul — ran full day, final ROAS 3.13">21: full day · R3.13</span><span class="t ok" title="22 Jul — ran full day, final ROAS 1.81">22: full day · R1.81</span><span class="t ok" title="23 Jul — ran full day, final ROAS 2.63">23: full day · R2.63</span><span class="t ok" title="24 Jul — closed 16:00 at ROAS 1.16, day ended 1.18">24: 16h · R1.16</span></div>
+          <div class="cmeta">4 tries · 1 closed · 0 early · 3 hit ROAS≥1.6 · sunk ₹6,120</div>
+        </div><div class="camp">
+          <div class="cname">ntn_adv_Catalog_bracelet_200726 <span class="chip neu">Other</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 10:00 at ROAS 0, day ended 0.36">21: 10h · R0</span></div>
+          <div class="cmeta">1 tries · 1 closed · 0 early · 0 hit ROAS≥1.6 · sunk ₹1,821</div>
+        </div></details><details class="card" >
+      <summary><b>Geode</b> <span class="sku-inline"></span>
+        <span class="sum-meta">8 tries · 5 closes (5 early) · 0 wins ≥1.6 · sunk ₹10,848</span>
+      </summary><div class="camp">
+          <div class="cname">ntn_adv_web_ex30dp_geode_reel_clp_090726_High potential – Copy <span class="chip neu">Paras</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 08:00 at ROAS 0, day ended 0">21: 08h · R0☀</span><span class="t crit" title="23 Jul — closed 07:00 at ROAS 0, day ended 0">23: 07h · R0☀</span><span class="t crit" title="24 Jul — closed 07:00 at ROAS 0.14, day ended 1.49">24: 07h · R0.14☀</span></div>
+          <div class="cmeta">3 tries · 3 closed · 3 early · 0 hit ROAS≥1.6 · sunk ₹6,485</div>
+        </div><div class="camp">
+          <div class="cname">ntn_adv_web_loose_geode_reel_clp_090726_High potential <span class="chip neu">Paras</span></div>
+          <div class="ctl"><span class="t crit" title="21 Jul — closed 08:00 at ROAS 0, day ended 0.86">21: 08h · R0☀</span><span class="t neu" title="22 Jul — ran full day, final ROAS 1.49">22: full day · R1.49</span><span class="t neu" title="23 Jul — ran full day, final ROAS 0.98">23: full day · R0.98</span><span class="t neu" title="24 Jul — ran full day, final ROAS 1.42">24: full day · R1.42</span></div>
+          <div class="cmeta">4 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,046</div>
+        </div><div class="camp">
+          <div class="cname">ntn_adv_web_rtg_geode_reel_clp_090726_High potential – Copy <span class="chip neu">Paras</span></div>
+          <div class="ctl"><span class="t crit" title="24 Jul — closed 07:00 at ROAS 0.35, day ended 0.46">24: 07h · R0.35☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,318</div>
+        </div></details><details class="card" >
+      <summary><b>Velore Chain</b> <span class="sku-inline">NTN1290</span>
+        <span class="sum-meta">6 tries · 4 closes (3 early) · 1 wins ≥1.6 · sunk ₹13,446</span>
+      </summary><div class="camp">
+          <div class="cname">ntn1290_web_sales_jewellery_velore_chain_reel_clp_070726_testing_v.str <span class="chip neu">Motion</span><span class="chip neu">NTN1290</span></div>
+          <div class="ctl"><span class="t ok" title="23 Jul — closed 09:00 at ROAS 1.09, day ended 0.99">23: 09h · R1.09☀</span><span class="t warn" title="24 Jul — closed 15:00 at ROAS 0.73, day ended 1.07">24: 15h · R0.73</span></div>
+          <div class="cmeta">2 tries · 2 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹8,616</div>
+        </div><div class="camp">
+          <div class="cname">ntn1290_web_sales_jewellery_velore_chain_single_chains_399_reel_clp_09 <span class="chip neu">Motion</span><span class="chip neu">NTN1290</span></div>
+          <div class="ctl"><span class="t crit" title="23 Jul — closed 06:00 at ROAS 0, day ended 0">23: 06h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,115</div>
+        </div><div class="camp">
+          <div class="cname">Velorechain_NTN1290_rtg_brand_paras_single/packof2_100726_v.strong <span class="chip neu">Paras</span><span class="chip neu">NTN1290</span></div>
+          <div class="ctl"><span class="t crit" title="24 Jul — closed 06:00 at ROAS 0, day ended 0">24: 06h · R0☀</span></div>
+          <div class="cmeta">1 tries · 1 closed · 1 early · 0 hit ROAS≥1.6 · sunk ₹2,715</div>
+        </div><div class="camp">
+          <div class="cname">ntn1290_web_sales_jewellery_velore_chain_reel_clp_130726_v.strong <span class="chip neu">Motion</span><span class="chip neu">NTN1290</span></div>
+          <div class="ctl"><span class="t ok" title="23 Jul — ran full day, final ROAS 1.73">23: full day · R1.73</span><span class="t neu" title="24 Jul — ran full day, final ROAS 1.12">24: full day · R1.12</span></div>
+          <div class="cmeta">2 tries · 0 closed · 0 early · 1 hit ROAS≥1.6 · sunk ₹0</div>
+        </div></details></div>
+</section>
+
+<section>
+  <h2>Recommendations to cut closing waste</h2>
+  <div class="recs">
+    <div class="rec"><div><b>Retire the kill list — stop the zombie relaunches.</b>
+      <p>Keychains NTN1990 (all 3 campaigns), Geode ex30dp, NTN2151, Richie Rich NTN1577 rtg + ex30dp, Gold Chips NTN1716, NTN1687 wanda pair, NTN1682. Closed 2–4 days straight at ROAS &lt; 0.5 — re-enabling them buys the same loss again. ~₹60–70k of the 4-day sunk spend.</p></div></div>
+    <div class="rec"><div><b>Swap the creative before relaunching, not just the budget.</b>
+      <p>Richie Rich on Paras-single: <mark>16 tries, 16 closes, 0 wins</mark>. Richie Rich on Motion: 13 tries, 5 closes, 2 wins. Same product, different format, opposite outcome. Same story on Unstoppable (Motion 3/6 wins vs Paras 0/3). Relaunch losers only as Motion/Wanda, never as another Paras-single copy.</p></div></div>
+    <div class="rec"><div><b>Move the cull from 7–9 AM to 11 PM.</b>
+      <p>The same pause decision made before sleep saves the 12–6 AM burn — ₹70k over these 4 days (~₹17.5k/night). Overnight traffic almost never rescues a loser.</p></div></div>
+    <div class="rec"><div><b>Meta Automated Rule as a safety net.</b>
+      <p>Pause campaign if <mark>spend &gt; ₹1,500 AND purchases = 0</mark>, checked hourly. Catches the Keychains/Geode failure mode (ROAS 0.00 at ₹2–4k) with no code. Matches the kill-point analysis: kill at ROAS &lt; 0.5 by 30–40% of budget spent.</p></div></div>
+    <div class="rec"><div><b>Halve overnight budgets on borderline repeat offenders.</b>
+      <p>Richie Rich Combo NTN222 closes late (~0.9 ROAS at close, 5 wins across formats) — not hopeless. Cap the overnight downside, restore budget at 9 AM on a good morning read.</p></div></div>
+    <div class="rec"><div><b>Wire camp_closing.py to act, not just alert.</b>
+      <p>The closing engine runs (1 PM alert) but pauses nothing — its action log is empty. A dry-run week of rule #4, then live, automates the 11 PM/overnight cull entirely. Needs your go-ahead.</p></div></div>
+  </div>
+</section>
+
+<p class="foot">Data: campaign_hourly_snapshots (state/camp_snapshots.db), 24 hourly snapshots/day, 21–24 Jul 2026 IST · creative types from classified ad names (meta_ads_meta, spend-dominant per campaign) · SM credit-line accounts (incl. act_…750453) are not snapshotted — SM totals understate true spend · SKU = NTN code; codes without a product_ntn_labels entry are shown by keyword grouping · Generated 25 Jul 2026.</p>
+</div>
