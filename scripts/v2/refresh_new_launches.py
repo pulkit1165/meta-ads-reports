@@ -9,9 +9,12 @@ show only keychains). Shopify smart collections cannot rule on created_at, so
 this script re-syncs the membership daily:
 
   * IN : active, published-to-online-store products created in the last
-         WINDOW_DAYS days, newest first
+         WINDOW_DAYS days
   * OUT: anything older, plus hidden add-on products (the ₹99 Koi coaster
          deal must never be sold standalone — operator rule)
+  * ORDER: round-robin across categories (rakhi, keychain, chain, …), each
+         category newest-first. Pure recency put 7 rakhis in a row at the
+         top and the operator asked for a mix (25 Jul).
 
 Full resync (delete all collects, re-add in order) — ~25 items, simplest way
 to also keep the manual sort order correct.
@@ -57,6 +60,30 @@ def hidden_addon(p: dict) -> bool:
     return 'add-on' in t or 'addon' in (p.get('tags') or '').lower()
 
 
+def category(p: dict) -> str:
+    """Coarse bucket used only for interleaving the display order."""
+    t = p['title'].lower()
+    for key in ('rakhi', 'keychain', 'bracelet', 'pendant', 'necklace', 'chain'):
+        if key in t:
+            return key
+    return 'other'
+
+
+def interleave(prods: list[dict]) -> list[dict]:
+    """Round-robin across categories, each category newest-first, so no
+    single launch drop (e.g. 7 rakhis in one day) monopolises the row."""
+    from collections import OrderedDict
+    groups: OrderedDict[str, list[dict]] = OrderedDict()
+    for p in sorted(prods, key=lambda p: p['created_at'], reverse=True):
+        groups.setdefault(category(p), []).append(p)
+    out = []
+    while any(groups.values()):
+        for g in groups.values():
+            if g:
+                out.append(g.pop(0))
+    return out
+
+
 def main() -> None:
     if not TOKEN:
         sys.exit('FATAL: SHOPIFY_ACCESS_TOKEN not set')
@@ -72,8 +99,7 @@ def main() -> None:
     prods = req('GET', '/products.json?limit=250&status=active'
                        f'&published_status=published&created_at_min={since}'
                        '&fields=id,title,created_at,tags')['products']
-    keep = sorted((p for p in prods if not hidden_addon(p)),
-                  key=lambda p: p['created_at'], reverse=True)
+    keep = interleave([p for p in prods if not hidden_addon(p)])
     print(f'{len(keep)} products created since {since[:10]}')
 
     old = req('GET', f'/collects.json?collection_id={cid}&limit=250')['collects']
