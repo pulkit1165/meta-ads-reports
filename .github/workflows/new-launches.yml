@@ -1,0 +1,26 @@
+name: New Launches home collection (daily 9 AM IST)
+
+# Keeps the studdmuffyn.com homepage "New Launches" row honest: the
+# `new-launches-home` custom collection is resynced every morning to the
+# products created in the last 10 days (all categories, newest first).
+# See scripts/v2/refresh_new_launches.py for the rules.
+on:
+  schedule:
+    - cron: "30 3 * * *"        # 09:00 IST
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      SHOPIFY_ACCESS_TOKEN: ${{ secrets.SHOPIFY_ACCESS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 1 }
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.11" }
+      - run: python3 scripts/v2/refresh_new_launches.py
