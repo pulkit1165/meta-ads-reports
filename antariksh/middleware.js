@@ -1,12 +1,12 @@
 // Vercel Edge Middleware — HTTP Basic Auth gate for the Antariksh dashboard.
 // Mirrors the Cloudflare _worker.js gate so the reports stay password-protected
 // on Vercel's free tier (which otherwise serves static files publicly).
-// Shared login: ntnteam / saisha@123  (override via env DASH_USER / DASH_PASSWORD).
+// Shared login: ntnteam / Muffyn2026  (override via env DASH_USER / DASH_PASSWORD).
 export const config = { matcher: '/(.*)' };
 
 export default function middleware(request) {
   const USER = process.env.DASH_USER || 'ntnteam';
-  const PASS = process.env.DASH_PASSWORD || 'saisha@123';
+  const PASS = process.env.DASH_PASSWORD || 'Muffyn2026';
   const auth = request.headers.get('authorization') || '';
   if (auth.startsWith('Basic ')) {
     try {
